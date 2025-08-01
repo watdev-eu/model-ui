@@ -33,9 +33,13 @@ Provide the relevant properties to start a new model run.
 </div>
 
 <div class="form-group">
-<label for="period-from">Period</label><br/>
-Start <input class="datepicker" id="period-from" data-date-format="mm/dd/yyyy">
-End <input class="datepicker" id="period-to" data-date-format="mm/dd/yyyy">
+<label for="period-from">Period</label>
+<div class="row">
+
+<div class="col"><input class="datepicker form-control" data-provide="datepicker" placeholder="start" id="period-from" data-date-format="mm/dd/yyyy"></div>
+
+<div class="col"><input class="datepicker form-control" data-provide="datepicker" placeholder="end" id="period-to" data-date-format="mm/dd/yyyy"></div>
+</div>
 </div>
 
 <div class="form-group">
@@ -62,9 +66,6 @@ Land management</label>
 
 </form>
 
-
-
-
 <div id="app"></div>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
@@ -77,7 +78,6 @@ https://cdn.jsdelivr.net/npm/bootstrap-datepicker@1.10.0/dist/js/bootstrap-datep
 <link href="
 https://cdn.jsdelivr.net/npm/bootstrap-datepicker@1.10.0/dist/css/bootstrap-datepicker3.min.css
 " rel="stylesheet">
-
 
 
 <script src='js/model.js'></script>
