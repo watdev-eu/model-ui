@@ -1,4 +1,4 @@
-WATDEV model UI
+# WATDEV model UI
 
 A user interface to interact with WATDEV models, view live app at [github.io](https://watdev-eu.github.io/model-ui)
 
