@@ -4,7 +4,7 @@
     "href": "model.html",
     "title": "Request a new model run",
     "section": "",
-    "text": "Provide the relevant properties to start a new model run.\n\n\nModel run identifier \n\n\nSelect modelling area  Egypt Ethiopia Kenya Sudan \n\n\nSelect BPM  UX345 IY783 SD453 RE432 \n\n\nPeriod Start  End \n\n\n Land management  Low Medium High \n\n\nScenario  Fertility Erosion Drought Pests/Deseases \n\n\nNext"
+    "text": "Provide the relevant properties to start a new model run.\n\n\nModel run identifier \n\n\nSelect modelling area  Egypt Ethiopia Kenya Sudan \n\n\nSelect BPM  UX345 IY783 SD453 RE432 \n\n\nPeriod\n\n\n\n\n\n\n\n\n\n\n Land management  Low Medium High \n\n\nScenario  Fertility Erosion Drought Pests/Deseases \n\n\nNext"
   },
   {
     "objectID": "index.html",
