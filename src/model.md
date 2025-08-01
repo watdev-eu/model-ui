@@ -23,12 +23,20 @@ Provide the relevant properties to start a new model run.
 </div>
 
 <div class="form-group">
-<label for="model-region">Select BPM</label>
+<label for="model-region">Select HRU</label>
 <select class="form-control" id="model-region">
 <option>UX345</option>
 <option>IY783</option>
 <option>SD453</option>
 <option>RE432</option>
+</select>
+</div>
+
+<div class="form-group">
+<label for="model-region">Select Model</label>
+<select class="form-control" id="model-mdl">
+<option>SWAT-Modflow</option>
+<option>DSSAT</option>
 </select>
 </div>
 
@@ -40,6 +48,17 @@ Provide the relevant properties to start a new model run.
 
 <div class="col"><input class="datepicker form-control" data-provide="datepicker" placeholder="end" id="period-to" data-date-format="mm/dd/yyyy"></div>
 </div>
+</div>
+
+<div class="form-group">
+<label for="model-ts">Time step</label>
+<select class="form-control" id="model-ts">
+<option>2hr</option>
+<option>8hr</option>
+<option>24hr</option>
+<option>48hr</option>
+<option>96hr</option>
+</select>
 </div>
 
 <div class="form-group">
@@ -61,6 +80,23 @@ Land management</label>
 <option>Pests/Deseases</option>
 </select>
 </div>
+
+<div class="form-group">
+<label>Interventions (BMP)</label>
+<div class="form-check form-check-inline">
+<input class="form-check-input" type="checkbox" id="inlineCheckbox1" value="option1">
+<label class="form-check-label" for="inlineCheckbox1">Drip irrigation</label>
+</div>
+<div class="form-check form-check-inline">
+<input class="form-check-input" type="checkbox" id="inlineCheckbox2" value="option2">
+<label class="form-check-label" for="inlineCheckbox2">Gully irrigation</label>
+</div>
+<div class="form-check form-check-inline">
+<input class="form-check-input" type="checkbox" id="inlineCheckbox3" value="option3">
+<label class="form-check-label" for="inlineCheckbox3">Ridges</label>
+</div>
+</div>
+
 
 <button onclick="go()" class="btn btn-primary">Next</button>
 
