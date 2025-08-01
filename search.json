@@ -4,13 +4,20 @@
     "href": "model.html",
     "title": "Request a new model run",
     "section": "",
-    "text": "Provide the relevant properties to start a new model run.\n\n\nModel run identifier \n\n\nSelect modelling area  Egypt Ethiopia Kenya Sudan \n\n\nNext"
+    "text": "Provide the relevant properties to start a new model run.\n\n\nModel run identifier \n\n\nSelect modelling area  Egypt Ethiopia Kenya Sudan \n\n\nSelect BPM  UX345 IY783 SD453 RE432 \n\n\nPeriod Start  End \n\n\n Land management  Low Medium High \n\n\nScenario  Fertility Erosion Drought Pests/Deseases \n\n\nNext"
   },
   {
     "objectID": "index.html",
     "href": "index.html",
-    "title": "WATDEV model introduction",
+    "title": "Model introduction",
     "section": "",
-    "text": "This websites hosts an interface to interact with model which predict agricultural scenario’s in the east of Africa.\n\nRequest a model run\nAnalyse existing runs"
+    "text": "This websites hosts an interface to interact with a model which predicts agricultural scenario’s in 4 regions in the east of Africa.\n\nRequest a model run\nAnalyse existing runs\n\n\n​The WATDEV project is maintained with the financial support of the European Union. Its contents are the sole responsibility of the authors and do not necessarily reflect the views of the European Union."
+  },
+  {
+    "objectID": "login.html",
+    "href": "login.html",
+    "title": "Login",
+    "section": "",
+    "text": "You can log in for extra options.\n\n\nEmail \n\n\nPassword \n\n\nNext"
   }
 ]
