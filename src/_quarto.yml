@@ -22,4 +22,6 @@ website:
     right:
       - text: Home
         file: "/"
+      - text: Login
+        file: "login.md"
 format: html
