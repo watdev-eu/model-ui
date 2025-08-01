@@ -141,7 +141,10 @@ ul.task-list li input[type="checkbox"] {
 <p><label for="model-area">Select modelling area</label> <select class="form-control" id="model-area"> <option>Egypt</option> <option>Ethiopia</option> <option>Kenya</option> <option>Sudan</option> </select></p>
 </div>
 <div class="form-group">
-<p><label for="model-region">Select BPM</label> <select class="form-control" id="model-region"> <option>UX345</option> <option>IY783</option> <option>SD453</option> <option>RE432</option> </select></p>
+<p><label for="model-region">Select HRU</label> <select class="form-control" id="model-region"> <option>UX345</option> <option>IY783</option> <option>SD453</option> <option>RE432</option> </select></p>
+</div>
+<div class="form-group">
+<p><label for="model-region">Select Model</label> <select class="form-control" id="model-mdl"> <option>SWAT-Modflow</option> <option>DSSAT</option> </select></p>
 </div>
 <div class="form-group">
 <label for="period-from">Period</label>
@@ -155,10 +158,25 @@ ul.task-list li input[type="checkbox"] {
 </div>
 </div>
 <div class="form-group">
+<p><label for="model-ts">Time step</label> <select class="form-control" id="model-ts"> <option>2hr</option> <option>8hr</option> <option>24hr</option> <option>48hr</option> <option>96hr</option> </select></p>
+</div>
+<div class="form-group">
 <p><label for="model-lm"> Land management</label> <select class="form-control" id="model-lm"> <option>Low</option> <option>Medium</option> <option>High</option> </select></p>
 </div>
 <div class="form-group">
 <p><label for="model-sc">Scenario</label> <select class="form-control" id="model-sc"> <option>Fertility</option> <option>Erosion</option> <option>Drought</option> <option>Pests/Deseases</option> </select></p>
+</div>
+<div class="form-group">
+<label>Interventions (BMP)</label>
+<div class="form-check form-check-inline">
+<p><input class="form-check-input" type="checkbox" id="inlineCheckbox1" value="option1"> <label class="form-check-label" for="inlineCheckbox1">Drip irrigation</label></p>
+</div>
+<div class="form-check form-check-inline">
+<p><input class="form-check-input" type="checkbox" id="inlineCheckbox2" value="option2"> <label class="form-check-label" for="inlineCheckbox2">Gully irrigation</label></p>
+</div>
+<div class="form-check form-check-inline">
+<p><input class="form-check-input" type="checkbox" id="inlineCheckbox3" value="option3"> <label class="form-check-label" for="inlineCheckbox3">Ridges</label></p>
+</div>
 </div>
 <button onclick="go()" class="btn btn-primary">
 Next
