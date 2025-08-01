@@ -1,9 +1,16 @@
 [
   {
+    "objectID": "model.html",
+    "href": "model.html",
+    "title": "Request a new model run",
+    "section": "",
+    "text": "Provide the relevant properties to start a new model run.\n\n\nModel run identifier \n\n\nSelect modelling area  Egypt Ethiopia Kenya Sudan \n\n\nNext"
+  },
+  {
     "objectID": "index.html",
     "href": "index.html",
-    "title": "WATDEV EU",
+    "title": "WATDEV model introduction",
     "section": "",
-    "text": "Hello WATDEV"
+    "text": "This websites hosts an interface to interact with model which predict agricultural scenario’s in the east of Africa.\n\nRequest a model run\nAnalyse existing runs"
   }
 ]
