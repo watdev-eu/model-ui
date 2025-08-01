@@ -1,0 +1,1 @@
+Sitemap: https://watdev-eu.github.io/model-ui/sitemap.xml
