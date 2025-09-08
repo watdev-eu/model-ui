@@ -6,21 +6,20 @@ sidebar: true
 You can log in for extra options.
 
 <div class="card shadow-lg rounded-3">
-    <div class="card-body">
-    <h4 class="card-title text-center mb-4">Login</h4>
-    <form id="login-form">
-        <div class="mb-3">
-        <label for="email" class="form-label">Email address</label>
-        <input type="email" class="form-control" id="email" placeholder="Enter email" required>
-        </div>
-        <div class="mb-3">
-        <label for="password" class="form-label">Password</label>
-        <input type="password" class="form-control" id="password" placeholder="Password" required>
-        </div>
-        <button type="submit" class="btn btn-primary w-100">Login</button>
-    </form>
-    <div id="error-msg" class="alert alert-danger mt-3 d-none"></div>
-    </div>
+<div class="card-body">
+<h4 class="card-title text-center mb-4">Login</h4>
+<form id="login-form">
+<div class="mb-3">
+<label for="email" class="form-label">Email address</label>
+<input type="email" class="form-control" id="email" placeholder="Enter email" required>
+</div>
+<div class="mb-3">
+<label for="password" class="form-label">Password</label>
+<input type="password" class="form-control" id="password" placeholder="Password" required>
+</div>
+<button type="submit" class="btn btn-primary w-100">Login</button></form>
+<div id="error-msg" class="alert alert-danger mt-3 d-none"></div>
+</div>
 </div>
 
 <div id="app"></div>
@@ -30,43 +29,34 @@ You can log in for extra options.
 
 <script src="https://cdn.auth0.com/js/auth0/9.28.0/auth0.min.js"></script>
 
-  <script>
-    // Configure Auth0 client
-    var webAuth = new auth0.WebAuth({
-      domain: 'dev-hij2adphqgx0e2ay.us.auth0.com',   // replace with your Auth0 domain
-      clientID: 'xqCwC4XzNpUGVdfw7yCJXjpDJNwZ6Baf',        // replace with your Auth0 client ID
-      redirectUri: 'https://watdev-eu.github.io/model-ui',
-      responseType: 'token id_token',
-      scope: 'openid profile email'
-    });
+<script>
+// Configure Auth0 client
+var webAuth = new auth0.WebAuth({
+domain: 'dev-hij2adphqgx0e2ay.us.auth0.com',   // replace with your Auth0 domain
+clientID: 'xqCwC4XzNpUGVdfw7yCJXjpDJNwZ6Baf',  
+redirectUri: 'https://watdev-eu.github.io/model-ui',
+responseType: 'token id_token',
+scope: 'openid profile email'});
 
-    // Handle login form submission
-    document.getElementById("login-form").addEventListener("submit", function(e) {
-      e.preventDefault();
+document.getElementById("login-form").addEventListener("submit", function(e) {
+e.preventDefault();
 
-      var email = document.getElementById("email").value;
-      var password = document.getElementById("password").value;
+var email = document.getElementById("email").value;
+var password = document.getElementById("password").value;
 
-      webAuth.login({
-        realm: 'Username-Password-Authentication', // default DB connection name
-        username: email,
-        password: password
-      }, function(err) {
-        if (err) {
-          document.getElementById("error-msg").textContent = err.description || "Login failed";
+webAuth.login({
+realm: 'Username-Password-Authentication',
+username: email,
+password: password
+}, function(err) {
+if (err) {
+document.getElementById("error-msg").textContent = err.description || "Login failed";
           document.getElementById("error-msg").classList.remove("d-none");
-        }
-      });
-    });
-
-    // Handle redirect callback (after successful login)
-    webAuth.parseHash(function(err, authResult) {
-      if (authResult && authResult.accessToken && authResult.idToken) {
-        window.location.hash = "";
-        alert("Login successful! Access Token: " + authResult.accessToken);
-        // You could save tokens in localStorage/sessionStorage here
-      } else if (err) {
-        console.error("Error parsing hash:", err);
-      }
-    });
-  </script>
+}})});
+webAuth.parseHash(function(err, authResult) {
+if (authResult && authResult.accessToken && authResult.idToken) {
+window.location.hash = "";
+alert("Login successful! Access Token: " + authResult.accessToken);
+} else if (err) {
+console.error("Error parsing hash:", err)}});
+</script>
