@@ -18,6 +18,6 @@
     "href": "login.html",
     "title": "Login",
     "section": "",
-    "text": "You can log in for extra options.\n\n\nEmail \n\n\nPassword \n\n\nNext"
+    "text": "You can log in for extra options.\n\n&lt;div class=\"card-body\"&gt;\n&lt;h4 class=\"card-title text-center mb-4\"&gt;Login&lt;/h4&gt;\n&lt;form id=\"login-form\"&gt;\n    &lt;div class=\"mb-3\"&gt;\n    &lt;label for=\"email\" class=\"form-label\"&gt;Email address&lt;/label&gt;\n    &lt;input type=\"email\" class=\"form-control\" id=\"email\" placeholder=\"Enter email\" required&gt;\n    &lt;/div&gt;\n    &lt;div class=\"mb-3\"&gt;\n    &lt;label for=\"password\" class=\"form-label\"&gt;Password&lt;/label&gt;\n    &lt;input type=\"password\" class=\"form-control\" id=\"password\" placeholder=\"Password\" required&gt;\n    &lt;/div&gt;\n    &lt;button type=\"submit\" class=\"btn btn-primary w-100\"&gt;Login&lt;/button&gt;\n&lt;/form&gt;\n&lt;div id=\"error-msg\" class=\"alert alert-danger mt-3 d-none\"&gt;&lt;/div&gt;\n&lt;/div&gt;"
   }
 ]
