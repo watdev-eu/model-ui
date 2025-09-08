@@ -3,11 +3,8 @@ title: "Login"
 sidebar: true
 ---
 
-You can log in for extra options.
-
 <div class="card shadow-lg rounded-3">
 <div class="card-body">
-<h4 class="card-title text-center mb-4">Login</h4>
 <form id="login-form">
 <div class="mb-3">
 <label for="email" class="form-label">Email address</label>
@@ -30,20 +27,16 @@ You can log in for extra options.
 <script src="https://cdn.auth0.com/js/auth0/9.28.0/auth0.min.js"></script>
 
 <script>
-// Configure Auth0 client
 var webAuth = new auth0.WebAuth({
-domain: 'dev-hij2adphqgx0e2ay.us.auth0.com',   // replace with your Auth0 domain
+domain: 'dev-hij2adphqgx0e2ay.us.auth0.com',
 clientID: 'xqCwC4XzNpUGVdfw7yCJXjpDJNwZ6Baf',  
 redirectUri: 'https://watdev-eu.github.io/model-ui',
 responseType: 'token id_token',
 scope: 'openid profile email'});
-
 document.getElementById("login-form").addEventListener("submit", function(e) {
 e.preventDefault();
-
 var email = document.getElementById("email").value;
 var password = document.getElementById("password").value;
-
 webAuth.login({
 realm: 'Username-Password-Authentication',
 username: email,
@@ -51,7 +44,7 @@ password: password
 }, function(err) {
 if (err) {
 document.getElementById("error-msg").textContent = err.description || "Login failed";
-          document.getElementById("error-msg").classList.remove("d-none");
+document.getElementById("error-msg").classList.remove("d-none");
 }})});
 webAuth.parseHash(function(err, authResult) {
 if (authResult && authResult.accessToken && authResult.idToken) {
