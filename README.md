@@ -18,13 +18,25 @@ Idea is to directly trigger the modelling backend and wait for the result. Alter
 
 ## Post processing
 
-After the modelling backend is finished, some cost-benefit analysis post processing needs to occur, before the result is presented in the front-end. Some of the parameters may be changed on the UI, which only require post processing to be run again, without a full model run.
+After the modelling backend is finished, some cost-benefit analysis post processing needs to occur, before the result is presented in the front-end. Some of the parameters may be changed on the UI, which only require post processing to be run again, without a full model run. To be investigated how the post processing accesses the various model run results (will there be a central database, or will the model-ui send the required results to post processing).
 
-## Storage of model runs
+```mermaid
+flowchart LR
+    A(Model UI) --> B(Model)
+    A --> P(Post Processing)
+    A --> DB[(Database)]
+```
 
-The UI will offer an interface to compare various model runs. It will need a storage to capture these results.
-For now suggestion is to use the browser-local-storage to store these results. Alternative would be to store the 
-results server side linked to the user id (requires login).
+vs
+
+```mermaid
+flowchart LR
+    A(Model UI) --> B(Model)
+    A --> DB[(Database)]
+    B --> DB
+    A --> P(Post Processing)
+    DB --> P
+```
 
 ## Backend Delivery in phases
 
