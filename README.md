@@ -38,6 +38,8 @@ flowchart LR
     DB --> P
 ```
 
+Post processing calculates optimisation based on indicator weight. Model-UI should present for a set of indicators (yield, financial return, water availability) a weight scale how important the factor is for the user. And trigger post-processing again for a given model run (or compare 2 scenario's).
+
 ## Backend Delivery in phases
 
 Seems the model backend will be delivered in phases (up to 2026), for each target-area the model needs to be configured separately with relevant source data. Egypt is likely the first area available. Suggestion would be to create mock responses for the other areas, so the ui development is not delayed. The model-ui should clearly indicate the status of the model backend, when selecting a region.
