@@ -47,7 +47,7 @@ Seems the model backend will be delivered in phases (up to 2026), for each targe
 ## Glossary
 
 - HRU modelling area (fieldscale or region area, river catchment)
-- BMP scenario 
+- BMP: Best Management Practice (intervention) 
 - Indicators (cost/benefit, yield, )
 - KPI - Key performance indicators
 
