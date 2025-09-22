@@ -28,10 +28,10 @@ sidebar: true
 <script src="https://cdn.jsdelivr.net/npm/d3-dsv@3"></script>
 <script src="https://cdn.plot.ly/plotly-2.35.3.min.js"></script>
 
-<!-- your visualization logic -->
-<script type="module" src="js/results.js"></script>
-<script>
+<!-- Visualisation -->
+<script type="module">
+  import { initResults } from './js/results.js';
   window.addEventListener('DOMContentLoaded', () => {
-    window.initResults({ dataUrl: 'data/egypt/results.csv' });
+    initResults({ dataUrl: 'data/egypt/results.csv' });
   });
 </script>
