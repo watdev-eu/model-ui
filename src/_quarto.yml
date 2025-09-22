@@ -1,33 +1,31 @@
 project:
   type: website
-  render:
-    - "*.md"
-    - "*.qmd"
+  render: ["*.md", "*.qmd"]
+  resources:
+    - "js/**"
+    - "data/**"
 
 website:
-
+  title: "WATDEV"
   repo-url: https://github.com/watdev-eu/model-ui
   repo-subdir: src
-  repo-actions:
-    - edit
-    - issue
+  repo-actions: [edit, issue]
   page-footer:
     left:
-    - text: WATDEV EU 2025
-      file: https://www.watdev.eu
-  title: "WATDEV"
+      - text: WATDEV EU 2025
+        href: https://www.watdev.eu
   search: true
-  website:
+  navbar:
     pinned: true
     logo: https://static.wixstatic.com/media/9d090e_49fe8f50a4324adab5d65434391395d5~mv2.png/v1/fill/w_444,h_108,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/DEF2.png
-    navbar:
-      right:
-        - text: Home
-          file: "/"
-        - text: Results
-          menu:
-            - text: Egypt
-              file: "egypt.md"
-        - text: Login
-          file: "login.md"
+    right:
+      - text: Home
+        file: index.md           # avoid "/" on GitHub Pages
+      - text: Results
+        menu:
+          - text: Egypt
+            file: egypt.md
+      - text: Login
+        file: login.md
+
 format: html
