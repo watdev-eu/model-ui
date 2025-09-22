@@ -1,4 +1,4 @@
-export function initResults({ dataUrl }) {
+window.initResults = function initResults({ dataUrl }) {
     const els = {
         topic: document.getElementById('topicSelect'),
         crop: document.getElementById('cropSelect'),
