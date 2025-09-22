@@ -14,6 +14,13 @@
     "text": "This websites hosts an interface to interact with a model which predicts agricultural scenario’s in 4 regions in the east of Africa.\n\nRequest a model run\nAnalyse existing runs\n\n\n​The WATDEV project is maintained with the financial support of the European Union. Its contents are the sole responsibility of the authors and do not necessarily reflect the views of the European Union."
   },
   {
+    "objectID": "egypt.html",
+    "href": "egypt.html",
+    "title": "Results - Egypt",
+    "section": "",
+    "text": "Topic    Crop    Baseline     Show difference vs baseline"
+  },
+  {
     "objectID": "login.html",
     "href": "login.html",
     "title": "Login",
