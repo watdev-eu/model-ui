@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
 RUN a2enmod rewrite
 
 # Copy application files
-COPY . /var/www/html/
+COPY src/. /var/www/html/
 
 # Set correct owner/permissions (adjust as needed)
 RUN chown -R www-data:www-data /var/www/html
