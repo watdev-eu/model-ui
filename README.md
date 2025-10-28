@@ -1,12 +1,8 @@
 # WATDEV model UI
 
-A user interface to interact with WATDEV models, view live app at [github.io](https://watdev-eu.github.io/model-ui)
+A user interface to interact with WATDEV models, image is available in GHCR.io
 
 The project [WATDEV](https://watdev.eu)  - Climate Smart WATer Management and Sustainable DEVelopment for Food and Agriculture in East Africa is funded by the DeSIRA initiative of the European Union and aims to develop an in-depth understanding of small and large-scale water and agricultural resource dynamics and management while boosting people’s resilience to climate, through innovative research, modelling, and capacity building approaches.
-
-## Authentication
-
-A simple authentication has been added using [auth0](https://auth0.com/) services. Alternatives here are the authentication services provided by [Surf](https://www.surf.nl/en/services/identity-access-management/surfconext) or a authentication provided by the modelling backend.
 
 ## Inputs
 
