@@ -1,0 +1,42 @@
+/* Show sorting icons for DataTables with Bootstrap 5 */
+table.dataTable thead .sorting:after,
+table.dataTable thead .sorting_asc:after,
+table.dataTable thead .sorting_desc:after {
+    font-family: "Font Awesome 5 Free"; /* or 'Bootstrap Icons' if you use that */
+    font-weight: 900;
+    padding-left: 0.5rem;
+    opacity: 0.6;
+    font-size: 0.75rem;
+}
+
+table.dataTable thead .sorting:after {
+    content: "\f0dc"; /* fa-sort */
+}
+
+table.dataTable thead .sorting_asc:after {
+    content: "\f0de"; /* fa-sort-up */
+}
+
+table.dataTable thead .sorting_desc:after {
+    content: "\f0dd"; /* fa-sort-down */
+}
+
+tr.fade {
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+#productSearchResults .card {
+    padding: 0.5rem 1rem;
+}
+
+#invoiceItemsTable {
+    table-layout: auto;
+}
+
+#invoiceItemsTable th:first-child,
+#invoiceItemsTable td:first-child {
+    white-space: normal;
+    word-break: break-word;
+    max-width: 300px;
+}
