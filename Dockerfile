@@ -8,6 +8,16 @@ RUN apt-get update && apt-get install -y \
   && docker-php-ext-install pdo_mysql mysqli zip \
   && rm -rf /var/lib/apt/lists/*
 
+# Increase upload / post limits
+RUN { \
+      echo "file_uploads=On"; \
+      echo "upload_max_filesize=200M"; \
+      echo "post_max_size=200M"; \
+      echo "max_file_uploads=20"; \
+      echo "memory_limit=512M"; \
+      echo "max_execution_time=300"; \
+   } > /usr/local/etc/php/conf.d/uploads.ini
+
 # Enable apache modules if required
 RUN a2enmod rewrite
 
