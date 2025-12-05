@@ -14,11 +14,6 @@ function humanStudyArea(string $area): string {
     return ucfirst($area); // egypt → Egypt, ethiopia → Ethiopia
 }
 
-function humanBmp(string $bmp): string {
-    // water_management → Water management
-    return ucwords(str_replace('_', ' ', $bmp));
-}
-
 function renderStatusBadge(): string {
     // placeholder for now – later you can add a column `status`
     return '<span class="badge bg-success">Imported</span>';
@@ -33,7 +28,7 @@ function renderStatusBadge(): string {
                     <thead class="table-light">
                     <tr>
                         <th>Run</th>
-                        <th>Area / BMP</th>
+                        <th>Area</th>
                         <th>Period</th>
                         <th>Time step</th>
                         <th>Created</th>
@@ -52,8 +47,6 @@ function renderStatusBadge(): string {
                             </td>
                             <td>
                                 <?= htmlspecialchars(humanStudyArea($r['study_area'])) ?>
-                                —
-                                <?= htmlspecialchars(humanBmp($r['bmp'])) ?>
                             </td>
                             <td>
                                 <?php

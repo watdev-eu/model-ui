@@ -10,31 +10,28 @@ services:
       DB_NAME: ${DB_NAME}
       DB_USER: ${DB_USER}
       DB_PASS: ${DB_PASS}
-      DB_CHARSET: ${DB_CHARSET}
-      DB_LOCAL_INFILE: ${DB_LOCAL_INFILE}
       UPLOAD_DIR: ${UPLOAD_DIR}
     volumes:
       - ./src:/var/www/html
       - ./db:/var/www/db:ro
-      - ./ .env:/var/www/.env:ro
-      - uploads:/var/www/html/var/uploads
+      - ./.env:/var/www/.env:ro
+      - uploads:/shared/uploads
     depends_on:
       - db
 
   db:
-    image: mysql:8.0
-    command: --local-infile=1 --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    build: ./db
     environment:
-      MYSQL_DATABASE: ${DB_NAME}
-      MYSQL_USER: ${DB_USER}
-      MYSQL_PASSWORD: ${DB_PASS}
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASS}
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
     ports:
-      - "3306:3306"
+      - "5432:5432"
     volumes:
-      - dbdata:/var/lib/mysql
-      # Auto-run SQL migrations on first start
+      - dbdata:/var/lib/postgresql/data
+      # Auto-run SQL on first init
       - ./db/init:/docker-entrypoint-initdb.d:ro
+      - uploads:/shared/uploads
 
 volumes:
   uploads:

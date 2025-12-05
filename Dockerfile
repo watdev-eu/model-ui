@@ -1,11 +1,12 @@
 # Dockerfile
 FROM php:8.2-apache
 
-# Install PHP extensions you need (example: mysqli, pdo_mysql)
+# Install PHP extensions
 RUN apt-get update && apt-get install -y \
+    libpq-dev \
     libpng-dev \
     libzip-dev \
-  && docker-php-ext-install pdo_mysql mysqli zip \
+  && docker-php-ext-install pdo_pgsql pgsql zip \
   && rm -rf /var/lib/apt/lists/*
 
 # Increase upload / post limits
@@ -18,21 +19,13 @@ RUN { \
       echo "max_execution_time=300"; \
    } > /usr/local/etc/php/conf.d/uploads.ini
 
-# Enable apache modules if required
 RUN a2enmod rewrite
 
-# Copy application files
 COPY src/. /var/www/html/
-
-# Set correct owner/permissions (adjust as needed)
 RUN chown -R www-data:www-data /var/www/html
 
-# If you use composer, install it and run install
-# (uncomment the lines below if using composer)
-# RUN php -r "copy('https://getcomposer.org/installer','composer-setup.php');" \
-#     && php composer-setup.php --install-dir=/usr/local/bin --filename=composer \
-#     && rm composer-setup.php
-# RUN composer install --no-dev --optimize-autoloader --working-dir=/var/www/html
+RUN mkdir -p /shared/uploads \
+ && chown -R www-data:www-data /shared/uploads
 
 EXPOSE 80
 CMD ["apache2-foreground"]

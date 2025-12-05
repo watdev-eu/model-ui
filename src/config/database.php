@@ -8,11 +8,10 @@ final class Database {
         if (self::$pdo) return self::$pdo;
 
         $dsn = sprintf(
-            'mysql:host=%s;port=%s;dbname=%s;charset=%s',
+            'pgsql:host=%s;port=%s;dbname=%s',
             env('DB_HOST','db'),
-            env('DB_PORT','3306'),
-            env('DB_NAME','watdev'),
-            env('DB_CHARSET','utf8mb4')
+            env('DB_PORT','5432'),
+            env('DB_NAME','watdev')
         );
 
         // Support Docker secrets via *_FILE
@@ -27,7 +26,7 @@ final class Database {
         self::$pdo = new PDO($dsn, $user, $pass, [
             PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::MYSQL_ATTR_LOCAL_INFILE => (bool)env('DB_LOCAL_INFILE',1),
+            // no MYSQL_ATTR_LOCAL_INFILE in Postgres
         ]);
         return self::$pdo;
     }

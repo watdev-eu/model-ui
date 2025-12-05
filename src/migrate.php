@@ -14,23 +14,26 @@ $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
 $migrationsDir = __DIR__ . '/../db/migrations';
 
-// Ensure directory exists
+// If the directory does not exist, just show a notice and bail out gracefully
 if (!is_dir($migrationsDir)) {
-    echo "<div class='container mt-4'><div class='alert alert-danger'>
-            Migration directory not found: <code>$migrationsDir</code>
+    echo "<div class='card mb-3'><div class='card-body'>
+            <h1 class='title mb-3'>Database migrations</h1>
+            <div class='alert alert-info'>
+              Migration directory not found (<code>$migrationsDir</code>).<br>
+              The PostgreSQL setup currently relies on the <code>db/init/10_schema.sql</code> script only.
+            </div>
           </div></div>";
     include 'includes/footer.php';
     exit;
 }
 
-// Ensure migrations table exists
+// Ensure migrations table exists (PostgreSQL syntax)
 $pdo->exec("
   CREATE TABLE IF NOT EXISTS migrations (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    filename VARCHAR(255) NOT NULL,
-    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_filename (filename)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    id BIGSERIAL PRIMARY KEY,
+    filename VARCHAR(255) NOT NULL UNIQUE,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
 ");
 
 // Read applied migrations
@@ -84,7 +87,6 @@ if (isset($_POST['run_migrations'])) {
             }
             $log[] = "<div class='text-success'>✓ Applied <b>$file</b></div>";
         } catch (Throwable $e) {
-            // Only rollback if a transaction is actually open
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
