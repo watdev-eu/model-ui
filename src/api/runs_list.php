@@ -19,8 +19,28 @@ if ($studyArea === '') {
 try {
     $runs = SwatRunRepository::forStudyArea($studyArea);
 
-    // Optional: filter here, e.g. only public runs
-    // $runs = array_values(array_filter($runs, fn($r) => $r['visibility'] === 'public'));
+    // Keep only defaults OR public runs
+    $runs = array_values(array_filter($runs, static function (array $r): bool {
+        $isDefault  = !empty($r['is_default']);        // 1 / true
+        $visibility = $r['visibility'] ?? null;
+        return $isDefault || $visibility === 'public';
+    }));
+
+    // Sort – defaults first, then by newest date
+    usort($runs, static function (array $a, array $b): int {
+        $aDefault = !empty($a['is_default']);
+        $bDefault = !empty($b['is_default']);
+
+        if ($aDefault !== $bDefault) {
+            return $aDefault ? -1 : 1; // defaults first
+        }
+
+        $da = $a['run_date'] ?? '';
+        $db = $b['run_date'] ?? '';
+
+        // newest first
+        return strcmp($db, $da);
+    });
 
     echo json_encode(['runs' => $runs]);
 } catch (Throwable $e) {

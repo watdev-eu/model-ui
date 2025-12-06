@@ -412,19 +412,37 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
             return null;
         }
 
-        const optionsHtml = runs.map(r => {
-            const labelParts = [r.run_label];
-            if (r.run_date) labelParts.push(`(${r.run_date})`);
-            if (r.is_default) labelParts.push('[default]');
-            const label = labelParts.join(' ');
-            return `<option value="${r.id}">${escHtml(label)}</option>`;
-        }).join('');
+        const defaultRuns = runs.filter(r => r.is_default);
+        const userRuns    = runs.filter(r => !r.is_default); // visibility='public' only, by API
+
+        let optionsHtml = '';
+
+        // 1) Default datasets – no date in label
+        if (defaultRuns.length) {
+            optionsHtml += '<optgroup label="Default datasets">';
+            optionsHtml += defaultRuns.map(r =>
+                `<option value="${r.id}">${escHtml(r.run_label)}</option>`
+            ).join('');
+            optionsHtml += '</optgroup>';
+        }
+
+        // 2) User-created runs – include date if available
+        if (userRuns.length) {
+            optionsHtml += '<optgroup label="User-created model runs">';
+            optionsHtml += userRuns.map(r => {
+                const labelParts = [r.run_label];
+                if (r.run_date) labelParts.push(`(${r.run_date})`);
+                const label = labelParts.join(' ');
+                return `<option value="${r.id}">${escHtml(label)}</option>`;
+            }).join('');
+            optionsHtml += '</optgroup>';
+        }
 
         els.dataset.innerHTML = optionsHtml;
 
-        // Choose default run: first with is_default, else first in list
-        const defaultRun = runs.find(r => r.is_default) || runs[0];
-        return defaultRun.id;
+        // Choose default run: first default, else first user run
+        const defaultRun = defaultRuns[0] || userRuns[0] || null;
+        return defaultRun ? defaultRun.id : null;
     }
 
     // ---------- Map ----------
