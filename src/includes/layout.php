@@ -105,9 +105,44 @@ $avatarUrl = false;
         <ul class="nav nav-pills flex-column mb-auto text-white">
             <?php
             $navItems = [
-                    ['label' => 'Home',       'href' => '/index.php',  'icon' => 'house',          'title' => 'Home'],
-                    ['label' => 'Model runs', 'href' => '/model.php',  'icon' => 'play-circle',    'title' => 'Start or inspect a model run'],
-                    ['label' => 'Results',    'href' => '/egypt.php',  'icon' => 'bar-chart-line', 'title' => 'Egypt model results'],
+                    [
+                            'label' => 'Home',
+                            'href'  => '/index.php',
+                            'icon'  => 'house',
+                            'title' => 'Home',
+                    ],
+                    [
+                            'label' => 'Model runs',
+                            'href'  => '/model.php',
+                            'icon'  => 'play-circle',
+                            'title' => 'Inspect model runs',
+                    ],
+                    [
+                            'label' => 'Results',
+                            'href'  => '/egypt.php',
+                            'icon'  => 'bar-chart-line',
+                            'title' => 'Egypt model results',
+                    ],
+
+                    // --- Data & admin tools ---
+                    [
+                            'label' => 'Data',
+                            'href'  => '/data.php',
+                            'icon'  => 'database',
+                            'title' => 'Manage study areas, crops and runs',
+                    ],
+                    [
+                            'label' => 'Import',
+                            'href'  => '/import.php',
+                            'icon'  => 'cloud-upload',
+                            'title' => 'Import model runs from CSV',
+                    ],
+                    [
+                            'label' => 'Migrate',
+                            'href'  => '/migrate.php',
+                            'icon'  => 'arrow-repeat',
+                            'title' => 'Apply database migrations',
+                    ],
             ];
 
             $currentPage = $_SERVER['PHP_SELF'];
