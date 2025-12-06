@@ -1,13 +1,18 @@
 // assets/js/egypt/subbasin-dashboard.js
-export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indicators }) {
+export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indicators,
+                                          studyArea = 'egypt', apiBase = '/api'}) {
     // ---------- State ----------
     let map, subLayer, subSource, subFeatures = [];
     let vectorLayer; // stylable choropleth layer (subbasins)
     let rivLayer, rivSource;   // rivers
-    let rows = [];   // monthly HRU rows (from CSV)
-    let years = [];  // list of YEARs in data
-    let crops = [];  // list of LULC codes
-    let colset = new Set(); // available CSV columns
+    let rows = [];      // monthly HRU rows
+    let rchRows = [];   // monthly RCH rows
+    let snuRows = [];
+    let years = [];     // list of YEARs in data
+    let crops = [];     // list of LULC codes
+    let colsetHru = new Set(); // available HRU columns
+    let colsetRch = new Set(); // available RCH columns
+    let colsetSnu = new Set();// available SNU columns
     let current = {
         datasetUrl: els.dataset.value,
         indicatorId: null,
@@ -32,15 +37,37 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
         }
     };
 
+    const rchAnnual = {
+        data: [],
+        bySubYear(sub, year) {
+            return this.data.filter(r => r.SUB === +sub && r.YEAR === +year);
+        }
+    };
+
+    const snuAnnual = {
+        data: [],
+        byHruYear(gisnum, year) {
+            return this.data.filter(r => r.HRUGIS === +gisnum && r.YEAR === +year);
+        }
+    };
+
+    let cropLookup = {};
+
     // ---------- Boot ----------
     wireUI();
-    loadAll(current.datasetUrl);
+    bootstrapFromApi().catch(err => {
+        console.error('[BOOT] Failed to bootstrap dashboard:', err);
+        if (els.mapNote) els.mapNote.textContent = 'Failed to load runs or data.';
+    });
 
     // ---------- UI ----------
     function wireUI() {
         els.dataset.addEventListener('change', async () => {
-            current.datasetUrl = els.dataset.value;
-            await loadAll(current.datasetUrl);
+            const rid = +(els.dataset.value || 0);
+            current.runId = Number.isFinite(rid) && rid > 0 ? rid : null;
+            if (current.runId) {
+                await loadAll(current.runId);
+            }
         });
 
         els.metric.addEventListener('change', () => {
@@ -101,24 +128,23 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
     }
 
     // ---------- Data load ----------
-    async function loadAll(csvUrl) {
-        // Load CSV + GeoJSON
-        const [csvText, subGJ, rivGJ] = await Promise.all([
-            fetch(csvUrl).then(r => r.ok ? r.text() : Promise.reject(new Error(`CSV HTTP ${r.status}`))),
-            fetch(subbasinGeoUrl).then(r => r.ok ? r.json() : Promise.reject(new Error(`Subbasins HTTP ${r.status}`))),
-            fetch(riversGeoUrl).then(r => r.ok ? r.json() : Promise.reject(new Error(`Rivers HTTP ${r.status}`)))
+    async function loadAll(runId) {
+        const urlHru = `${apiBase}/hru_kpi.php?run_id=${encodeURIComponent(runId)}`;
+        const urlRch = `${apiBase}/rch_kpi.php?run_id=${encodeURIComponent(runId)}`;
+        const urlSnu = `${apiBase}/snu_kpi.php?run_id=${encodeURIComponent(runId)}`;
+
+        const [hruJson, rchJson, snuJson, subGJ, rivGJ] = await Promise.all([
+            fetch(urlHru).then(r => r.json()),
+            fetch(urlRch).then(r => r.json()),
+            fetch(urlSnu).then(r => r.json()),
+            fetch(subbasinGeoUrl).then(r => r.json()),
+            fetch(riversGeoUrl).then(r => r.json())
         ]).catch(err => {
             console.error('[LOAD] Failed:', err);
             throw err;
         });
-        console.debug('[LOAD] CSV bytes:', csvText.length);
-        console.debug('[LOAD] Subbasin keys:', Object.keys(subGJ || {}));
-        console.debug('[LOAD] Rivers keys:', Object.keys(rivGJ || {}));
 
-        // Parse CSV (semicolon)
-        const parsed = d3.dsvFormat(';').parse(csvText);
-        // Normalize + collect columns
-        rows = parsed.map(r => ({
+        rows = (hruJson.rows || []).map(r => ({
             ...r,
             LULC: clean(r.LULC),
             HRU: +r.HRU,
@@ -128,39 +154,182 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
             MON: +r.MON,
             AREAkm2: toNum(r.AREAkm2)
         }));
-        colset = new Set(Object.keys(rows[0] || {}));
+        console.debug('[LOAD] HRU rows from DB:', rows.length);
+
+        colsetHru = new Set(Object.keys(rows[0] || {}));
+
+        const hruLookup = new Map();
+        for (const r of rows) {
+            hruLookup.set(r.HRUGIS, {
+                SUB: r.SUB,
+                LULC: r.LULC,
+                AREAkm2: r.AREAkm2
+            });
+        }
+
+        // ----- RCH rows -----
+        rchRows = (rchJson.rows || []).map(r => ({
+            ...r,
+            SUB: +r.SUB,
+            YEAR: +r.YEAR,
+            MON: +r.MON,
+            AREAkm2: toNum(r.AREAkm2),
+            FLOW_OUTcms: toNum(r.FLOW_OUTcms),
+            NO3_OUTkg: toNum(r.NO3_OUTkg),
+            SED_OUTtons: toNum(r.SED_OUTtons)
+        }));
+        console.debug('[LOAD] RCH rows from DB:', rchRows.length);
+
+        colsetRch = new Set(Object.keys(rchRows[0] || {}));
 
         // Years / crops
         years = [...new Set(rows.map(r => r.YEAR).filter(Number.isFinite))].sort((a,b) => a-b);
         crops = [...new Set(rows.map(r => r.LULC).filter(Boolean))].sort();
 
-        // Pre-aggregate: annual per-HRU sums for any column needed by at least one enabled indicator
-        const neededCols = new Set();
-        for (const def of indicators) {
-            if (def.disabled) continue; // still allow enabling if data exists later
-            (def.needs || []).forEach(c => neededCols.add(c));
+        snuRows = (snuJson.rows || []).map(r => ({
+            ...r,
+            HRUGIS: +r.HRUGIS,
+            YEAR: +r.YEAR,
+            // keep raw NO3 / SOL_P / ORG_N / ORG_P / SOL_RSD; we call toNum() later
+        }));
+        console.debug('[LOAD] SNU rows from DB:', snuRows.length);
+
+        colsetSnu = new Set(Object.keys(snuRows[0] || {}));
+
+        const snuAcc = new Map();  // key: SUB|LULC|YEAR
+
+        for (const r of snuRows) {
+            const h = hruLookup.get(+r.HRUGIS);
+            if (!h) continue;
+
+            const key = `${h.SUB}|${h.LULC}|${r.YEAR}`;
+            let obj = snuAcc.get(key);
+            if (!obj) {
+                obj = {
+                    SUB: h.SUB,
+                    LULC: h.LULC,
+                    YEAR: r.YEAR,
+                    AREAkm2: h.AREAkm2,
+                    ORG_N_sum: 0,
+                    NO3_sum: 0,
+                    SOL_P_sum: 0,
+                    ORG_P_sum: 0,
+                    SOL_RSD_sum: 0,
+                    count: 0
+                };
+                snuAcc.set(key, obj);
+            }
+
+            obj.ORG_N_sum += toNum(r.ORG_N);
+            obj.NO3_sum += toNum(r.NO3);
+            obj.SOL_P_sum += toNum(r.SOL_P);
+            obj.ORG_P_sum += toNum(r.ORG_P);
+            obj.SOL_RSD_sum += toNum(r.SOL_RSD);
+            obj.count++;
         }
-        // Only keep the needed cols that actually exist
-        const keepCols = [...neededCols].filter(c => colset.has(c));
-        // Build a nested map by key
-        const key = r => `${r.SUB}|${r.LULC}|${r.HRU}|${r.YEAR}`;
-        const acc = new Map(); // key -> aggregate row
+
+        snuAnnual.data = [...snuAcc.values()].map(o => ({
+            ...o,
+            ORG_N_mean: o.ORG_N_sum / o.count,
+            NO3_mean: o.NO3_sum / o.count,
+            SOL_P_mean: o.SOL_P_sum / o.count,
+            ORG_P_mean: o.ORG_P_sum / o.count,
+            SOL_RSD_mean: o.SOL_RSD_sum / o.count
+        }));
+
+        // ---------- Pre-aggregate HRU to annual per-HRU ----------
+        // Columns needed by HRU-based indicators
+        const neededHruCols = new Set();
+        for (const def of indicators) {
+            if (def.disabled) continue;
+            (def.needs || []).forEach(c => neededHruCols.add(c));
+        }
+
+        const keepHruCols = [...neededHruCols].filter(c => colsetHru.has(c));
+        const maxCols = new Set(['YLDt_ha', 'BIOMt_ha']); // we also track annual max for these
+
+        const keyHru = r => `${r.SUB}|${r.LULC}|${r.HRU}|${r.YEAR}`;
+        const accHru = new Map();
+
         for (const r of rows) {
             if (!Number.isFinite(r.YEAR) || !Number.isFinite(r.MON)) continue;
-            const k = key(r);
-            let obj = acc.get(k);
+            const k = keyHru(r);
+            let obj = accHru.get(k);
             if (!obj) {
-                obj = { SUB: r.SUB, LULC: r.LULC, HRU: r.HRU, YEAR: r.YEAR, AREAkm2: r.AREAkm2 };
-                // init sums
-                for (const c of keepCols) obj[`${c}_sum`] = 0;
-                acc.set(k, obj);
+                obj = {
+                    SUB: r.SUB,
+                    LULC: r.LULC,
+                    HRU: r.HRU,
+                    YEAR: r.YEAR,
+                    AREAkm2: r.AREAkm2
+                };
+                for (const c of keepHruCols) {
+                    obj[`${c}_sum`] = 0;
+                    if (maxCols.has(c)) {
+                        obj[`${c}_max`] = Number.NEGATIVE_INFINITY;
+                    }
+                }
+                accHru.set(k, obj);
             }
-            for (const c of keepCols) {
+
+            for (const c of keepHruCols) {
                 const v = toNum(r[c]);
-                if (Number.isFinite(v)) obj[`${c}_sum`] += v;
+                if (!Number.isFinite(v)) continue;
+
+                obj[`${c}_sum`] += v;
+                if (maxCols.has(c)) {
+                    obj[`${c}_max`] = Math.max(obj[`${c}_max`], v);
+                }
             }
         }
-        hruAnnual.data = [...acc.values()];
+
+        // Normalise "no data" max values
+        for (const obj of accHru.values()) {
+            for (const c of ['YLDt_ha', 'BIOMt_ha']) {
+                const kMax = `${c}_max`;
+                if (kMax in obj && obj[kMax] === Number.NEGATIVE_INFINITY) {
+                    obj[kMax] = NaN;
+                }
+            }
+        }
+
+        hruAnnual.data = [...accHru.values()];
+
+        // ---------- Pre-aggregate RCH to annual per SUB ----------
+        const neededRchCols = new Set();
+        for (const def of indicators) {
+            if (def.disabled) continue;
+            (def.needsRch || []).forEach(c => neededRchCols.add(c));
+        }
+
+        const keepRchCols = [...neededRchCols].filter(c => colsetRch.has(c));
+
+        const keyRch = r => `${r.SUB}|${r.YEAR}`;
+        const accRch = new Map();
+
+        for (const r of rchRows) {
+            if (!Number.isFinite(r.YEAR) || !Number.isFinite(r.MON)) continue;
+            const k = keyRch(r);
+            let obj = accRch.get(k);
+            if (!obj) {
+                obj = {
+                    SUB: r.SUB,
+                    YEAR: r.YEAR
+                };
+                for (const c of keepRchCols) {
+                    obj[`${c}_sum`] = 0;
+                }
+                accRch.set(k, obj);
+            }
+
+            for (const c of keepRchCols) {
+                const v = toNum(r[c]);
+                if (!Number.isFinite(v)) continue;
+                obj[`${c}_sum`] += v;
+            }
+        }
+
+        rchAnnual.data = [...accRch.values()];
 
         // OpenLayers map (rebuild once per dataset load)
         buildMap(subGJ, rivGJ);
@@ -196,6 +365,66 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
 
         // First draw
         recomputeAndRedraw();
+    }
+
+    async function bootstrapFromApi() {
+        // Load crop names (global)
+        await loadCropLookup();
+
+        // Load runs for this study area and populate the dropdown
+        const defaultRunId = await loadRuns();
+        if (!defaultRunId) {
+            throw new Error('No runs found for this study area');
+        }
+
+        current.runId = defaultRunId;
+        els.dataset.value = String(defaultRunId);
+
+        // Now load HRU data for that run
+        await loadAll(current.runId);
+    }
+
+    async function loadCropLookup() {
+        try {
+            const res = await fetch(`${apiBase}/crops_list.php`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            cropLookup = {};
+            for (const row of json.crops || []) {
+                if (row.code) cropLookup[row.code] = row.name || row.code;
+            }
+            console.debug('[CROPS] Loaded', Object.keys(cropLookup).length, 'crop names');
+        } catch (err) {
+            console.warn('[CROPS] Failed to load crop names:', err);
+            cropLookup = {};
+        }
+    }
+
+    async function loadRuns() {
+        const url = `${apiBase}/runs_list.php?study_area=${encodeURIComponent(studyArea)}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`runs_list HTTP ${res.status}`);
+        const json = await res.json();
+        const runs = json.runs || [];
+
+        if (!runs.length) {
+            els.dataset.innerHTML = '';
+            return null;
+        }
+
+        const optionsHtml = runs.map(r => {
+            const labelParts = [r.run_label];
+            if (r.run_date) labelParts.push(`(${r.run_date})`);
+            if (r.is_default) labelParts.push('[default]');
+            const label = labelParts.join(' ');
+            return `<option value="${r.id}">${escHtml(label)}</option>`;
+        }).join('');
+
+        els.dataset.innerHTML = optionsHtml;
+
+        // Choose default run: first with is_default, else first in list
+        const defaultRun = runs.find(r => r.is_default) || runs[0];
+        return defaultRun.id;
     }
 
     // ---------- Map ----------
@@ -463,7 +692,15 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
                 if (!rows.length) continue;
                 // area for this crop in this sub-year
                 let area = 0; for (const r of rows) area += areaHa(r);
-                const v = def.calc({ hruAnnual, areaHa, sub, crop: c, year });
+                const v = def.calc({
+                    hruAnnual,
+                    rchAnnual,
+                    snuAnnual,
+                    areaHa,
+                    sub,
+                    crop: c,
+                    year
+                });
                 if (Number.isFinite(v) && area > 0) { wsum += area; vsum += v * area; }
             }
             return wsum ? vsum / wsum : NaN;
@@ -474,6 +711,8 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
 
         return def.calc({
             hruAnnual,
+            rchAnnual,
+            snuAnnual,
             areaHa,
             sub,
             crop,
@@ -526,6 +765,8 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
                 def.requiresCrop
                     ? def.calc({
                         hruAnnual,
+                        rchAnnual,
+                        snuAnnual,
                         sub: current.selectedSub,
                         crop: c,
                         year: Y,
@@ -533,6 +774,8 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
                     })
                     : def.calc({
                         hruAnnual,
+                        rchAnnual,
+                        snuAnnual,
                         sub: current.selectedSub,
                         year: Y,
                         areaHa: r => (Number.isFinite(r.AREAkm2) ? r.AREAkm2 * 100 : NaN)
@@ -540,7 +783,7 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
             ).filter(Number.isFinite);
 
             if (!vals.length) continue;
-            x2.push(c);
+            x2.push(displayCrop(c));
             y2.push(vals.reduce((a, b) => a + b, 0) / vals.length);
         }
 
@@ -565,8 +808,16 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
     // ---------- UI population ----------
     function isIndicatorAvailable(def) {
         if (def?.disabled) return false;
-        if (!def?.needs || def.needs.length === 0) return true;
-        return def.needs.every(c => colset.has(c));
+
+        const needsHru = def.needs || [];
+        const needsRch = def.needsRch || [];
+        const needsSnu = def.needsSnu || [];
+
+        const okHru = needsHru.length === 0 || needsHru.every(c => colsetHru.has(c));
+        const okRch = needsRch.length === 0 || needsRch.every(c => colsetRch.has(c));
+        const okSnu = needsSnu.length === 0 || needsSnu.every(c => colsetSnu.has(c));
+
+        return okHru && okRch && okSnu;
     }
 
     function populateMetricsCombined() {
@@ -595,7 +846,9 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
     }
 
     function populateCrops() {
-        els.crop.innerHTML = crops.map(c => `<option value="${escAttr(c)}">${escHtml(c)}</option>`).join('');
+        els.crop.innerHTML = crops
+            .map(c => `<option value="${escAttr(c)}">${escHtml(displayCrop(c))}</option>`)
+            .join('');
         current.crop = crops[0] || null;
     }
 
@@ -622,7 +875,9 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
     }
     function cropSuffix() {
         const def = currentIndicator();
-        return def?.requiresCrop && current.crop ? ` — ${current.crop}` : '';
+        return def?.requiresCrop && current.crop
+            ? ` — ${displayCrop(current.crop)}`
+            : '';
     }
     function unitText() {
         return currentIndicator()?.unit || '';
@@ -639,6 +894,13 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
         }
         const p = f.properties || f.values_ || null;
         return p ? p[key] : undefined;
+    }
+
+    function displayCrop(code) {
+        const n = cropLookup[code];
+        // If we know the name: show just the name.
+        // If not: fall back to the raw code.
+        return n || code;
     }
 
     // ---------- Pure utils ----------

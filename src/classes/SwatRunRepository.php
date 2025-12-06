@@ -80,4 +80,31 @@ final class SwatRunRepository
         // RETURNING id gives us a single row with the generated id
         return (int)$stmt->fetchColumn();
     }
+
+    // src/classes/SwatRunRepository.php
+
+    public static function forStudyArea(string $studyArea): array
+    {
+        $pdo = Database::pdo();
+        $sql = "
+        SELECT
+            id,
+            study_area,
+            run_label,
+            run_date,
+            visibility,
+            description,
+            period_start,
+            period_end,
+            time_step,
+            created_at,
+            is_default
+        FROM swat_runs
+        WHERE study_area = :study_area
+        ORDER BY created_at DESC
+    ";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([':study_area' => $studyArea]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
 }

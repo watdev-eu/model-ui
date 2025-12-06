@@ -94,10 +94,9 @@ require_once 'includes/layout.php';
                     <div class="mb-3">
                         <label class="form-label" for="datasetSelect">Dataset</label>
                         <select id="datasetSelect" class="form-select">
-                            <!-- Add more scenarios later; baseline wired below -->
-                            <option value="/assets/data/egypt/hruEgyptBaseline.csv" selected>Baseline</option>
+                            <option value="" disabled selected>Loading runs…</option>
                         </select>
-                        <div class="form-text">You can add scenarios here later.</div>
+                        <div class="form-text">Runs are loaded from the database for this study area.</div>
                     </div>
 
                     <div class="mb-3">
@@ -141,7 +140,6 @@ require_once 'includes/layout.php';
         </div>
     </div>
 
-    <!-- BELOW the first .row -->
     <div class="row mt-3">
         <div class="col-12">
             <div class="card">
@@ -158,7 +156,6 @@ require_once 'includes/layout.php';
     </div>
 
     <!-- libs -->
-    <script src="https://cdn.jsdelivr.net/npm/d3-dsv@3"></script>
     <script src="https://cdn.plot.ly/plotly-2.35.3.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/ol@9.2.4/dist/ol.js"></script>
 
@@ -200,7 +197,9 @@ require_once 'includes/layout.php';
                 // data sources
                 subbasinGeoUrl: '/assets/data/egypt/egypt-subbasin.geojson',
                 riversGeoUrl: '/assets/data/egypt/egypt-riv.geojson',
-                indicators: INDICATORS
+                indicators: INDICATORS,
+                studyArea: 'egypt',
+                apiBase: '/api'
             });
         });
     </script>

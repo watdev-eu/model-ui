@@ -21,8 +21,32 @@ CREATE TABLE IF NOT EXISTS crops (
                                      name TEXT NOT NULL             -- common name
 );
 
--- Prefill crops (from SWAT plant table: Common Name ↔ Plant Code)
+-- Prefill crops (SWAT plant codes ↔ common names)
 INSERT INTO crops (code, name) VALUES
+                                   ('CORN', 'Corn'),
+                                   ('CSIL', 'Corn silage'),
+                                   ('SCRN', 'Sweet corn'),
+                                   ('EGAM', 'Easters Gamagrass'),
+                                   ('GRSG', 'Grain sorghum'),
+                                   ('SGHY', 'Sorghum hay'),
+                                   ('JHGR', 'Johnsongrass'),
+                                   ('SUGC', 'Sugarcane'),
+                                   ('SWHT', 'Spring wheat'),
+                                   ('WWHT', 'Winter wheat'),
+                                   ('DWHT', 'Durum wheat'),
+                                   ('RYE',  'Rye'),
+                                   ('BARL', 'Spring barley'),
+                                   ('OATS', 'Oats'),
+                                   ('RICE', 'Rice'),
+                                   ('PMIL', 'Pearl millet'),
+                                   ('TIMO', 'Timothy'),
+                                   ('BROS', 'Smooth bromegrass'),
+                                   ('BROM', 'Meadow bromegrass'),
+                                   ('FESC', 'Tall fescue'),
+                                   ('BLUG', 'Kentucky bluegrass'),
+                                   ('BERM', 'Bermudagrass'),
+                                   ('CWGR', 'Crested wheatgrass'),
+                                   ('WWGR', 'Western wheatgrass'),
                                    ('SWGR', 'Slender wheatgrass'),
                                    ('RYEG', 'Italian (annual) ryegrass'),
                                    ('RYER', 'Russian wildrye'),
@@ -33,13 +57,11 @@ INSERT INTO crops (code, name) VALUES
                                    ('SWCH', 'Alamo switchgrass'),
                                    ('INDN', 'Indiangrass'),
                                    ('ALFA', 'Alfalfa'),
-
                                    ('CLVS', 'Sweetclover'),
                                    ('CLVR', 'Red clover'),
                                    ('CLVA', 'Alsike clover'),
-                                   ('SOYB', 'Soybean'),
+                                   ('SOYB', 'Soy bean'),
                                    ('CWPS', 'Cowpeas'),
-
                                    ('MUNG', 'Mung bean'),
                                    ('LIMA', 'Lima beans'),
                                    ('LENT', 'Lentils'),
@@ -48,7 +70,6 @@ INSERT INTO crops (code, name) VALUES
                                    ('PEAS', 'Garden or canning peas'),
                                    ('SESB', 'Sesbania'),
                                    ('FLAX', 'Flax'),
-
                                    ('COTS', 'Upland cotton (harvested with stripper)'),
                                    ('COTP', 'Upland cotton (harvested with picker)'),
                                    ('TOBC', 'Tobacco'),
@@ -56,13 +77,11 @@ INSERT INTO crops (code, name) VALUES
                                    ('POTA', 'Potato'),
                                    ('SPOT', 'Sweetpotato'),
                                    ('CRRT', 'Carrot'),
-
                                    ('ONIO', 'Onion'),
                                    ('SUNF', 'Sunflower'),
                                    ('CANP', 'Spring canola-Polish'),
                                    ('CANA', 'Spring canola-Argentine'),
                                    ('ASPR', 'Asparagus'),
-
                                    ('BROC', 'Broccoli'),
                                    ('CABG', 'Cabbage'),
                                    ('CAUF', 'Cauliflower'),
@@ -79,12 +98,13 @@ INSERT INTO crops (code, name) VALUES
                                    ('STRW', 'Strawberry'),
                                    ('TOMA', 'Tomato'),
                                    ('APPL', 'Apple'),
-
                                    ('PINE', 'Pine'),
                                    ('OAK',  'Oak'),
-                                   ('POPL', 'Poplar'),
+                                   ('POPL', 'Popular'),
+                                   ('ORAN', 'Orange trees'),
                                    ('MESQ', 'Honey mesquite')
-ON CONFLICT (code) DO NOTHING;  -- safe to re-run migration
+ON CONFLICT (code) DO UPDATE
+    SET name = EXCLUDED.name;
 
 ------------------------------------------------------------
 -- 3) swat_runs: add default flag
