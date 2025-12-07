@@ -168,66 +168,149 @@ function humanStudyArea(string $area): string {
     </div>
 
     <!-- Model runs -->
-    <div class="card mb-4">
+    <div class="card mb-4" id="runs-card"
+         data-api-url="/api/runs_admin.php"
+         data-csrf="<?= htmlspecialchars($csrfToken, ENT_QUOTES) ?>">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h2 class="h5 mb-0">Model runs</h2>
-            <button type="button" class="btn btn-sm btn-primary" disabled>
-                + Import / register run
-            </button>
+            <a href="/import.php" class="btn btn-sm btn-primary">
+                <i class="bi bi-upload me-1"></i>
+                Import / register run
+            </a>
         </div>
         <div class="card-body">
             <p class="text-muted">
-                Placeholder for managing imported model runs (visibility, default flags, etc.).
+                Manage imported model runs: visibility, defaults and cleanup rules.
             </p>
 
-            <div class="table-responsive">
+            <div class="table-responsive" id="runs-table-wrapper">
                 <table class="table table-hover align-middle mb-0">
                     <thead class="table-light">
                     <tr>
-                        <th>Run</th>
                         <th>Area</th>
-                        <th>Period</th>
-                        <th>Time step</th>
+                        <th>Scenario</th>
                         <th>Visibility</th>
-                        <th>Default</th>
-                        <th class="text-end">Action</th>
+                        <th>Period</th>
+                        <th>Expires</th>
+                        <th class="text-end">Actions</th>
                     </tr>
                     </thead>
                     <tbody>
                     <?php if (!$runs): ?>
                         <tr>
-                            <td colspan="7" class="text-center text-muted">
+                            <td colspan="6" class="text-center text-muted">
                                 No model runs yet
                             </td>
                         </tr>
                     <?php else: foreach ($runs as $r): ?>
-                        <tr>
-                            <td class="fw-medium"><?= htmlspecialchars($r['run_label']) ?></td>
-                            <td><?= htmlspecialchars(humanStudyArea($r['study_area'])) ?></td>
-                            <td>
+                        <tr data-run-id="<?= (int)$r['id'] ?>"
+                            data-study-area="<?= htmlspecialchars($r['study_area']) ?>"
+                            data-run-date="<?= htmlspecialchars($r['run_date'] ?? '') ?>"
+                            data-created-at="<?= htmlspecialchars($r['created_at'] ?? '') ?>"
+                            data-is-default="<?= !empty($r['is_default']) ? '1' : '0' ?>">
+                            <!-- Area -->
+                            <td class="run-area"><?= htmlspecialchars(humanStudyArea($r['study_area'])) ?></td>
+
+                            <!-- Scenario -->
+                            <td class="fw-medium run-scenario">
+                                <?= htmlspecialchars($r['run_label']) ?>
+                                <?php if (!empty($r['is_default'])): ?>
+                                    <span class="ms-1 text-warning run-default-star" title="Default run for this area">
+                                        <i class="bi bi-star-fill"></i>
+                                    </span>
+                                <?php else: ?>
+                                    <div class="small text-muted run-date">
+                                        <?php
+                                        $date = $r['run_date'] ?: ($r['created_at'] ?? null);
+                                        echo $date ? htmlspecialchars(substr($date, 0, 10)) : '—';
+                                        ?>
+                                    </div>
+                                <?php endif; ?>
+                            </td>
+
+                            <!-- Visibility -->
+                            <td class="run-visibility">
+                                <?php if (($r['visibility'] ?? 'private') === 'public'): ?>
+                                    <span class="badge bg-success">
+                                        <i class="bi bi-globe2 me-1"></i>Public
+                                    </span>
+                                <?php else: ?>
+                                    <span class="badge bg-secondary">
+                                        <i class="bi bi-lock-fill me-1"></i>Private
+                                    </span>
+                                <?php endif; ?>
+                            </td>
+
+                            <!-- Period -->
+                            <td class="run-period">
                                 <?php
                                 $start = $r['period_start'] ?? null;
-                                $end   = $r['period_end'] ?? null;
+                                $end   = $r['period_end']   ?? null;
                                 echo htmlspecialchars(($start ?: '—') . ' → ' . ($end ?: '—'));
                                 ?>
                             </td>
-                            <td>
-                                <span class="badge bg-secondary">
-                                    <?= htmlspecialchars($r['time_step']) ?>
-                                </span>
-                            </td>
-                            <td>
-                                <span class="badge bg-light text-muted">placeholder</span>
-                            </td>
-                            <td>
+
+                            <!-- Expires -->
+                            <td class="run-expires">
                                 <?php if (!empty($r['is_default'])): ?>
-                                    <span class="badge bg-success">Default</span>
+                                    &mdash;
                                 <?php else: ?>
-                                    <span class="badge bg-light text-muted">—</span>
+                                    &mdash;
                                 <?php endif; ?>
                             </td>
+
+                            <!-- Actions: info + dropdown -->
                             <td class="text-end">
-                                <button class="btn btn-sm btn-outline-secondary" disabled>Edit</button>
+                                <div class="btn-group btn-group-sm">
+                                    <!-- Info button -->
+                                    <button type="button"
+                                            class="btn btn-outline-secondary"
+                                            title="Details"
+                                            data-url="/modals/run_info.php?id=<?= (int)$r['id'] ?>">
+                                        <i class="bi bi-info-circle"></i>
+                                    </button>
+
+                                    <button type="button"
+                                            class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split"
+                                            data-bs-toggle="dropdown"
+                                            aria-expanded="false">
+                                        <span class="visually-hidden">Actions</span>
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end">
+                                        <li>
+                                            <button type="button"
+                                                    class="dropdown-item js-run-toggle-default"
+                                                    data-id="<?= (int)$r['id'] ?>">
+                                                <i class="bi bi-star<?= !empty($r['is_default']) ? '-fill' : '' ?> me-2"></i>
+                                                <?= !empty($r['is_default']) ? 'Unset as default' : 'Set as default' ?>
+                                            </button>
+                                        </li>
+                                        <li>
+                                            <button type="button"
+                                                    class="dropdown-item js-run-toggle-visibility"
+                                                    data-id="<?= (int)$r['id'] ?>"
+                                                    data-current="<?= htmlspecialchars($r['visibility']) ?>">
+                                                <?php if (($r['visibility'] ?? 'private') === 'public'): ?>
+                                                    <i class="bi bi-lock me-2"></i>
+                                                    Make private
+                                                <?php else: ?>
+                                                    <i class="bi bi-unlock me-2"></i>
+                                                    Make public
+                                                <?php endif; ?>
+                                            </button>
+                                        </li>
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li>
+                                            <button type="button"
+                                                    class="dropdown-item text-danger js-run-delete"
+                                                    data-id="<?= (int)$r['id'] ?>"
+                                                    data-label="<?= htmlspecialchars($r['run_label']) ?>">
+                                                <i class="bi bi-trash me-2"></i>
+                                                Remove
+                                            </button>
+                                        </li>
+                                    </ul>
+                                </div>
                             </td>
                         </tr>
                     <?php endforeach; endif; ?>
@@ -269,6 +352,48 @@ function humanStudyArea(string $area): string {
     </div>
 </div>
 
+<!-- Run delete confirmation modal -->
+<div class="modal fade" id="runDeleteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">Confirm removal</h5>
+                <button type="button"
+                        class="btn-close btn-close-white"
+                        data-bs-dismiss="modal"
+                        aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                Are you sure you want to remove scenario
+                <span id="runDeleteLabel" class="fw-bold"></span>?
+                This cannot be undone.
+            </div>
+            <div class="modal-footer">
+                <button type="button"
+                        class="btn btn-outline-secondary btn-sm"
+                        data-bs-dismiss="modal">
+                    Cancel
+                </button>
+                <button type="button"
+                        class="btn btn-danger btn-sm"
+                        id="runDeleteConfirmBtn">
+                    Remove
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* Let dropdowns in the model-runs card overflow the card boundaries */
+    #runs-card,
+    #runs-card .card-body,
+    #runs-card .table-responsive {
+        overflow: visible !important;
+    }
+</style>
+
 <?php include __DIR__ . '/includes/footer.php'; ?>
 
 <script src="/assets/js/data-crops.js"></script>
+<script src="/assets/js/data-runs.js"></script>
