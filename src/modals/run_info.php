@@ -3,38 +3,21 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/app.php';
-require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../classes/SwatRunRepository.php';
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
 
-$pdo = Database::pdo();
-$id  = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+$id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
 if ($id <= 0) {
     echo "<div class='p-3 text-danger'>Run not found.</div>";
     return;
 }
 
-$stmt = $pdo->prepare("
-    SELECT
-        id,
-        study_area,
-        run_label,
-        run_date,
-        visibility,
-        description,
-        created_by,
-        period_start,
-        period_end,
-        created_at,
-        is_default
-    FROM swat_runs
-    WHERE id = :id
-");
-$stmt->execute([':id' => $id]);
-$run = $stmt->fetch(PDO::FETCH_ASSOC);
+// Use repository so we always join study_areas
+$run = SwatRunRepository::find($id);
 
 if (!$run) {
     echo "<div class='p-3 text-danger'>Run not found.</div>";
@@ -44,6 +27,10 @@ if (!$run) {
 function h($v) {
     return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 }
+
+// Fallback label if for some reason name is missing
+$studyAreaLabel = $run['study_area_name']
+        ?? ('Area #' . (int)$run['study_area']);
 ?>
 
 <script>
@@ -56,7 +43,7 @@ function h($v) {
         <dd class="col-sm-8"><?= h($run['run_label']) ?></dd>
 
         <dt class="col-sm-4">Study area</dt>
-        <dd class="col-sm-8"><?= h(ucfirst($run['study_area'])) ?></dd>
+        <dd class="col-sm-8"><?= h($studyAreaLabel) ?></dd>
 
         <dt class="col-sm-4">Run date</dt>
         <dd class="col-sm-8"><?= $run['run_date'] ? h($run['run_date']) : '—' ?></dd>
@@ -78,7 +65,9 @@ function h($v) {
         <dd class="col-sm-8"><?= h($run['created_at']) ?></dd>
 
         <dt class="col-sm-4">Created by</dt>
-        <dd class="col-sm-8"><?= $run['created_by'] ? ('User #' . (int)$run['created_by']) : '—' ?></dd>
+        <dd class="col-sm-8">
+            <?= $run['created_by'] ? ('User #' . (int)$run['created_by']) : '—' ?>
+        </dd>
 
         <dt class="col-sm-4">Description</dt>
         <dd class="col-sm-8">

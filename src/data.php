@@ -34,10 +34,6 @@ $perCol  = (int)ceil(max(1, count($crops)) / $columns);
 // Placeholder arrays – later we’ll load these from repositories / DB
 $studyAreas = StudyAreaRepository::all();
 $runs       = SwatRunRepository::all();
-
-function humanStudyArea(string $area): string {
-    return ucfirst($area);
-}
 ?>
 
     <div class="card mb-3">
@@ -225,12 +221,14 @@ function humanStudyArea(string $area): string {
                         </tr>
                     <?php else: foreach ($runs as $r): ?>
                         <tr data-run-id="<?= (int)$r['id'] ?>"
-                            data-study-area="<?= htmlspecialchars($r['study_area']) ?>"
+                            data-study-area="<?= (int)($r['study_area_id'] ?? $r['study_area']) ?>"
                             data-run-date="<?= htmlspecialchars($r['run_date'] ?? '') ?>"
                             data-created-at="<?= htmlspecialchars($r['created_at'] ?? '') ?>"
                             data-is-default="<?= !empty($r['is_default']) ? '1' : '0' ?>">
                             <!-- Area -->
-                            <td class="run-area"><?= htmlspecialchars(humanStudyArea($r['study_area'])) ?></td>
+                            <td class="run-area">
+                                <?= htmlspecialchars($r['study_area_name'] ?? ('Area #' . (int)$r['study_area'])) ?>
+                            </td>
 
                             <!-- Scenario -->
                             <td class="fw-medium run-scenario">

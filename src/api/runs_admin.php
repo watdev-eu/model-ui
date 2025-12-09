@@ -47,7 +47,7 @@ try {
                 'ok'         => true,
                 'is_default' => $isDefault,
                 'visibility' => $run['visibility'] ?? 'private',
-                'study_area' => $run['study_area'] ?? null,
+                'study_area' => isset($run['study_area']) ? (int)$run['study_area'] : null,
             ]);
             break;
 

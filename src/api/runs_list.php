@@ -8,7 +8,7 @@ require_once __DIR__ . '/../classes/SwatRunRepository.php';
 
 header('Content-Type: application/json');
 
-$studyArea = strtolower(trim($_GET['study_area'] ?? ''));
+$studyArea = trim($_GET['study_area'] ?? '');
 
 if ($studyArea === '') {
     http_response_code(400);
@@ -17,6 +17,7 @@ if ($studyArea === '') {
 }
 
 try {
+    // This will accept either an id ("3") or a legacy name ("egypt")
     $runs = SwatRunRepository::forStudyArea($studyArea);
 
     // Keep only defaults OR public runs

@@ -10,10 +10,6 @@ require_once __DIR__ . '/includes/layout.php';
 require_once __DIR__ . '/classes/SwatRunRepository.php';
 $runs = SwatRunRepository::all();
 
-function humanStudyArea(string $area): string {
-    return ucfirst($area); // egypt → Egypt, ethiopia → Ethiopia
-}
-
 function renderStatusBadge(): string {
     // placeholder for now – later you can add a column `status`
     return '<span class="badge bg-success">Imported</span>';
@@ -46,7 +42,7 @@ function renderStatusBadge(): string {
                                 <?= htmlspecialchars($r['run_label']) ?>
                             </td>
                             <td>
-                                <?= htmlspecialchars(humanStudyArea($r['study_area'])) ?>
+                                <?= htmlspecialchars($r['study_area_name'] ?? ('Area #' . (int)$r['study_area'])) ?>
                             </td>
                             <td>
                                 <?php

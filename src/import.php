@@ -6,6 +6,11 @@ $pageButtons = [];
 require_once __DIR__ . '/config/app.php';
 // require_admin();
 require_once __DIR__ . '/includes/layout.php';
+require_once __DIR__ . '/classes/StudyAreaRepository.php';
+
+// Fetch enabled study areas
+$allAreas    = StudyAreaRepository::all();
+$studyAreas  = array_filter($allAreas, fn($row) => !empty($row['enabled']));
 ?>
 
     <div class="card mb-3">
@@ -23,10 +28,19 @@ require_once __DIR__ . '/includes/layout.php';
                 <div class="col-md-3">
                     <label class="form-label">Study area</label>
                     <select name="study_area" class="form-select" required>
-                        <option value="egypt">Egypt</option>
-                        <option value="ethiopia">Ethiopia</option>
-                        <option value="sudan">Sudan</option>
+                        <?php if ($studyAreas): ?>
+                            <?php foreach ($studyAreas as $area): ?>
+                                <option value="<?= (int)$area['id'] ?>">
+                                    <?= h($area['name']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <option value="">No enabled study areas found</option>
+                        <?php endif; ?>
                     </select>
+                    <div class="form-text">
+                        Only enabled study areas are listed.
+                    </div>
                 </div>
 
                 <div class="col-md-3">

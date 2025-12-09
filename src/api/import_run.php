@@ -22,16 +22,24 @@ $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 // ------------------------------------------------------------------
 // 1. Read & validate metadata
 // ------------------------------------------------------------------
-$studyArea  = strtolower(trim($_POST['study_area'] ?? ''));   // egypt | ethiopia | sudan
-$runLabel   = trim($_POST['run_label'] ?? '');                // scenario name
+$studyAreaId = isset($_POST['study_area']) ? (int)$_POST['study_area'] : 0;
+$runLabel   = trim($_POST['run_label'] ?? '');
 $runDateRaw = trim($_POST['run_date'] ?? '');
 $visibility = $_POST['visibility'] ?? 'private';
 $description = trim($_POST['description'] ?? '');
 
-// basic required fields
-if (!$studyArea || !$runLabel) {
+if ($studyAreaId <= 0 || !$runLabel) {
     http_response_code(400);
     echo json_encode(['error' => 'study_area and run_label are required']);
+    exit;
+}
+
+// Validate that the study area exists (and maybe is enabled)
+$chk = $pdo->prepare("SELECT id FROM study_areas WHERE id = :id AND enabled = TRUE");
+$chk->execute([':id' => $studyAreaId]);
+if (!$chk->fetchColumn()) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Invalid or disabled study area']);
     exit;
 }
 
@@ -138,7 +146,7 @@ try {
     // 2. Check uniqueness within study area
     // ------------------------------------------------------------------
     $sel = $pdo->prepare("SELECT id FROM swat_runs WHERE study_area = ? AND run_label = ?");
-    $sel->execute([$studyArea, $runLabel]);
+    $sel->execute([$studyAreaId, $runLabel]);
     if ($sel->fetchColumn()) {
         $pdo->rollBack();
         http_response_code(409);
@@ -159,15 +167,15 @@ try {
     ");
 
     $ins->execute([
-        $studyArea,
+        $studyAreaId,
         $runLabel,
-        $runDate,          // user-specified run date (or null)
-        $visibility,       // 'private' | 'public'
+        $runDate,
+        $visibility,
         $description !== '' ? $description : null,
-        null,              // created_by (will hold user id later)
-        null,              // period_start (will be updated from KPI)
-        null,              // period_end   (will be updated from KPI)
-        'MONTHLY',         // nominal time_step; we still store DAILY in SNU
+        null,   // created_by
+        null,   // period_start
+        null,   // period_end
+        'MONTHLY',
     ]);
     $runId = (int)$ins->fetchColumn();
 
