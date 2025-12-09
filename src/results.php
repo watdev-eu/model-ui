@@ -57,7 +57,7 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
     <div class="alert alert-warning">No enabled study areas configured.</div>
 <?php else: ?>
 
-    <!-- Map + controls layout is basically what you already had -->
+    <!-- Map + controls layout -->
 
     <div class="row g-3">
         <div class="col-12 col-lg-8">
@@ -100,23 +100,36 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                                 </div>
                             </div>
                         </div>
+                        <hr class="my-2">
+                        <div class="small fw-semibold mb-1">Map scenario</div>
+                        <div class="mb-1">
+                            <select id="mapScenarioSelect" class="form-select form-select-sm" multiple size="4">
+                                <!-- options filled dynamically -->
+                            </select>
+                        </div>
+                        <div class="form-text small">
+                            Select up to two scenarios for the map. One = direct values, two = absolute difference.
+                        </div>
                     </div>
 
                 </div>
             </div>
         </div>
 
-        <!-- controls column (same as before, but generic) -->
+        <!-- controls column -->
         <div class="col-12 col-lg-4">
             <div class="card sticky-col">
                 <div class="card-body">
                     <h2 class="h6 mb-3" id="controlsTitle">Controls</h2>
 
                     <div class="mb-3">
-                        <label class="form-label" for="datasetSelect">Dataset</label>
-                        <select id="datasetSelect" class="form-select">
-                            <option value="" disabled selected>Loading runs…</option>
-                        </select>
+                        <label class="form-label" for="datasetSelect">Datasets / scenarios</label>
+                        <div id="datasetSelect" class="border rounded p-2" style="max-height:220px; overflow-y:auto;">
+                            <div class="text-muted small">Select a study area first.</div>
+                        </div>
+                        <div class="form-text">
+                            Use the checkboxes to enable or disable scenarios.
+                        </div>
                         <div class="form-text">Runs are loaded from the database for this study area.</div>
                     </div>
 
@@ -162,7 +175,7 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
         </div>
     </div>
 
-    <!-- charts row same as before -->
+    <!-- charts row -->
     <div class="row mt-3">
         <div class="col-12">
             <div class="card">
@@ -221,6 +234,7 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                     opacitySubbasinsVal: document.getElementById('opacitySubbasinsVal'),
                     opacityRivers: document.getElementById('opacityRivers'),
                     opacityRiversVal: document.getElementById('opacityRiversVal'),
+                    mapScenario: document.getElementById('mapScenarioSelect'),
                 },
                 studyAreaId: initialAreaId,
                 indicators: INDICATORS,

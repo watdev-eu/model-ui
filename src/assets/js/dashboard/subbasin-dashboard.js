@@ -30,6 +30,17 @@ export function initSubbasinDashboard({
         yearIndex: 0,
         selectedSub: null
     };
+    // All data per run_id
+    // runsStore[runId] = {
+    //   meta: { id, label },
+    //   years, crops,
+    //   colsetHru, colsetRch, colsetSnu,
+    //   hruAnnualData, rchAnnualData, snuAnnualData
+    // }
+    const runsStore = new Map();
+    let selectedRunIds = [];   // run_ids currently selected in the checkbox list
+    let mapScenarioIds = [];   // run_ids currently visualised on the map (0–2)
+    let runsMeta = [];         // metadata from runs_list.php (id, run_label, run_date)
 
     // Cached annual per-HRU sums by available columns
     // hruAnnual.key = `${SUB}|${LULC}|${HRU}|${YEAR}`
@@ -54,12 +65,14 @@ export function initSubbasinDashboard({
 
     const snuAnnual = {
         data: [],
-        byHruYear(gisnum, year) {
-            return this.data.filter(r => r.HRUGIS === +gisnum && r.YEAR === +year);
-        }
     };
 
     let cropLookup = {};
+
+    const COLORWAY = [
+        '#636EFA', '#EF553B', '#00CC96', '#AB63FA',
+        '#FFA15A', '#19D3F3', '#FF6692', '#B6E880'
+    ];
 
     // ---------- Boot ----------
     wireUI();
@@ -68,11 +81,45 @@ export function initSubbasinDashboard({
     // ---------- UI ----------
     function wireUI() {
         els.dataset.addEventListener('change', async () => {
-            const rid = +(els.dataset.value || 0);
-            current.runId = Number.isFinite(rid) && rid > 0 ? rid : null;
-            if (current.runId) {
-                await loadAll(current.runId);
+            selectedRunIds = getSelectedRunIdsFromSelect();
+
+            if (!selectedRunIds.length) {
+                current.runId = null;
+                mapScenarioIds = [];
+                updateMapScenarioOptions();
+
+                if (els.mapNote) {
+                    els.mapNote.textContent = 'Select at least one scenario.';
+                }
+                if (els.seriesHint) {
+                    els.seriesHint.style.display = 'block';
+                    els.seriesHint.textContent = 'Select a scenario, then click a subbasin to load time series.';
+                }
+                if (els.seriesChart) Plotly.purge(els.seriesChart);
+                if (els.cropChart)   Plotly.purge(els.cropChart);
+
+                if (vectorLayer) vectorLayer.changed();
+                return;
             }
+
+            // Ensure data is loaded for all selected runs
+            await Promise.all(selectedRunIds.map(id => ensureRunLoaded(id)));
+
+            // Keep mapScenarioIds as subset of selectedRunIds
+            mapScenarioIds = mapScenarioIds.filter(id => selectedRunIds.includes(id));
+            if (!mapScenarioIds.length) {
+                mapScenarioIds = [selectedRunIds[0]];
+            } else if (mapScenarioIds.length > 2) {
+                mapScenarioIds = mapScenarioIds.slice(0, 2);
+            }
+
+            // Base run for metrics / crop list / year slider = first map scenario
+            const baseRunId = mapScenarioIds[0];
+            current.runId = baseRunId;
+            activateRun(baseRunId, { preserveCrop: true });
+
+            updateMapScenarioOptions();
+            recomputeAndRedraw();
         });
 
         els.metric.addEventListener('change', () => {
@@ -130,26 +177,66 @@ export function initSubbasinDashboard({
         };
         els.opacitySubbasins.addEventListener('input', applySubOpacity);
         els.opacityRivers.addEventListener('input', applyRivOpacity);
+
+        if (els.mapScenario) {
+            els.mapScenario.addEventListener('change', () => {
+                const opts = [...els.mapScenario.options];
+
+                let ids = opts
+                    .filter(o => o.selected)
+                    .map(o => parseInt(o.value, 10))
+                    .filter(v => Number.isFinite(v) && v > 0);
+
+                // Enforce max 2
+                if (ids.length > 2) {
+                    ids = ids.slice(0, 2);
+                    // reflect back in DOM
+                    opts.forEach(o => {
+                        const id = parseInt(o.value, 10);
+                        o.selected = ids.includes(id);
+                    });
+                }
+
+                // If user deselects all, fall back to first selected run
+                if (!ids.length && selectedRunIds.length) {
+                    ids = [selectedRunIds[0]];
+                    opts.forEach(o => {
+                        const id = parseInt(o.value, 10);
+                        o.selected = ids.includes(id);
+                    });
+                }
+
+                mapScenarioIds = ids;
+
+                if (mapScenarioIds.length) {
+                    const baseRunId = mapScenarioIds[0];
+                    current.runId = baseRunId;
+                    activateRun(baseRunId, { preserveCrop: true });
+                }
+
+                recomputeAndRedraw();
+            });
+        }
     }
 
     // ---------- Data load ----------
-    async function loadAll(runId) {
+    // Load + aggregate all KPI data for a single run_id
+    async function loadRunData(runId) {
         const urlHru = `${apiBase}/hru_kpi.php?run_id=${encodeURIComponent(runId)}`;
         const urlRch = `${apiBase}/rch_kpi.php?run_id=${encodeURIComponent(runId)}`;
         const urlSnu = `${apiBase}/snu_kpi.php?run_id=${encodeURIComponent(runId)}`;
 
-        const [hruJson, rchJson, snuJson, subGJ, rivGJ] = await Promise.all([
+        const [hruJson, rchJson, snuJson] = await Promise.all([
             fetch(urlHru).then(r => r.json()),
             fetch(urlRch).then(r => r.json()),
-            fetch(urlSnu).then(r => r.json()),
-            fetch(subbasinGeoUrl).then(r => r.json()),
-            fetch(riversGeoUrl).then(r => r.json())
+            fetch(urlSnu).then(r => r.json())
         ]).catch(err => {
-            console.error('[LOAD] Failed:', err);
+            console.error('[loadRunData] Failed:', err);
             throw err;
         });
 
-        rows = (hruJson.rows || []).map(r => ({
+        // ---------- HRU rows ----------
+        const rows = (hruJson.rows || []).map(r => ({
             ...r,
             LULC: clean(r.LULC),
             HRU: +r.HRU,
@@ -159,9 +246,9 @@ export function initSubbasinDashboard({
             MON: +r.MON,
             AREAkm2: toNum(r.AREAkm2)
         }));
-        console.debug('[LOAD] HRU rows from DB:', rows.length);
+        console.debug(`[loadRunData] HRU rows from DB for run ${runId}:`, rows.length);
 
-        colsetHru = new Set(Object.keys(rows[0] || {}));
+        const colsetHru = new Set(Object.keys(rows[0] || {}));
 
         const hruLookup = new Map();
         for (const r of rows) {
@@ -172,8 +259,8 @@ export function initSubbasinDashboard({
             });
         }
 
-        // ----- RCH rows -----
-        rchRows = (rchJson.rows || []).map(r => ({
+        // ---------- RCH rows ----------
+        const rchRows = (rchJson.rows || []).map(r => ({
             ...r,
             SUB: +r.SUB,
             YEAR: +r.YEAR,
@@ -183,24 +270,26 @@ export function initSubbasinDashboard({
             NO3_OUTkg: toNum(r.NO3_OUTkg),
             SED_OUTtons: toNum(r.SED_OUTtons)
         }));
-        console.debug('[LOAD] RCH rows from DB:', rchRows.length);
+        console.debug(`[loadRunData] RCH rows from DB for run ${runId}:`, rchRows.length);
 
-        colsetRch = new Set(Object.keys(rchRows[0] || {}));
+        const colsetRch = new Set(Object.keys(rchRows[0] || {}));
 
-        // Years / crops
-        years = [...new Set(rows.map(r => r.YEAR).filter(Number.isFinite))].sort((a,b) => a-b);
-        crops = [...new Set(rows.map(r => r.LULC).filter(Boolean))].sort();
-
-        snuRows = (snuJson.rows || []).map(r => ({
+        // ---------- SNU rows ----------
+        const snuRows = (snuJson.rows || []).map(r => ({
             ...r,
             HRUGIS: +r.HRUGIS,
             YEAR: +r.YEAR,
             // keep raw NO3 / SOL_P / ORG_N / ORG_P / SOL_RSD; we call toNum() later
         }));
-        console.debug('[LOAD] SNU rows from DB:', snuRows.length);
+        console.debug(`[loadRunData] SNU rows from DB for run ${runId}:`, snuRows.length);
 
-        colsetSnu = new Set(Object.keys(snuRows[0] || {}));
+        const colsetSnu = new Set(Object.keys(snuRows[0] || {}));
 
+        // ---------- Years / crops ----------
+        const years = [...new Set(rows.map(r => r.YEAR).filter(Number.isFinite))].sort((a, b) => a - b);
+        const crops = [...new Set(rows.map(r => r.LULC).filter(Boolean))].sort();
+
+        // ---------- Aggregate SNU -> annual per SUB–CROP–YEAR ----------
         const snuAcc = new Map();  // key: SUB|LULC|YEAR
 
         for (const r of snuRows) {
@@ -226,23 +315,23 @@ export function initSubbasinDashboard({
             }
 
             obj.ORG_N_sum += toNum(r.ORG_N);
-            obj.NO3_sum += toNum(r.NO3);
+            obj.NO3_sum   += toNum(r.NO3);
             obj.SOL_P_sum += toNum(r.SOL_P);
             obj.ORG_P_sum += toNum(r.ORG_P);
             obj.SOL_RSD_sum += toNum(r.SOL_RSD);
             obj.count++;
         }
 
-        snuAnnual.data = [...snuAcc.values()].map(o => ({
+        const snuAnnualData = [...snuAcc.values()].map(o => ({
             ...o,
             ORG_N_mean: o.ORG_N_sum / o.count,
-            NO3_mean: o.NO3_sum / o.count,
+            NO3_mean:   o.NO3_sum   / o.count,
             SOL_P_mean: o.SOL_P_sum / o.count,
             ORG_P_mean: o.ORG_P_sum / o.count,
             SOL_RSD_mean: o.SOL_RSD_sum / o.count
         }));
 
-        // ---------- Pre-aggregate HRU to annual per-HRU ----------
+        // ---------- Pre-aggregate HRU -> annual per HRU (SUB–LULC–HRU–YEAR) ----------
         // Columns needed by HRU-based indicators
         const neededHruCols = new Set();
         for (const def of indicators) {
@@ -251,7 +340,7 @@ export function initSubbasinDashboard({
         }
 
         const keepHruCols = [...neededHruCols].filter(c => colsetHru.has(c));
-        const maxCols = new Set(['YLDt_ha', 'BIOMt_ha']); // we also track annual max for these
+        const maxCols = new Set(['YLDt_ha', 'BIOMt_ha']); // also track annual max for these
 
         const keyHru = r => `${r.SUB}|${r.LULC}|${r.HRU}|${r.YEAR}`;
         const accHru = new Map();
@@ -298,9 +387,9 @@ export function initSubbasinDashboard({
             }
         }
 
-        hruAnnual.data = [...accHru.values()];
+        const hruAnnualData = [...accHru.values()];
 
-        // ---------- Pre-aggregate RCH to annual per SUB ----------
+        // ---------- Pre-aggregate RCH -> annual per SUB–YEAR ----------
         const neededRchCols = new Set();
         for (const def of indicators) {
             if (def.disabled) continue;
@@ -334,56 +423,78 @@ export function initSubbasinDashboard({
             }
         }
 
-        rchAnnual.data = [...accRch.values()];
+        const rchAnnualData = [...accRch.values()];
 
-        // OpenLayers map (rebuild once per dataset load)
-        buildMap(subGJ, rivGJ);
-
-        // Populate UI (sectors, indicators, crops, years)
-        populateMetricsCombined();
-        populateCrops();
-        initYearSlider();
-
-        // Apply current toggle visibility
-        if (els.toggleRivers) rivLayer.setVisible(els.toggleRivers.checked);
-        if (els.toggleSubbasins) {
-            const vis = els.toggleSubbasins.checked;
-            subLayer.setVisible(vis);
-            vectorLayer.setVisible(vis);
-        }
-
-        // Re-apply opacities after reloading layers
-        if (els.opacitySubbasins && subLayer && vectorLayer) {
-            const a = Math.max(0, Math.min(1, (+els.opacitySubbasins.value || 0) / 100));
-            subLayer.setOpacity(a); vectorLayer.setOpacity(a);
-        }
-        if (els.opacityRivers && rivLayer) {
-            const a = Math.max(0, Math.min(1, (+els.opacityRivers.value || 0) / 100));
-            rivLayer.setOpacity(a);
-        }
-
-        // Defaults
-        current.indicatorId = els.metric.value || null;
-        current.crop = (els.crop.options[0] && els.crop.options[0].value) || null;
-        current.avgAllYears = els.avgAllYears.checked;
-        current.yearIndex = +els.yearSlider.value;
-
-        // First draw
-        recomputeAndRedraw();
+        // ---------- Return structured run data ----------
+        return {
+            id: runId,
+            // raw monthly rows (optional but handy)
+            rows,
+            rchRows,
+            snuRows,
+            // meta
+            years,
+            crops,
+            colsetHru,
+            colsetRch,
+            colsetSnu,
+            // annual aggregates used by indicators
+            hruAnnualData,
+            rchAnnualData,
+            snuAnnualData
+        };
     }
 
     async function bootstrapFromApi() {
         await loadCropLookup();
 
-        const defaultRunId = await loadRuns();
-        if (!defaultRunId) {
-            throw new Error('No runs found for this study area');
+        const [subGJ, rivGJ] = await Promise.all([
+            fetch(subbasinGeoUrl).then(r => r.json()),
+            fetch(riversGeoUrl).then(r => r.json())
+        ]);
+        buildMap(subGJ, rivGJ);
+
+        const runIds = await loadRuns();
+
+        // --- No runs: keep map, show friendly messages, but DON'T throw
+        if (!runIds.length) {
+            selectedRunIds = [];
+            mapScenarioIds = [];
+            current.runId = null;
+
+            updateMapScenarioOptions();
+
+            if (els.mapNote) {
+                els.mapNote.textContent = 'No model runs found for this study area.';
+            }
+            if (els.seriesHint) {
+                els.seriesHint.style.display = 'block';
+                els.seriesHint.textContent = 'No scenarios available for this study area.';
+            }
+            if (els.seriesChart) Plotly.purge(els.seriesChart);
+            if (els.cropChart)   Plotly.purge(els.cropChart);
+
+            return; // <- important: exit without error
         }
 
-        current.runId = defaultRunId;
-        els.dataset.value = String(defaultRunId);
+        const firstId = runIds[0];
 
-        await loadAll(current.runId);
+        // Mark first as selected in the checkbox list
+        if (els.dataset) {
+            const box = els.dataset.querySelector(`input.dataset-checkbox[data-run-id="${firstId}"]`);
+            if (box) box.checked = true;
+        }
+
+        selectedRunIds = [firstId];
+        mapScenarioIds = [firstId];
+        current.runId = firstId;
+
+        updateMapScenarioOptions();
+
+        await ensureRunLoaded(firstId);
+        activateRun(firstId);
+
+        recomputeAndRedraw();
     }
 
     async function loadCropLookup() {
@@ -409,42 +520,56 @@ export function initSubbasinDashboard({
         const json = await res.json();
         const runs = json.runs || [];
 
+        runsMeta = runs;  // store for later lookup (labels, etc.)
+
         if (!runs.length) {
-            els.dataset.innerHTML = '';
-            return null;
+            els.dataset.innerHTML = '<div class="text-muted small">No runs found for this study area.</div>';
+            return [];
         }
 
         const defaultRuns = runs.filter(r => r.is_default);
-        const userRuns    = runs.filter(r => !r.is_default); // visibility='public' only, by API
+        const userRuns    = runs.filter(r => !r.is_default);
 
-        let optionsHtml = '';
+        let html = '';
 
-        // 1) Default datasets – no date in label
         if (defaultRuns.length) {
-            optionsHtml += '<optgroup label="Default datasets">';
-            optionsHtml += defaultRuns.map(r =>
-                `<option value="${r.id}">${escHtml(r.run_label)}</option>`
-            ).join('');
-            optionsHtml += '</optgroup>';
+            html += '<div class="mb-2">';
+            html += '<div class="small fw-semibold text-muted mb-1">Default datasets</div>';
+            html += defaultRuns.map(r => {
+                const label = escHtml(r.run_label);
+                const id    = `run-${r.id}`;
+                return `
+                <div class="form-check mb-1">
+                    <input class="form-check-input dataset-checkbox" type="checkbox"
+                           id="${id}" data-run-id="${r.id}">
+                    <label class="form-check-label" for="${id}">${label}</label>
+                </div>`;
+            }).join('');
+            html += '</div>';
         }
 
-        // 2) User-created runs – include date if available
         if (userRuns.length) {
-            optionsHtml += '<optgroup label="User-created model runs">';
-            optionsHtml += userRuns.map(r => {
+            html += '<div class="mb-2">';
+            html += '<div class="small fw-semibold text-muted mb-1">User-created model runs</div>';
+            html += userRuns.map(r => {
                 const labelParts = [r.run_label];
                 if (r.run_date) labelParts.push(`(${r.run_date})`);
-                const label = labelParts.join(' ');
-                return `<option value="${r.id}">${escHtml(label)}</option>`;
+                const label = escHtml(labelParts.join(' '));
+                const id    = `run-${r.id}`;
+                return `
+                <div class="form-check mb-1">
+                    <input class="form-check-input dataset-checkbox" type="checkbox"
+                           id="${id}" data-run-id="${r.id}">
+                    <label class="form-check-label" for="${id}">${label}</label>
+                </div>`;
             }).join('');
-            optionsHtml += '</optgroup>';
+            html += '</div>';
         }
 
-        els.dataset.innerHTML = optionsHtml;
+        els.dataset.innerHTML = html;
 
-        // Choose default run: first default, else first user run
-        const defaultRun = defaultRuns[0] || userRuns[0] || null;
-        return defaultRun ? defaultRun.id : null;
+        // return list of ids so caller can decide what to auto-select
+        return runs.map(r => r.id);
     }
 
     // ---------- Map ----------
@@ -484,33 +609,32 @@ export function initSubbasinDashboard({
         }) || [];
         console.debug('[RIV] features:', rivFeatures.length);
 
-        // Sources
-        subSource = new ol.source.Vector({ features: subFeatures });
-        rivSource = new ol.source.Vector({ features: rivFeatures });
-
-        // Layers
-        subLayer = new ol.layer.Vector({
-            source: subSource,
-            zIndex: 10,
-            style: new ol.style.Style({
-                stroke: new ol.style.Stroke({ color: '#444', width: 1.25 }),
-                fill: new ol.style.Fill({ color: [230,230,230,0.6] })
-            })
-        });
-
-        vectorLayer = new ol.layer.Vector({
-            source: subSource,
-            zIndex: 20,
-            style: subStyleFn
-        });
-
-        rivLayer = new ol.layer.Vector({
-            source: rivSource,
-            style: riverStyle
-        });
-        rivLayer.setZIndex(1000); // on top
-
         if (!map) {
+            // ---------- First time: create sources + layers ----------
+            subSource = new ol.source.Vector({ features: subFeatures });
+            rivSource = new ol.source.Vector({ features: rivFeatures });
+
+            subLayer = new ol.layer.Vector({
+                source: subSource,
+                zIndex: 10,
+                style: new ol.style.Style({
+                    stroke: new ol.style.Stroke({ color: '#444', width: 1.25 }),
+                    fill: new ol.style.Fill({ color: [230,230,230,0.6] })
+                })
+            });
+
+            vectorLayer = new ol.layer.Vector({
+                source: subSource,
+                zIndex: 20,
+                style: subStyleFn
+            });
+
+            rivLayer = new ol.layer.Vector({
+                source: rivSource,
+                style: riverStyle
+            });
+            rivLayer.setZIndex(1000); // on top
+
             map = new ol.Map({
                 target: 'map',
                 layers: [
@@ -527,7 +651,10 @@ export function initSubbasinDashboard({
                 if (hit) {
                     const sid = getProp(hit, 'Subbasin');
                     const v = valueForSub(sid);
-                    els.mapInfo.innerHTML = `<b>Subbasin ${escHtml(sid)}</b><br><b>${escHtml(currentIndicator()?.name||'')}</b>: ${fmt(v)} ${unitText()}<br><span class="mono">${escHtml(timeLabelText())}</span>`;
+                    els.mapInfo.innerHTML =
+                        `<b>Subbasin ${escHtml(sid)}</b><br>` +
+                        `<b>${escHtml(currentIndicator()?.name||'')}</b>: ${fmt(v)} ${unitText()}<br>` +
+                        `<span class="mono">${escHtml(timeLabelText())}</span>`;
                     map.getTargetElement().style.cursor = 'pointer';
                 } else {
                     els.mapInfo.textContent = 'Hover or click a subbasin';
@@ -544,10 +671,24 @@ export function initSubbasinDashboard({
                 }
             });
         } else {
-            subLayer.setSource(subSource);
-            vectorLayer.setSource(subSource);
-            rivLayer.setSource(rivSource);
-            vectorLayer.changed();
+            // ---------- Subsequent calls: reuse layers, replace features ----------
+            subSource = subLayer.getSource();
+            rivSource = rivLayer.getSource();
+
+            if (subSource) {
+                subSource.clear();
+                subSource.addFeatures(subFeatures);
+            }
+            if (rivSource) {
+                rivSource.clear();
+                rivSource.addFeatures(rivFeatures);
+            }
+
+            // Make sure the “thematic” layer uses the updated subSource
+            if (vectorLayer) {
+                vectorLayer.setSource(subSource);
+                vectorLayer.changed();
+            }
         }
 
         // Fit to union extent (subbasins + rivers)
@@ -557,34 +698,38 @@ export function initSubbasinDashboard({
         const rivExt = rivSource.getExtent();
         if (rivExt && rivExt.every(Number.isFinite)) ol.extent.extend(extAll, rivExt);
         if (!ol.extent.isEmpty(extAll)) {
-            map.getView().fit(extAll, { padding: [18,18,18,18], duration: 250, maxZoom: 9 });
+            map.getView().fit(extAll, {
+                padding: [18,18,18,18],
+                duration: 250,
+                maxZoom: 9
+            });
         }
 
         // Apply toggles immediately
-        if (els.toggleRivers) rivLayer.setVisible(els.toggleRivers.checked);
-        if (els.toggleSubbasins) {
+        if (els.toggleRivers && rivLayer) {
+            rivLayer.setVisible(els.toggleRivers.checked);
+        }
+        if (els.toggleSubbasins && subLayer && vectorLayer) {
             const vis = els.toggleSubbasins.checked;
             subLayer.setVisible(vis);
             vectorLayer.setVisible(vis);
         }
 
-        // Apply toggles immediately
-        if (els.toggleRivers) rivLayer.setVisible(els.toggleRivers.checked);
-        if (els.toggleSubbasins) {
-            const vis = els.toggleSubbasins.checked;
-            subLayer.setVisible(vis);
-            vectorLayer.setVisible(vis);
-        }
         // Apply current opacity slider values
-        if (els.opacitySubbasins) {
+        if (els.opacitySubbasins && subLayer && vectorLayer) {
             const a = Math.max(0, Math.min(1, (+els.opacitySubbasins.value || 0) / 100));
-            subLayer.setOpacity(a); vectorLayer.setOpacity(a);
-            if (els.opacitySubbasinsVal) els.opacitySubbasinsVal.textContent = `${Math.round(a*100)}%`;
+            subLayer.setOpacity(a);
+            vectorLayer.setOpacity(a);
+            if (els.opacitySubbasinsVal) {
+                els.opacitySubbasinsVal.textContent = `${Math.round(a * 100)}%`;
+            }
         }
-        if (els.opacityRivers) {
+        if (els.opacityRivers && rivLayer) {
             const a = Math.max(0, Math.min(1, (+els.opacityRivers.value || 0) / 100));
             rivLayer.setOpacity(a);
-            if (els.opacityRiversVal) els.opacityRiversVal.textContent = `${Math.round(a*100)}%`;
+            if (els.opacityRiversVal) {
+                els.opacityRiversVal.textContent = `${Math.round(a * 100)}%`;
+            }
         }
     }
 
@@ -621,8 +766,8 @@ export function initSubbasinDashboard({
 
         // legend + map note
         updateLegend();
-        els.mapNote.textContent =
-            `${currentIndicator()?.name || ''}${(current.aggMode==='crop') ? cropSuffix() : ' — all crops'} — ${timeLabelText()}`;
+        const base = `${currentIndicator()?.name || ''}${(current.aggMode === 'crop') ? cropSuffix() : ' — all crops'}`;
+        els.mapNote.textContent = `${base}${describeMapScenario()} — ${timeLabelText()}`;
 
         // restyle map
         vectorLayer.changed();
@@ -673,15 +818,19 @@ export function initSubbasinDashboard({
     function valueForSub(sub) {
         const def = currentIndicator();
         if (!def) return NaN;
-        // average across all years?
-        if (current.avgAllYears) {
-            const arr = years.map(y => computeIndicatorValue(def, +sub, y)).filter(Number.isFinite);
-            if (!arr.length) return NaN;
-            return arr.reduce((a,b)=>a+b,0) / arr.length;
+        if (!mapScenarioIds.length) return NaN;
+
+        // One scenario: direct value for that run
+        if (mapScenarioIds.length === 1) {
+            return valueForSubRun(mapScenarioIds[0], sub);
         }
-        // specific year
-        const y = years[current.yearIndex];
-        return computeIndicatorValue(def, +sub, y);
+
+        // Two scenarios: absolute difference between them
+        const v1 = valueForSubRun(mapScenarioIds[0], sub);
+        const v2 = valueForSubRun(mapScenarioIds[1], sub);
+
+        if (!Number.isFinite(v1) || !Number.isFinite(v2)) return NaN;
+        return Math.abs(v2 - v1);
     }
 
     function computeIndicatorValue(def, sub, year) {
@@ -724,10 +873,33 @@ export function initSubbasinDashboard({
         });
     }
 
+    function valueForSubRun(runId, sub) {
+        const def = currentIndicator();
+        if (!def) return NaN;
+
+        const rd = runsStore.get(runId);
+        if (!rd) return NaN;
+
+        if (current.avgAllYears) {
+            // average across all years available in this run
+            const vals = rd.years
+                .map(Y => computeIndicatorValueForRun(def, rd, sub, Y))
+                .filter(Number.isFinite);
+            if (!vals.length) return NaN;
+            return vals.reduce((a, b) => a + b, 0) / vals.length;
+        }
+
+        // specific year: use the year index from the *active* run
+        const year = years[current.yearIndex];
+        if (!Number.isFinite(year)) return NaN;
+
+        return computeIndicatorValueForRun(def, rd, sub, year);
+    }
+
     // ---------- Time series for clicked sub ----------
     function drawSeries() {
         const def = currentIndicator();
-        if (!def || !current.selectedSub) {
+        if (!def || !current.selectedSub || !selectedRunIds.length) {
             els.seriesHint.style.display = 'block';
             Plotly.purge(els.seriesChart);
             Plotly.purge(els.cropChart);
@@ -735,78 +907,45 @@ export function initSubbasinDashboard({
         }
         els.seriesHint.style.display = 'none';
 
-        // --- time series (left)
-        const x = years.slice();
-        const y = years.map(Y => {
-            const v = computeIndicatorValue(def, current.selectedSub, Y);
-            return Number.isFinite(v) ? v : null; // ensure gaps are null
-        });
+        const traces = [];
 
-        Plotly.newPlot(els.seriesChart, [{
-            type: 'scatter',
-            mode: 'lines',
-            connectgaps: true,
-            line: { width: 2 },
-            x,
-            y,
-            hovertemplate: '%{x}<br>%{y:.3f}<extra></extra>'
-        }], {
+        for (const runId of selectedRunIds) {
+            const rd = runsStore.get(runId);
+            if (!rd) continue;
+
+            const meta = runsMeta.find(r => r.id === runId);
+            const runLabel = meta ? meta.run_label : `Run ${runId}`;
+
+            const xs = rd.years.slice();
+            const ys = rd.years.map(Y => {
+                const v = computeIndicatorValueForRun(def, rd, current.selectedSub, Y);
+                return Number.isFinite(v) ? v : null;
+            });
+
+            traces.push({
+                type: 'scatter',
+                mode: 'lines',
+                connectgaps: true,
+                line: { width: 2 },
+                x: xs,
+                y: ys,
+                name: runLabel,  // legend + hover
+                hovertemplate: `${runLabel}<br>%{x}<br>%{y:.3f}<extra></extra>`
+            });
+        }
+
+        Plotly.newPlot(els.seriesChart, traces, {
             margin: { t: 30, r: 10, b: 40, l: 55 },
             title: `Subbasin ${current.selectedSub}${cropSuffix()} — ${def.name}`,
             xaxis: { title: 'Year' },
-            yaxis: { title: `${def.name}${unitText() ? ` (${unitText()})` : ''}` },
-            showlegend: false
+            yaxis: {
+                title: `${def.name}${unitText() ? ` (${unitText()})` : ''}`
+            },
+            showlegend: true,
+            colorway: COLORWAY
         }, { displayModeBar: false, responsive: true });
 
-        // --- crop breakdown (right)
-        // Compute one value per crop for either the selected year or average across years
-        const yr = current.avgAllYears ? null : years[current.yearIndex];
-        const x2 = [];
-        const y2 = [];
-
-        for (const c of crops) {
-            const vals = (yr == null ? years : [yr]).map(Y =>
-                def.requiresCrop
-                    ? def.calc({
-                        hruAnnual,
-                        rchAnnual,
-                        snuAnnual,
-                        sub: current.selectedSub,
-                        crop: c,
-                        year: Y,
-                        areaHa: r => (Number.isFinite(r.AREAkm2) ? r.AREAkm2 * 100 : NaN)
-                    })
-                    : def.calc({
-                        hruAnnual,
-                        rchAnnual,
-                        snuAnnual,
-                        sub: current.selectedSub,
-                        year: Y,
-                        areaHa: r => (Number.isFinite(r.AREAkm2) ? r.AREAkm2 * 100 : NaN)
-                    })
-            ).filter(Number.isFinite);
-
-            if (!vals.length) continue;
-            x2.push(displayCrop(c));
-            y2.push(vals.reduce((a, b) => a + b, 0) / vals.length);
-        }
-
-        if (x2.length) {
-            Plotly.newPlot(els.cropChart, [{
-                type: 'bar',
-                x: x2,
-                y: y2,
-                hovertemplate: '%{x}<br>%{y:.3f}<extra></extra>'
-            }], {
-                margin: { t: 30, r: 10, b: 80, l: 55 },
-                title: `Crop breakdown — Subbasin ${current.selectedSub} — ${def.name}`,
-                xaxis: { title: 'Crop', tickangle: -30, automargin: true },
-                yaxis: { title: `${def.name}${unitText() ? ` (${unitText()})` : ''}` },
-                showlegend: false
-            }, { displayModeBar: false, responsive: true });
-        } else {
-            Plotly.purge(els.cropChart);
-        }
+        drawCropChart(def);
     }
 
     // ---------- UI population ----------
@@ -849,21 +988,45 @@ export function initSubbasinDashboard({
         updateCropVisibility();
     }
 
-    function populateCrops() {
+    function populateCrops(preferredCrop = null) {
+        if (!els.crop) return;
+
+        if (!crops.length) {
+            els.crop.innerHTML = '';
+            current.crop = null;
+            return;
+        }
+
         els.crop.innerHTML = crops
             .map(c => `<option value="${escAttr(c)}">${escHtml(displayCrop(c))}</option>`)
             .join('');
-        current.crop = crops[0] || null;
+
+        let target = preferredCrop && crops.includes(preferredCrop)
+            ? preferredCrop
+            : crops[0];
+
+        els.crop.value = target;
+        current.crop = target;
     }
 
     function initYearSlider() {
+        if (!els.yearSlider) return;
+
         els.yearSlider.min = 0;
         els.yearSlider.max = Math.max(0, years.length - 1);
-        els.yearSlider.value = 0;
-        els.yearMin.textContent = years[0] ?? '—';
-        els.yearMax.textContent = years[years.length-1] ?? '—';
-        els.yearLabel.textContent = years[0] ?? '—';
-        els.yearSlider.disabled = true; // start with "avg all years"
+
+        // Clamp current.yearIndex to the new range
+        if (current.yearIndex < 0 || current.yearIndex >= years.length) {
+            current.yearIndex = 0;
+        }
+
+        els.yearSlider.value = current.yearIndex;
+        els.yearMin.textContent   = years[0] ?? '—';
+        els.yearMax.textContent   = years[years.length - 1] ?? '—';
+        els.yearLabel.textContent = years[current.yearIndex] ?? '—';
+
+        // Important: use current.avgAllYears as the source of truth
+        els.yearSlider.disabled = current.avgAllYears;
     }
 
     function updateCropVisibility() {
@@ -876,8 +1039,8 @@ export function initSubbasinDashboard({
     // ---------- Helpers ----------
     function setIdleState() {
         if (els.dataset) {
-            els.dataset.disabled = true;
-            els.dataset.innerHTML = '<option value="" disabled selected>Select a study area first</option>';
+            els.dataset.innerHTML =
+                '<div class="text-muted small">Select a study area first.</div>';
         }
 
         if (els.metric) {
@@ -912,6 +1075,204 @@ export function initSubbasinDashboard({
         if (els.cropChart)   Plotly.purge(els.cropChart);
     }
 
+    function getSelectedRunIdsFromSelect() {
+        if (!els.dataset) return [];
+        const boxes = els.dataset.querySelectorAll('input.dataset-checkbox[data-run-id]');
+        return [...boxes]
+            .filter(b => b.checked)
+            .map(b => parseInt(b.dataset.runId, 10))
+            .filter(v => Number.isFinite(v) && v > 0);
+    }
+
+    async function ensureRunLoaded(runId) {
+        if (runsStore.has(runId)) return;
+
+        const runData = await loadRunData(runId);
+        runsStore.set(runId, runData);
+    }
+
+    function updateMapScenarioOptions() {
+        if (!els.mapScenario) return;
+
+        const options = selectedRunIds
+            .map(id => {
+                const meta = runsMeta.find(r => r.id === id);
+                if (!meta) return null;
+                const labelParts = [meta.run_label];
+                if (meta.run_date) labelParts.push(`(${meta.run_date})`);
+                return {
+                    id,
+                    label: labelParts.join(' ')
+                };
+            })
+            .filter(Boolean);
+
+        if (!options.length) {
+            els.mapScenario.innerHTML =
+                '<option value="" disabled>No scenarios available</option>';
+            return;
+        }
+
+        const html = options.map(o => {
+            const selected = mapScenarioIds.includes(o.id) ? 'selected' : '';
+            return `<option value="${o.id}" ${selected}>${escHtml(o.label)}</option>`;
+        }).join('');
+
+        els.mapScenario.innerHTML = html;
+    }
+
+    function activateRun(runId, { preserveCrop = false } = {}) {
+        const rd = runsStore.get(runId);
+        if (!rd) return;
+
+        const prevCrop = preserveCrop ? current.crop : null;
+
+        // Copy to globals used everywhere else:
+        years = rd.years.slice();
+        crops = rd.crops.slice();
+
+        colsetHru = new Set(rd.colsetHru);
+        colsetRch = new Set(rd.colsetRch);
+        colsetSnu = new Set(rd.colsetSnu);
+
+        hruAnnual.data = rd.hruAnnualData;
+        rchAnnual.data = rd.rchAnnualData;
+        snuAnnual.data = rd.snuAnnualData;
+
+        current.runId = runId;
+
+        // Keep avgAllYears UI in sync with state
+        if (els.avgAllYears) {
+            els.avgAllYears.checked = current.avgAllYears;
+        }
+
+        // Rebuild crops but try to keep the previous selection if possible
+        populateCrops(prevCrop);
+
+        // Rebuild slider for this run while respecting current.avgAllYears + current.yearIndex
+        initYearSlider();
+
+        // Rebuild metric list (availability may change per run)
+        populateMetricsCombined();
+    }
+
+    function computeIndicatorValueForRun(def, rd, sub, year, cropOverride = null) {
+        const areaHa = r => (Number.isFinite(r.AREAkm2) ? r.AREAkm2 * 100 : NaN);
+
+        const hruWrapper = {
+            data: rd.hruAnnualData,
+            bySubYear(s, y) {
+                return this.data.filter(r => r.SUB === +s && r.YEAR === y);
+            },
+            bySubCropYear(s, c, y) {
+                return this.data.filter(r => r.SUB === +s && r.LULC === c && r.YEAR === y);
+            }
+        };
+
+        const rchWrapper = {
+            data: rd.rchAnnualData,
+            bySubYear(s, y) {
+                return this.data.filter(r => r.SUB === +s && r.YEAR === y);
+            }
+        };
+
+        const snuWrapper = { data: rd.snuAnnualData };
+
+        // --- Aggregated across crops (aggMode === 'sub' and no explicit crop override)
+        if (current.aggMode === 'sub' && def.requiresCrop && !cropOverride) {
+            let wsum = 0, vsum = 0;
+            for (const c of rd.crops) {
+                const rows = hruWrapper.bySubCropYear(sub, c, year);
+                if (!rows.length) continue;
+
+                let area = 0; for (const r of rows) area += areaHa(r);
+
+                const v = def.calc({
+                    hruAnnual: hruWrapper,
+                    rchAnnual: rchWrapper,
+                    snuAnnual: snuWrapper,
+                    areaHa,
+                    sub,
+                    crop: c,
+                    year
+                });
+
+                if (Number.isFinite(v) && area > 0) {
+                    wsum += area;
+                    vsum += v * area;
+                }
+            }
+            return wsum ? vsum / wsum : NaN;
+        }
+
+        // --- Crop-specific or crop-agnostic
+        const crop = def.requiresCrop ? (cropOverride || current.crop) : undefined;
+
+        return def.calc({
+            hruAnnual: hruWrapper,
+            rchAnnual: rchWrapper,
+            snuAnnual: snuWrapper,
+            areaHa,
+            sub,
+            crop,
+            year
+        });
+    }
+
+    function drawCropChart(def) {
+        const yr = current.avgAllYears ? null : (years[current.yearIndex] ?? null);
+        const traces = [];
+
+        for (const runId of selectedRunIds) {
+            const rd = runsStore.get(runId);
+            if (!rd) continue;
+
+            const meta = runsMeta.find(r => r.id === runId);
+            const runLabel = meta ? meta.run_label : `Run ${runId}`;
+
+            const x = [];
+            const y = [];
+
+            for (const c of rd.crops) {
+                const yearsToUse = (yr == null ? rd.years : [yr]);
+                const vals = yearsToUse.map(Y =>
+                    computeIndicatorValueForRun(def, rd, current.selectedSub, Y, c)
+                ).filter(Number.isFinite);
+
+                if (!vals.length) continue;
+                x.push(displayCrop(c));
+                y.push(vals.reduce((a, b) => a + b, 0) / vals.length);
+            }
+
+            if (!x.length) continue;
+
+            traces.push({
+                type: 'bar',
+                x,
+                y,
+                name: runLabel,
+                hovertemplate: `${runLabel}<br>%{x}<br>%{y:.3f}<extra></extra>`
+            });
+        }
+
+        if (!traces.length) {
+            Plotly.purge(els.cropChart);
+            return;
+        }
+
+        Plotly.newPlot(els.cropChart, traces, {
+            margin: { t: 30, r: 10, b: 80, l: 55 },
+            title: `Crop breakdown — Subbasin ${current.selectedSub} — ${def.name}`,
+            xaxis: { title: 'Crop', tickangle: -30, automargin: true },
+            yaxis: {
+                title: `${def.name}${unitText() ? ` (${unitText()})` : ''}`
+            },
+            barmode: 'group',
+            showlegend: false,
+            colorway: COLORWAY
+        }, { displayModeBar: false, responsive: true });
+    }
+
     function currentIndicator() {
         return indicators.find(d => d.id === current.indicatorId) || null;
     }
@@ -943,6 +1304,21 @@ export function initSubbasinDashboard({
         // If we know the name: show just the name.
         // If not: fall back to the raw code.
         return n || code;
+    }
+
+    function scenarioLabel(runId) {
+        const meta = runsMeta.find(r => r.id === runId);
+        return meta ? meta.run_label : `Run ${runId}`;
+    }
+
+    function describeMapScenario() {
+        if (!mapScenarioIds.length) return '';
+        if (mapScenarioIds.length === 1) {
+            return ` — Scenario: ${scenarioLabel(mapScenarioIds[0])}`;
+        }
+        const a = scenarioLabel(mapScenarioIds[0]);
+        const b = scenarioLabel(mapScenarioIds[1]);
+        return ` — Difference |${b} − ${a}|`;
     }
 
     // ---------- Pure utils ----------
@@ -1035,19 +1411,24 @@ export function initSubbasinDashboard({
         subbasinGeoUrl = `/api/study_area_subbasins_geo.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;
         riversGeoUrl   = `/api/study_area_reaches_geo.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;
 
-        // reset UI bits
+        // reset state & UI bits for new area
+        selectedRunIds = [];
+        mapScenarioIds = [];
+        current.runId = null;
+        current.selectedSub = null;
+
         if (els.dataset) {
-            els.dataset.disabled = true;
-            els.dataset.innerHTML = '<option value="" disabled>Loading runs…</option>';
+            els.dataset.innerHTML = '<div class="text-muted small">Loading runs…</div>';
         }
-        if (els.seriesHint) els.seriesHint.style.display = 'block';
+        if (els.seriesHint) {
+            els.seriesHint.style.display = 'block';
+            els.seriesHint.textContent = 'Loading scenarios for this study area…';
+        }
         if (els.seriesChart) Plotly.purge(els.seriesChart);
         if (els.cropChart)   Plotly.purge(els.cropChart);
-        current.selectedSub = null;
 
         try {
             await bootstrapFromApi();
-            if (els.dataset) els.dataset.disabled = false;
         } catch (err) {
             console.error('[switchStudyArea] failed:', err);
             if (els.mapNote) els.mapNote.textContent = 'Failed to load runs or data for this study area.';
