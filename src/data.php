@@ -7,7 +7,7 @@ $pageButtons = [];
 
 require_once __DIR__ . '/config/app.php';
 
-// ---- SESSION + CSRF MUST BE BEFORE ANY OUTPUT ----
+// ---- SESSION + CSRF ----
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
@@ -17,10 +17,10 @@ if (empty($_SESSION['csrf_token'])) {
 $csrfToken = $_SESSION['csrf_token'];
 // --------------------------------------------------
 
-// now safe to include layout (which outputs HTML)
 require_once __DIR__ . '/includes/layout.php';
 require_once __DIR__ . '/classes/CropRepository.php';
 require_once __DIR__ . '/classes/SwatRunRepository.php';
+require_once __DIR__ . '/classes/StudyAreaRepository.php';
 
 // Protect this page
 //require_admin();
@@ -32,7 +32,7 @@ $columns = 2; // (or 3 if you kept that)
 $perCol  = (int)ceil(max(1, count($crops)) / $columns);
 
 // Placeholder arrays – later we’ll load these from repositories / DB
-$studyAreas = [];
+$studyAreas = StudyAreaRepository::all();
 $runs       = SwatRunRepository::all();
 
 function humanStudyArea(string $area): string {
@@ -50,42 +50,63 @@ function humanStudyArea(string $area): string {
     </div>
 
     <!-- Study areas -->
-    <div class="card mb-4">
+    <div class="card mb-4" id="study-areas-card">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h2 class="h5 mb-0">Study areas</h2>
-            <button type="button" class="btn btn-sm btn-primary" disabled>
+            <button type="button"
+                    class="btn btn-sm btn-primary"
+                    data-url="/modals/study_area_add.php">
                 + Add study area
             </button>
         </div>
         <div class="card-body">
             <p class="text-muted">
-                Placeholder for managing study areas (name, boundaries, metadata, etc.).
+                Manage study areas and their underlying subbasins and reaches.
             </p>
 
             <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0">
                     <thead class="table-light">
                     <tr>
-                        <th>Code</th>
                         <th>Name</th>
-                        <th>Description</th>
+                        <th class="text-center">Subbasins</th>
+                        <th class="text-center">Reaches</th>
+                        <th>Status</th>
                         <th class="text-end">Action</th>
                     </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="studyAreasTbody">
                     <?php if (!$studyAreas): ?>
                         <tr>
-                            <td colspan="4" class="text-center text-muted">
+                            <td colspan="5" class="text-center text-muted">
                                 No study areas configured yet
                             </td>
                         </tr>
-                    <?php else: foreach ($studyAreas as $code => $name): ?>
-                        <tr>
-                            <td class="mono"><?= htmlspecialchars($code) ?></td>
-                            <td><?= htmlspecialchars($name) ?></td>
-                            <td class="text-muted">—</td>
+                    <?php else: foreach ($studyAreas as $area): ?>
+                        <tr data-study-area-id="<?= (int)$area['id'] ?>">
+                            <td><?= htmlspecialchars($area['name']) ?></td>
+                            <td class="text-center">
+                    <span class="badge bg-light text-muted">
+                        <?= (int)($area['subbasins'] ?? 0) ?>
+                    </span>
+                            </td>
+                            <td class="text-center">
+                    <span class="badge bg-light text-muted">
+                        <?= (int)($area['reaches'] ?? 0) ?>
+                    </span>
+                            </td>
+                            <td>
+                                <?php if (!empty($area['enabled'])): ?>
+                                    <span class="badge bg-success">Enabled</span>
+                                <?php else: ?>
+                                    <span class="badge bg-secondary">Disabled</span>
+                                <?php endif; ?>
+                            </td>
                             <td class="text-end">
-                                <button class="btn btn-sm btn-outline-secondary" disabled>Edit</button>
+                                <button class="btn btn-sm btn-outline-secondary"
+                                        data-url="/modals/study_area_manage.php?id=<?= (int)$area['id'] ?>">
+                                    Manage
+                                </button>
                             </td>
                         </tr>
                     <?php endforeach; endif; ?>
@@ -397,3 +418,4 @@ function humanStudyArea(string $area): string {
 
 <script src="/assets/js/data-crops.js"></script>
 <script src="/assets/js/data-runs.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/ol@latest/dist/ol.js"></script>
