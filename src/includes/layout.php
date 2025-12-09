@@ -119,9 +119,9 @@ $avatarUrl = false;
                     ],
                     [
                             'label' => 'Results',
-                            'href'  => '/egypt.php',
+                            'href'  => '/results.php',
                             'icon'  => 'bar-chart-line',
-                            'title' => 'Egypt model results',
+                            'title' => 'Model results per study area',
                     ],
 
                     // --- Data & admin tools ---

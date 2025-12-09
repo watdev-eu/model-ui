@@ -1,8 +1,19 @@
 <?php
-$pageTitle = 'Egypt — Subbasin Dashboard';
+// src/results.php
+declare(strict_types=1);
+
+$pageTitle   = 'Results — Subbasin Dashboard';
 $pageButtons = [];
-require_once 'includes/layout.php';
+
+require_once __DIR__ . '/config/app.php';
+require_once __DIR__ . '/includes/layout.php';
+require_once __DIR__ . '/classes/StudyAreaRepository.php';
+
+$allAreas  = StudyAreaRepository::all();
+$areas     = array_values(array_filter($allAreas, fn($a) => !empty($a['enabled'])));
+$firstId   = $areas ? (int)$areas[0]['id'] : 0;
 ?>
+
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@9.2.4/ol.css">
     <style>
@@ -12,84 +23,94 @@ require_once 'includes/layout.php';
         .legend .swatch { width:18px; height:12px; border-radius:2px; }
         .legend .legend-swatch-subbasin { width:18px; height:12px; border:1px solid #555; border-radius:2px; background:#e6e6e6; display:inline-block; }
         .legend .legend-line-river { width:34px; height:0; border-top:3px solid #1f77b4; display:inline-block; box-shadow:0 0 0 2px #fff; border-radius:2px; }
-        .legend .scale { display:flex; gap:10px; margin-top:6px; }
         .legend .scale .item { display:flex; flex-direction:column; align-items:center; gap:4px; }
         .legend .tick { font-size:11px; color:#333; opacity:.9; line-height:1; }
-        /* Legend sliders */
         .legend .opacity { margin-left:auto; display:flex; align-items:center; gap:6px; }
         .legend .op-slider { width:120px; }
-        .legend .form-switch .form-check-input { transform: scale(.9); } /* compact switches */
-
+        .legend .form-switch .form-check-input { transform: scale(.9); }
         .info { position:absolute; right:12px; top:12px; background:#fff; padding:6px 8px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,.2); font-size:12px; z-index:1000; }
         .sticky-col { position: sticky; top: 70px; }
         .mono { font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; }
-        .muted { color:#6c757d; }
     </style>
 
+    <div class="card mb-3">
+        <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+            <strong>Study area:</strong>
+            <?php if (!$areas): ?>
+                <span class="text-muted ms-2">No enabled study areas.</span>
+            <?php else: ?>
+                <div class="btn-group" role="group" id="studyAreaButtons">
+                    <?php foreach ($areas as $a): ?>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-primary"
+                                data-area-id="<?= (int)$a['id'] ?>"
+                                data-area-name="<?= h($a['name']) ?>">
+                            <?= h($a['name']) ?>
+                        </button>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+
+<?php if (!$areas): ?>
+    <div class="alert alert-warning">No enabled study areas configured.</div>
+<?php else: ?>
+
+    <!-- Map + controls layout is basically what you already had -->
+
     <div class="row g-3">
-        <!-- LEFT: Map -->
         <div class="col-12 col-lg-8">
             <div class="card">
                 <div class="card-body">
-                    <h2 class="h5 mb-3">Subbasins</h2>
+                    <h2 class="h5 mb-3" id="mapTitle">Subbasins</h2>
                     <div id="map" class="position-relative">
                         <div id="mapInfo" class="info">Hover or click a subbasin</div>
                     </div>
                     <div id="mapNote" class="mt-2 text-muted small"></div>
 
-                    <!-- Legend -->
                     <div class="legend mt-2" id="legendBox">
                         <div><strong id="legendTitle">Metric</strong></div>
-
-                        <!-- color swatches + tick labels -->
                         <div class="scale" id="legendScale"></div>
-
-                        <!-- Layer key + toggles -->
                         <hr class="my-2">
                         <div class="small fw-semibold mb-1">Layers</div>
                         <div class="d-flex flex-column gap-1">
-
-                            <!-- Subbasins row -->
                             <div class="d-flex align-items-center gap-2">
                                 <div class="form-check form-switch m-0">
                                     <input class="form-check-input" type="checkbox" id="toggleSubbasins" checked>
                                 </div>
                                 <span class="legend-swatch-subbasin" aria-hidden="true"></span>
                                 <label class="form-check-label mb-0" for="toggleSubbasins">Subbasins</label>
-
                                 <div class="opacity">
                                     <span class="text-muted small">Opacity</span>
-                                    <input type="range" class="form-range op-slider" id="opacitySubbasins" min="0" max="100" step="5" value="100" aria-label="Subbasins opacity">
+                                    <input type="range" class="form-range op-slider" id="opacitySubbasins" min="0" max="100" step="5" value="100">
                                     <span class="mono small" id="opacitySubbasinsVal">100%</span>
                                 </div>
                             </div>
-
-                            <!-- Rivers row -->
                             <div class="d-flex align-items-center gap-2">
                                 <div class="form-check form-switch m-0">
                                     <input class="form-check-input" type="checkbox" id="toggleRivers" checked>
                                 </div>
                                 <span class="legend-line-river" aria-hidden="true"></span>
                                 <label class="form-check-label mb-0" for="toggleRivers">Streams</label>
-
                                 <div class="opacity">
                                     <span class="text-muted small">Opacity</span>
-                                    <input type="range" class="form-range op-slider" id="opacityRivers" min="0" max="100" step="5" value="100" aria-label="Rivers opacity">
+                                    <input type="range" class="form-range op-slider" id="opacityRivers" min="0" max="100" step="5" value="100">
                                     <span class="mono small" id="opacityRiversVal">100%</span>
                                 </div>
                             </div>
-
                         </div>
                     </div>
+
                 </div>
             </div>
         </div>
 
-        <!-- RIGHT: Controls -->
+        <!-- controls column (same as before, but generic) -->
         <div class="col-12 col-lg-4">
             <div class="card sticky-col">
                 <div class="card-body">
-                    <h2 class="h6 mb-3">Controls</h2>
+                    <h2 class="h6 mb-3" id="controlsTitle">Controls</h2>
 
                     <div class="mb-3">
                         <label class="form-label" for="datasetSelect">Dataset</label>
@@ -135,11 +156,13 @@ require_once 'includes/layout.php';
                         </select>
                         <div class="form-text">Default shows KPI per crop type per subbasin. Switch to average across all crops per subbasin.</div>
                     </div>
+
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- charts row same as before -->
     <div class="row mt-3">
         <div class="col-12">
             <div class="card">
@@ -159,14 +182,19 @@ require_once 'includes/layout.php';
     <script src="https://cdn.plot.ly/plotly-2.35.3.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/ol@9.2.4/dist/ol.js"></script>
 
-    <!-- modules -->
+    <!-- module that wires switching -->
     <script type="module">
         import { initSubbasinDashboard } from '/assets/js/dashboard/subbasin-dashboard.js';
         import { INDICATORS } from '/assets/js/dashboard/indicators.js';
 
+        const initialAreaId = 0; // start idle, no data loaded
+
         window.addEventListener('DOMContentLoaded', () => {
-            initSubbasinDashboard({
-                // UI elements
+            const buttonsWrap   = document.getElementById('studyAreaButtons');
+            const mapTitle      = document.getElementById('mapTitle');
+            const controlsTitle = document.getElementById('controlsTitle');
+
+            const ctrl = initSubbasinDashboard({
                 els: {
                     dataset: document.getElementById('datasetSelect'),
                     metric: document.getElementById('metricSelect'),
@@ -194,14 +222,34 @@ require_once 'includes/layout.php';
                     opacityRivers: document.getElementById('opacityRivers'),
                     opacityRiversVal: document.getElementById('opacityRiversVal'),
                 },
-                // data sources
-                subbasinGeoUrl: '/assets/data/dashboard/dashboard-subbasin.geojson',
-                riversGeoUrl: '/assets/data/dashboard/dashboard-riv.geojson',
+                studyAreaId: initialAreaId,
                 indicators: INDICATORS,
-                studyArea: 'dashboard',
                 apiBase: '/api'
             });
+
+            if (buttonsWrap) {
+                buttonsWrap.addEventListener('click', (ev) => {
+                    const btn = ev.target.closest('button[data-area-id]');
+                    if (!btn) return;
+
+                    const id   = parseInt(btn.dataset.areaId, 10);
+                    const name = btn.dataset.areaName || btn.textContent || 'Study area';
+
+                    // toggle active state
+                    buttonsWrap.querySelectorAll('button[data-area-id]').forEach(b => {
+                        b.classList.toggle('btn-primary', b === btn);
+                        b.classList.toggle('btn-outline-primary', b !== btn);
+                    });
+
+                    mapTitle.textContent      = `Subbasins — ${name}`;
+                    controlsTitle.textContent = `Controls — ${name}`;
+
+                    ctrl.switchStudyArea(id);
+                });
+            }
         });
     </script>
 
-<?php include 'includes/footer.php'; ?>
+<?php endif; ?>
+
+<?php include __DIR__ . '/includes/footer.php'; ?>

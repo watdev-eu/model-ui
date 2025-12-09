@@ -1,10 +1,18 @@
-// assets/js/egypt/subbasin-dashboard.js
-export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indicators,
-                                          studyArea = 'egypt', apiBase = '/api'}) {
+// assets/js/dashboard/subbasin-dashboard.js
+export function initSubbasinDashboard({
+                                          els,
+                                          indicators,
+                                          studyAreaId,
+                                          apiBase = '/api',
+                                      }) {
     // ---------- State ----------
+    let currentStudyAreaId = studyAreaId;
+    let subbasinGeoUrl = `/api/study_area_subbasins_geo.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;
+    let riversGeoUrl   = `/api/study_area_reaches_geo.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;
+
     let map, subLayer, subSource, subFeatures = [];
-    let vectorLayer; // stylable choropleth layer (subbasins)
-    let rivLayer, rivSource;   // rivers
+    let vectorLayer;
+    let rivLayer, rivSource;
     let rows = [];      // monthly HRU rows
     let rchRows = [];   // monthly RCH rows
     let snuRows = [];
@@ -55,10 +63,7 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
 
     // ---------- Boot ----------
     wireUI();
-    bootstrapFromApi().catch(err => {
-        console.error('[BOOT] Failed to bootstrap dashboard:', err);
-        if (els.mapNote) els.mapNote.textContent = 'Failed to load runs or data.';
-    });
+    setIdleState();
 
     // ---------- UI ----------
     function wireUI() {
@@ -368,10 +373,8 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
     }
 
     async function bootstrapFromApi() {
-        // Load crop names (global)
         await loadCropLookup();
 
-        // Load runs for this study area and populate the dropdown
         const defaultRunId = await loadRuns();
         if (!defaultRunId) {
             throw new Error('No runs found for this study area');
@@ -380,7 +383,6 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
         current.runId = defaultRunId;
         els.dataset.value = String(defaultRunId);
 
-        // Now load HRU data for that run
         await loadAll(current.runId);
     }
 
@@ -401,7 +403,7 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
     }
 
     async function loadRuns() {
-        const url = `${apiBase}/runs_list.php?study_area=${encodeURIComponent(studyArea)}`;
+        const url = `${apiBase}/runs_list.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;
         const res = await fetch(url);
         if (!res.ok) throw new Error(`runs_list HTTP ${res.status}`);
         const json = await res.json();
@@ -470,32 +472,16 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
 
         const geoFmt = new ol.format.GeoJSON();
 
-        // Subbasins: EPSG:4326 -> display 3857
         subFeatures = geoFmt.readFeatures(subGJ, {
-            dataProjection: 'EPSG:4326',
+            dataProjection: 'EPSG:3857',
             featureProjection: 'EPSG:3857'
         }) || [];
         console.debug('[SUB] features:', subFeatures.length);
 
-        // Rivers: EPSG:32636 -> display 3857 (fallback to 4326 if needed)
-        let rivFeatures = [];
-        try {
-            rivFeatures = geoFmt.readFeatures(rivGJ, {
-                dataProjection: 'EPSG:32636',
-                featureProjection: 'EPSG:3857'
-            }) || [];
-        } catch (e) {
-            console.warn('[RIV] Failed as EPSG:32636, retry as EPSG:4326:', e);
-            try {
-                rivFeatures = geoFmt.readFeatures(rivGJ, {
-                    dataProjection: 'EPSG:4326',
-                    featureProjection: 'EPSG:3857'
-                }) || [];
-            } catch (e2) {
-                console.error('[RIV] Failed as EPSG:4326 too:', e2);
-                rivFeatures = [];
-            }
-        }
+        let rivFeatures = geoFmt.readFeatures(rivGJ, {
+            dataProjection: 'EPSG:3857',
+            featureProjection: 'EPSG:3857'
+        }) || [];
         console.debug('[RIV] features:', rivFeatures.length);
 
         // Sources
@@ -537,7 +523,7 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
             });
 
             map.on('pointermove', (evt) => {
-                const hit = map.forEachFeatureAtPixel(evt.pixel, (f, layer) => (layer === vectorLayer ? f : null));
+                const hit = map.forEachFeatureAtPixel(evt.pixel, (f) => f); // take first feature on any vector layer
                 if (hit) {
                     const sid = getProp(hit, 'Subbasin');
                     const v = valueForSub(sid);
@@ -550,7 +536,7 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
             });
 
             map.on('singleclick', (evt) => {
-                const hit = map.forEachFeatureAtPixel(evt.pixel, (f, layer) => (layer === vectorLayer ? f : null));
+                const hit = map.forEachFeatureAtPixel(evt.pixel, (f) => f);
                 if (hit) {
                     current.selectedSub = getProp(hit, 'Subbasin');
                     drawSeries();
@@ -888,6 +874,44 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
     }
 
     // ---------- Helpers ----------
+    function setIdleState() {
+        if (els.dataset) {
+            els.dataset.disabled = true;
+            els.dataset.innerHTML = '<option value="" disabled selected>Select a study area first</option>';
+        }
+
+        if (els.metric) {
+            els.metric.innerHTML = '';
+        }
+        if (els.crop) {
+            els.crop.innerHTML = '';
+        }
+        if (els.cropGroup) {
+            els.cropGroup.style.display = 'none';
+        }
+
+        if (els.yearSlider) {
+            els.yearSlider.value = 0;
+            els.yearSlider.disabled = true;
+        }
+        if (els.yearMin)   els.yearMin.textContent = '—';
+        if (els.yearMax)   els.yearMax.textContent = '—';
+        if (els.yearLabel) els.yearLabel.textContent = '—';
+
+        if (els.legendTitle) els.legendTitle.textContent = 'Metric';
+        if (els.legendScale) els.legendScale.innerHTML = '';
+
+        if (els.mapNote) els.mapNote.textContent = 'Select a study area to begin.';
+        if (els.mapInfo) els.mapInfo.textContent = 'Select a study area, then hover or click a subbasin.';
+
+        if (els.seriesHint) {
+            els.seriesHint.style.display = 'block';
+            els.seriesHint.textContent = 'Select a study area, then click a subbasin to load time series.';
+        }
+        if (els.seriesChart) Plotly.purge(els.seriesChart);
+        if (els.cropChart)   Plotly.purge(els.cropChart);
+    }
+
     function currentIndicator() {
         return indicators.find(d => d.id === current.indicatorId) || null;
     }
@@ -1003,4 +1027,35 @@ export function initSubbasinDashboard({ els, subbasinGeoUrl, riversGeoUrl, indic
             return `rgb(${c[0]},${c[1]},${c[2]})`;
         };
     }
+
+    async function switchStudyArea(newStudyAreaId) {
+        if (!Number.isFinite(+newStudyAreaId) || +newStudyAreaId <= 0) return;
+
+        currentStudyAreaId = +newStudyAreaId;
+        subbasinGeoUrl = `/api/study_area_subbasins_geo.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;
+        riversGeoUrl   = `/api/study_area_reaches_geo.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;
+
+        // reset UI bits
+        if (els.dataset) {
+            els.dataset.disabled = true;
+            els.dataset.innerHTML = '<option value="" disabled>Loading runs…</option>';
+        }
+        if (els.seriesHint) els.seriesHint.style.display = 'block';
+        if (els.seriesChart) Plotly.purge(els.seriesChart);
+        if (els.cropChart)   Plotly.purge(els.cropChart);
+        current.selectedSub = null;
+
+        try {
+            await bootstrapFromApi();
+            if (els.dataset) els.dataset.disabled = false;
+        } catch (err) {
+            console.error('[switchStudyArea] failed:', err);
+            if (els.mapNote) els.mapNote.textContent = 'Failed to load runs or data for this study area.';
+        }
+    }
+
+    // Expose controller
+    return {
+        switchStudyArea,
+    };
 }

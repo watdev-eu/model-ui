@@ -3,48 +3,48 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/app.php';
-require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../classes/SwatRunRepository.php';
 
 header('Content-Type: application/json');
 
+// Accept new param: ?study_area_id=14
+$studyAreaId = isset($_GET['study_area_id']) ? (int)$_GET['study_area_id'] : 0;
+
+// Accept legacy param: ?study_area=dashboard
 $studyArea = trim($_GET['study_area'] ?? '');
 
-if ($studyArea === '') {
-    http_response_code(400);
-    echo json_encode(['error' => 'study_area is required']);
-    exit;
-}
-
 try {
-    // This will accept either an id ("3") or a legacy name ("egypt")
-    $runs = SwatRunRepository::forStudyArea($studyArea);
+    if ($studyAreaId > 0) {
+        // New way – preferred
+        $runs = SwatRunRepository::forStudyAreaId($studyAreaId);
+    } elseif ($studyArea !== '') {
+        // Legacy fallback
+        $runs = SwatRunRepository::forStudyArea($studyArea);
+    } else {
+        http_response_code(400);
+        echo json_encode(['error' => 'study_area_id or study_area is required']);
+        exit;
+    }
 
-    // Keep only defaults OR public runs
-    $runs = array_values(array_filter($runs, static function (array $r): bool {
-        $isDefault  = !empty($r['is_default']);        // 1 / true
-        $visibility = $r['visibility'] ?? null;
-        return $isDefault || $visibility === 'public';
+    // Keep only default or public runs
+    $runs = array_values(array_filter($runs, function ($r) {
+        return !empty($r['is_default']) || ($r['visibility'] ?? '') === 'public';
     }));
 
-    // Sort – defaults first, then by newest date
-    usort($runs, static function (array $a, array $b): int {
-        $aDefault = !empty($a['is_default']);
-        $bDefault = !empty($b['is_default']);
+    echo json_encode([
+        'ok' => true,
+        'runs' => array_map(function ($r) {
+            return [
+                'id'        => (int)$r['id'],
+                'run_label' => $r['run_label'],
+                'is_default'=> (bool)$r['is_default'],
+                'run_date'  => $r['run_date'] ?? null,
+            ];
+        }, $runs)
+    ]);
 
-        if ($aDefault !== $bDefault) {
-            return $aDefault ? -1 : 1; // defaults first
-        }
-
-        $da = $a['run_date'] ?? '';
-        $db = $b['run_date'] ?? '';
-
-        // newest first
-        return strcmp($db, $da);
-    });
-
-    echo json_encode(['runs' => $runs]);
 } catch (Throwable $e) {
+    error_log('[runs_list] '.$e->getMessage());
     http_response_code(500);
-    echo json_encode(['error' => $e->getMessage()]);
+    echo json_encode(['error' => 'Server error']);
 }

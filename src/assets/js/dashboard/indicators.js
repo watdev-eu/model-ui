@@ -1,4 +1,4 @@
-// assets/js/egypt/indicators.js
+// assets/js/dashboard/indicators.js
 // Indicator registry + calculator hooks for subbasin-level choropleth and series.
 //
 // IMPORTANT: All results produced here are **annual** values aggregated to subbasins.
