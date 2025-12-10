@@ -12,11 +12,11 @@ RUN apt-get update && apt-get install -y \
 # Increase upload / post limits
 RUN { \
       echo "file_uploads=On"; \
-      echo "upload_max_filesize=200M"; \
-      echo "post_max_size=200M"; \
+      echo "upload_max_filesize=512M"; \
+      echo "post_max_size=512M"; \
       echo "max_file_uploads=20"; \
-      echo "memory_limit=512M"; \
-      echo "max_execution_time=300"; \
+      echo "memory_limit=1G"; \
+      echo "max_execution_time=600"; \
    } > /usr/local/etc/php/conf.d/uploads.ini
 
 RUN a2enmod rewrite

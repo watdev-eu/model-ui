@@ -1,18 +1,19 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../config/app.php';
-require_once __DIR__ . '/../config/database.php';
-//require_admin();
-
-// Make sure we don't leak warnings/HTML into the JSON response
+// Start buffering + suppress HTML error output BEFORE any includes
 ini_set('display_errors', '0');
 error_reporting(E_ALL);
 
-// Start output buffering so we can wipe any accidental output
 if (!ob_get_level()) {
     ob_start();
 }
+
+header('Content-Type: application/json');
+
+require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../config/database.php';
+//require_admin();
 
 header('Content-Type: application/json');
 
