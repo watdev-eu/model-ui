@@ -106,24 +106,20 @@ final class SwatRunRepository
             throw new InvalidArgumentException('Run not found');
         }
 
-        $studyAreaId = (int)$run['study_area'];
         $currentlyDefault = !empty($run['is_default']);
 
         $pdo->beginTransaction();
         try {
             if ($currentlyDefault) {
-                // Unset default
+                // Unset default, keep visibility as-is
                 $upd = $pdo->prepare("UPDATE swat_runs SET is_default = FALSE WHERE id = :id");
                 $upd->execute([':id' => $id]);
                 $pdo->commit();
                 return false;
             }
 
-            // Clear defaults for this area
-            $clear = $pdo->prepare("UPDATE swat_runs SET is_default = FALSE WHERE study_area = :area");
-            $clear->execute([':area' => $studyAreaId]);
-
-            // Set this one as default and make it public
+            // Just set this run as default and make it public,
+            // WITHOUT clearing other defaults in the same study area
             $set = $pdo->prepare("
                 UPDATE swat_runs
                 SET is_default = TRUE,

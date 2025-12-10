@@ -61,52 +61,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function clearDefaultForArea(area, exceptTr) {
-        const rows = card.querySelectorAll(`tbody tr[data-study-area="${CSS.escape(area)}"]`);
-        rows.forEach(row => {
-            if (row === exceptTr) return;
-
-            row.dataset.isDefault = '0';
-
-            const scenCell = row.querySelector('.run-scenario');
-            if (!scenCell) return;
-
-            // remove star if present
-            const star = scenCell.querySelector('.run-default-star');
-            if (star) star.remove();
-
-            // ensure date line exists
-            let dateDiv = scenCell.querySelector('.run-date');
-            if (!dateDiv) {
-                const d = getDisplayDate(row);
-                if (d) {
-                    dateDiv = document.createElement('div');
-                    dateDiv.className = 'small text-muted run-date';
-                    dateDiv.textContent = d;
-                    scenCell.appendChild(dateDiv);
-                }
-            }
-
-            const btnDef = row.querySelector('.js-run-toggle-default');
-            if (btnDef) {
-                btnDef.innerHTML = '<i class="bi bi-star me-2"></i>Set as default';
-            }
-        });
-    }
-
-    function updateDefaultUI(tr, isDefault, areaFromServer) {
-        const area = areaFromServer || tr.dataset.studyArea || '';
+    function updateDefaultUI(tr, isDefault) {
         const scenCell = tr.querySelector('.run-scenario');
         if (!scenCell) return;
 
         tr.dataset.isDefault = isDefault ? '1' : '0';
 
-        // first, clean up for this area if we became default
-        if (isDefault && area) {
-            clearDefaultForArea(area, tr);
-        }
-
-        // remove existing star & date
+        // remove existing star & date inside this row only
         const oldStar = scenCell.querySelector('.run-default-star');
         if (oldStar) oldStar.remove();
         const oldDate = scenCell.querySelector('.run-date');
@@ -126,7 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 btnDef.innerHTML = '<i class="bi bi-star-fill me-2"></i>Unset as default';
             }
         } else {
-            // add date again
+            // put the date back
             const d = getDisplayDate(tr);
             if (d) {
                 const div = document.createElement('div');
@@ -155,9 +116,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const json = await send('toggle_default', { id });
                 const nowDefault = !!json.is_default;
                 const visibility = json.visibility || 'private';
-                const area       = json.study_area || tr.dataset.studyArea || '';
 
-                updateDefaultUI(tr, nowDefault, area);
+                updateDefaultUI(tr, nowDefault);
                 updateVisibilityUI(tr, visibility); // becomes public when default
 
                 showToast(
