@@ -24,6 +24,12 @@ RUN a2enmod rewrite
 COPY src/. /var/www/html/
 RUN chown -R www-data:www-data /var/www/html
 
+COPY db/migrations/. /var/www/db/migrations
+RUN chown -R www-data:www-data /var/www/db/migrations \
+ && find /var/www/db/migrations -type d -exec chmod 755 {} \; \
+ && find /var/www/db/migrations -type f -name "*.sql" -exec chmod 644 {} \;
+
+
 RUN mkdir -p /shared/uploads \
  && chown -R www-data:www-data /shared/uploads
 
