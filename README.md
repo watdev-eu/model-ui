@@ -1,20 +1,35 @@
 # WATDEV model UI
 
-A user interface to interact with WATDEV models, image is available in GHCR.io
+A user interface to interact with WATDEV models
 
 The project [WATDEV](https://watdev.eu)  - Climate Smart WATer Management and Sustainable DEVelopment for Food and Agriculture in East Africa is funded by the DeSIRA initiative of the European Union and aims to develop an in-depth understanding of small and large-scale water and agricultural resource dynamics and management while boosting people’s resilience to climate, through innovative research, modelling, and capacity building approaches.
 
-## Inputs
+## Installation instructions
 
-Potentially 2 types of users exist, advanced users, which can update advanced parameters on the model and `policy users` which have a basic set of configuration options.
+### PHP Apache
 
-## Modelling backend
+This setup requires a postgres database (local or on the network) and a Apache server with PHP pre installed.
+Clone the repository to the server and setup apache to host the php folder.
+Enable the .env file to set the proper credentials
 
-Idea is to directly trigger the modelling backend and wait for the result. Alternatively the backend may respond with a queue token, and we verify at intervals if the process is finished using the token. Or a model-UI server component maintains a queue and the modelling backend polls the queue at times to understand if there are pending modelling tasks. 
+### Docker
+
+A docker compose setup has been prepared which installs the website and postgres database on a docker enabled server.
+A docker image of the tool is available in GHCR.io
+
+## Model UI 
+
+The tool offers functionality to visualise model results and compare different scenario's.
+
+### Users
+
+2 types of users exist: 
+- anonymous users, which can vizualise model runs which have been set as public
+- advanced users, which can upload model results and update advanced parameters on the model
 
 ## Post processing
 
-After the modelling backend is finished, some cost-benefit analysis post processing needs to occur, before the result is presented in the front-end. Some of the parameters may be changed on the UI, which only require post processing to be run again, without a full model run. To be investigated how the post processing accesses the various model run results (will there be a central database, or will the model-ui send the required results to post processing).
+After the modelling backend is finished, some cost-benefit analysis post processing will occur, before the result is presented in the front-end. Some of the parameters may be changed on the UI, which only require post processing to be run again, without a full model run. To be investigated how the post processing accesses the various model run results (will there be a central database, or will the model-ui send the required results to post processing).
 
 ```mermaid
 flowchart LR
