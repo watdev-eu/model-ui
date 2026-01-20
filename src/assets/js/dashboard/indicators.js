@@ -352,4 +352,18 @@ export const INDICATORS = [
         },
         needs: ['BIOMt_ha'],
     },
+
+    {
+        id: 'mca_score',
+        sector: 'MCA',
+        name: 'MCA composite score',
+        description: 'Weighted composite score across all MCA indicators.',
+        requiresCrop: false,
+        unit: 'score (0–1)',
+        calc: ({ sub }) => {
+            // MCA is per scenario, not per sub — map shows same value everywhere
+            return NaN;
+        },
+        isMca: true
+    },
 ];

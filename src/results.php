@@ -175,6 +175,43 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
         </div>
     </div>
 
+    <!-- Post-processing row (MCA) -->
+    <div class="row mt-3">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <h2 class="h6 mb-3">Multi-Criteria Analysis (MCA)</h2>
+
+                    <div class="mb-2">
+                        <label class="form-label">Preset</label>
+                        <select id="mcaPresetSelect" class="form-select form-select-sm">
+                            <option value="">Select preset…</option>
+                        </select>
+                    </div>
+
+                    <div class="d-flex gap-2 mb-2">
+                        <button class="btn btn-sm btn-outline-primary" id="mcaCloneBtn" disabled>
+                            Clone default
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" id="mcaEditBtn" disabled>
+                            Edit weights
+                        </button>
+                    </div>
+
+                    <div class="d-grid mb-2">
+                        <button class="btn btn-sm btn-success" id="mcaComputeBtn" disabled>
+                            Compute MCA
+                        </button>
+                    </div>
+
+                    <div class="form-text small">
+                        MCA scores are computed per scenario using the selected preset.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- charts row -->
     <div class="row mt-3">
         <div class="col-12">
@@ -235,6 +272,18 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                     opacityRivers: document.getElementById('opacityRivers'),
                     opacityRiversVal: document.getElementById('opacityRiversVal'),
                     mapScenario: document.getElementById('mapScenarioSelect'),
+                    mcaPreset: document.getElementById('mcaPresetSelect'),
+                    mcaCloneBtn: document.getElementById('mcaCloneBtn'),
+                    mcaEditBtn: document.getElementById('mcaEditBtn'),
+                    mcaComputeBtn: document.getElementById('mcaComputeBtn'),
+                    mcaEditModal: document.getElementById('mcaEditModal'),
+                    mcaEditTable: document.getElementById('mcaEditTable'),
+                    mcaWeightSum: document.getElementById('mcaWeightSum'),
+                    mcaEditError: document.getElementById('mcaEditError'),
+                    mcaResetBtn: document.getElementById('mcaResetBtn'),
+                    mcaSaveOverridesBtn: document.getElementById('mcaSaveOverridesBtn'),
+                    mcaVarsForm: document.getElementById('mcaVarsForm'),
+                    mcaCropVarsForm: document.getElementById('mcaCropVarsForm'),
                 },
                 studyAreaId: initialAreaId,
                 indicators: INDICATORS,
@@ -265,5 +314,69 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
     </script>
 
 <?php endif; ?>
+
+    <!-- MCA Edit Modal -->
+    <div class="modal fade" id="mcaEditModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">MCA settings</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body">
+                    <div class="alert alert-info py-2 small mb-3">
+                        Changes here are temporary and will be used for the next computation.
+                        (Saving presets will be implemented later.)
+                    </div>
+
+                    <div class="mb-3">
+                        <h6 class="mb-2">Indicators</h6>
+                        <table class="table table-sm align-middle" id="mcaEditTable">
+                            <thead></thead>
+                            <tbody></tbody>
+                        </table>
+
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div class="small">
+                                Enabled weights sum:
+                                <span class="mono" id="mcaWeightSum">0.000</span>
+                                <span class="text-muted">(must be 1.000)</span>
+                            </div>
+                            <div class="small text-danger" id="mcaEditError" style="display:none"></div>
+                        </div>
+                    </div>
+
+                    <hr class="my-3">
+
+                    <div class="mb-2">
+                        <h6 class="mb-2">Post-processing variables</h6>
+                        <div id="mcaVarsForm" class="row g-2"></div>
+                        <div class="form-text small">
+                            These values are used for indicators like BCR, income change, labour, etc.
+                        </div>
+                    </div>
+
+                    <hr class="my-3">
+                    <div class="mb-2">
+                        <h6 class="mb-2">Crop variables</h6>
+                        <div id="mcaCropVarsForm" class="row g-2"></div>
+                        <div class="form-text small">
+                            Used for water economic efficiency (e.g., crop price).
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" id="mcaResetBtn">
+                        Reset to defaults
+                    </button>
+                    <button type="button" class="btn btn-primary" id="mcaSaveOverridesBtn">
+                        Use these values
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

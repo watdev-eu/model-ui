@@ -15,6 +15,9 @@ $avatarUrl = false;
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
     <link href="/assets/css/sidebar.css" rel="stylesheet">
     <script src="/assets/js/sidebar.js" defer></script>
+    <script>
+        window.CSRF_TOKEN = <?= json_encode($csrfToken ?? '') ?>;
+    </script>
 </head>
 <body>
 

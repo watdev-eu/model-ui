@@ -1,4 +1,6 @@
 // assets/js/dashboard/subbasin-dashboard.js
+
+import { initMcaController } from './mca-controller.js';
 export function initSubbasinDashboard({
                                           els,
                                           indicators,
@@ -22,7 +24,7 @@ export function initSubbasinDashboard({
     let colsetRch = new Set(); // available RCH columns
     let colsetSnu = new Set();// available SNU columns
     let current = {
-        datasetUrl: els.dataset.value,
+        datasetUrl: null,
         indicatorId: null,
         crop: null,
         aggMode: 'crop',
@@ -76,6 +78,24 @@ export function initSubbasinDashboard({
 
     // ---------- Boot ----------
     wireUI();
+    const mca = initMcaController({
+        apiBase,
+        els: {
+            mcaPreset: els.mcaPreset,
+            mcaCloneBtn: els.mcaCloneBtn,
+            mcaEditBtn: els.mcaEditBtn,
+            mcaComputeBtn: els.mcaComputeBtn,
+
+            // modal hooks
+            mcaEditModal: els.mcaEditModal,
+            mcaEditTable: els.mcaEditTable,
+            mcaWeightSum: els.mcaWeightSum,
+            mcaEditError: els.mcaEditError,
+            mcaResetBtn: els.mcaResetBtn,
+            mcaSaveOverridesBtn: els.mcaSaveOverridesBtn,
+            mcaVarsForm: els.mcaVarsForm,
+        }
+    });
     setIdleState();
 
     // ---------- UI ----------
@@ -877,6 +897,11 @@ export function initSubbasinDashboard({
         const def = currentIndicator();
         if (!def) return NaN;
 
+        if (def.isMca) {
+            const v = mca.getScenarioScore(runId);
+            return Number.isFinite(v) ? v : NaN;
+        }
+
         const rd = runsStore.get(runId);
         if (!rd) return NaN;
 
@@ -1433,6 +1458,8 @@ export function initSubbasinDashboard({
             console.error('[switchStudyArea] failed:', err);
             if (els.mapNote) els.mapNote.textContent = 'Failed to load runs or data for this study area.';
         }
+
+        await mca.loadActivePreset(currentStudyAreaId);
     }
 
     // Expose controller

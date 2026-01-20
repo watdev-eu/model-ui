@@ -1,4 +1,16 @@
 <?php
+declare(strict_types=1);
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+$csrfToken = $_SESSION['csrf_token'];
+
 // Load .env from project root
 $paths = [ dirname(__DIR__,1).'/.env', __DIR__.'/.env' ];
 foreach ($paths as $envFile) {
