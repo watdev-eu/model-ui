@@ -26,7 +26,7 @@ RUN chown -R www-data:www-data /var/www/html
 
 COPY db/migrations/. /var/www/db/migrations
 RUN chown -R www-data:www-data /var/www/db/migrations \
- && find /var/www/db/migrati  ons -type d -exec chmod 755 {} \; \
+ && find /var/www/db/migrations -type d -exec chmod 755 {} \; \
  && find /var/www/db/migrations -type f -name "*.sql" -exec chmod 644 {} \;
 
 
