@@ -74,8 +74,11 @@ if ($fieldSep === '\\t') {
 $decimalSep = ($fieldSep === ',') ? '.' : ',';
 
 $uploadDir = UPLOAD_DIR;
-if (!is_dir($uploadDir)) {
-    @mkdir($uploadDir, 0775, true);
+if (!is_dir($uploadDir) && !mkdir($uploadDir, 0775, true)) {
+    throw new RuntimeException("Failed to create upload dir: $uploadDir");
+}
+if (!is_writable($uploadDir)) {
+    throw new RuntimeException("Upload dir not writable: $uploadDir");
 }
 
 $in = [
@@ -90,12 +93,18 @@ function normalize_decimal_if_needed(string $srcPath, string $decimalSep, string
     error_log('[import_run] normalize_decimal_if_needed called with: ' . $srcPath);
 
     if (!is_file($srcPath)) {
-        error_log('[import_run] File missing. ls /temp: ' . shell_exec('ls -l /temp 2>&1'));
-        error_log('[import_run] File missing. ls /tmp: ' . shell_exec('ls -l /tmp 2>&1'));
+        $dir = dirname($srcPath);
+        error_log('[import_run] CSV missing: ' . $srcPath);
+        error_log('[import_run] ls dir: ' . $dir . ' => ' . shell_exec('ls -la ' . escapeshellarg($dir) . ' 2>&1'));
+        error_log('[import_run] UPLOAD_DIR: ' . (defined('UPLOAD_DIR') ? UPLOAD_DIR : '(undef)'));
+        if (defined('UPLOAD_DIR')) {
+            error_log('[import_run] ls UPLOAD_DIR => ' . shell_exec('ls -la ' . escapeshellarg(UPLOAD_DIR) . ' 2>&1'));
+        }
+        error_log('[import_run] ls /tmp => ' . shell_exec('ls -la /tmp 2>&1'));
         throw new RuntimeException('CSV file not found: ' . $srcPath);
     }
 
-    error_log('[import_run] File exists, size=' . filesize($srcPath));
+    error_log('[import_run] CSV exists, size=' . filesize($srcPath));
     return $srcPath;
 }
 
@@ -142,12 +151,105 @@ function assertRequiredColumns(array $headerIndex, array $required, string $labe
     }
 }
 
+function pgConnFromEnv()
+{
+    $host = env('DB_HOST', 'db');
+    $port = env('DB_PORT', '5432');
+    $name = env('DB_NAME', 'watdev');
+
+    $user = getenv('DB_USER_FILE') && is_readable(getenv('DB_USER_FILE'))
+        ? trim(file_get_contents(getenv('DB_USER_FILE')))
+        : env('DB_USER', 'watdev_user');
+
+    $pass = getenv('DB_PASS_FILE') && is_readable(getenv('DB_PASS_FILE'))
+        ? trim(file_get_contents(getenv('DB_PASS_FILE')))
+        : env('DB_PASS', '');
+
+    // Optional: add connect_timeout so the import fails fast if networking is broken
+    $connStr = sprintf(
+        "host=%s port=%s dbname=%s user=%s password=%s connect_timeout=10",
+        $host, $port, $name, $user, $pass
+    );
+
+    $pg = @pg_connect($connStr);
+    if (!$pg) {
+        throw new RuntimeException('Failed to connect to Postgres via ext/pgsql (check DB_HOST/PORT/network/creds).');
+    }
+    return $pg;
+}
+
+function pgExec($pg, string $sql): void
+{
+    $res = @pg_query($pg, $sql);
+    if ($res === false) {
+        throw new RuntimeException('Postgres error: ' . pg_last_error($pg) . ' | SQL: ' . $sql);
+    }
+}
+
+function pgCopyFromCsvFile($pg, string $table, string $path, string $fieldSep): void
+{
+    if (!is_file($path)) {
+        throw new RuntimeException("CSV file not found for COPY: $path");
+    }
+
+    $sep = ($fieldSep === "\t") ? "\t" : $fieldSep;
+
+    // Start COPY FROM STDIN (client-side)
+    $copySql = "COPY {$table} FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER " . pg_escape_literal($pg, $sep) . ")";
+    $res = @pg_query($pg, $copySql);
+    if ($res === false) {
+        throw new RuntimeException('COPY start failed: ' . pg_last_error($pg));
+    }
+
+    $fh = fopen($path, 'rb');
+    if (!$fh) {
+        throw new RuntimeException("Failed to open CSV for COPY: $path");
+    }
+
+    // Stream in chunks (fast; less overhead than line-by-line)
+    while (!feof($fh)) {
+        $chunk = fread($fh, 1024 * 1024); // 1MB
+        if ($chunk === false) {
+            fclose($fh);
+            throw new RuntimeException("Failed reading CSV during COPY: $path");
+        }
+        if ($chunk !== '') {
+            if (!pg_put_line($pg, $chunk)) {
+                fclose($fh);
+                throw new RuntimeException('COPY streaming failed: ' . pg_last_error($pg));
+            }
+        }
+    }
+    fclose($fh);
+
+    // End COPY
+    pg_put_line($pg, "\\.\n");
+    if (!pg_end_copy($pg)) {
+        throw new RuntimeException('COPY end failed: ' . pg_last_error($pg));
+    }
+}
+
+function dropStagingTables(PDO $pdo, ?string ...$tables): void
+{
+    foreach ($tables as $t) {
+        if ($t) {
+            $pdo->exec("DROP TABLE IF EXISTS {$t}");
+        }
+    }
+}
+
 $runId = null;
 
 try {
     $pdo->beginTransaction();
     $pdo->exec("SET LOCAL synchronous_commit = OFF;");
     $pdo->exec("SET LOCAL temp_buffers = '64MB';");
+
+    $pg = pgConnFromEnv();
+
+    // Apply same performance settings on the pgsql session too (COPY happens there)
+    pgExec($pg, "SET synchronous_commit = OFF");
+    pgExec($pg, "SET temp_buffers = '64MB'");
 
     // ------------------------------------------------------------------
     // 2. Check uniqueness within study area
@@ -185,6 +287,10 @@ try {
         'MONTHLY',
     ]);
     $runId = (int)$ins->fetchColumn();
+
+    $tmpHru = 'tmp_hru_import_' . $runId;
+    $tmpRch = 'tmp_rch_import_' . $runId;
+    $tmpSnu = 'tmp_snu_import_' . $runId;
 
     // ------------------------------------------------------------------
     // 4. Copy uploaded files to a safe place
@@ -283,8 +389,8 @@ try {
 
         // 5.1. Create staging table with full SWAT HRU layout (UNLOGGED = faster)
         $pdo->exec("
-            DROP TABLE IF EXISTS tmp_hru_import;
-            CREATE UNLOGGED TABLE tmp_hru_import (
+            DROP TABLE IF EXISTS {$tmpHru};
+            CREATE UNLOGGED TABLE {$tmpHru} (
                 LULC        VARCHAR(16),
                 HRU         INTEGER,
                 HRUGIS      INTEGER,
@@ -373,15 +479,7 @@ try {
         ");
 
         // 5.2. COPY from CSV into staging table
-        $sep = ($fieldSep === "\t") ? "\t" : $fieldSep;
-        $copySql = "
-        COPY tmp_hru_import FROM " . $pdo->quote($path) . " WITH (
-            FORMAT csv,
-            HEADER true,
-            DELIMITER '$sep'
-        )
-    ";
-        $pdo->exec($copySql);
+        pgCopyFromCsvFile($pg, $tmpHru, $path, $fieldSep);
 
         // 5.3. Insert into final table with conversion and filtering
         $areaExpr   = pgNumericExpr('AREAkm2',    $decimalSep, $fieldSep);
@@ -441,13 +539,13 @@ try {
                 $pGrazExpr                     AS pgraz_kg_ha,
                 $nCfrtExpr                     AS cfertn_kg_ha,
                 $pCfrtExpr                     AS cfertp_kg_ha
-            FROM tmp_hru_import
+            FROM {$tmpHru}
             WHERE YEAR > 0 AND MON > 0;
         ";
         $pdo->exec($sql);
 
         // 5.4. Cleanup staging
-        $pdo->exec("DROP TABLE tmp_hru_import");
+        $pdo->exec("DROP TABLE IF EXISTS {$tmpHru}");
     }
 
     // ------------------------------------------------------------------
@@ -475,8 +573,8 @@ try {
 
         // 6.1. Create staging table (UNLOGGED = faster)
         $pdo->exec("
-            DROP TABLE IF EXISTS tmp_rch_import;
-            CREATE UNLOGGED TABLE tmp_rch_import (
+            DROP TABLE IF EXISTS {$tmpRch};
+            CREATE UNLOGGED TABLE {$tmpRch} (
                 SUB           INTEGER,
                 YEAR          INTEGER,
                 MON           INTEGER,
@@ -532,15 +630,7 @@ try {
         ");
 
         // 6.2. COPY CSV into staging table
-        $sep = $fieldSep === "\t" ? '\t' : $fieldSep;
-        $copySql = "
-            COPY tmp_rch_import FROM " . $pdo->quote($path) . " WITH (
-                FORMAT csv,
-                HEADER true,
-                DELIMITER '$sep'
-            )
-        ";
-        $pdo->exec($copySql);
+        pgCopyFromCsvFile($pg, $tmpRch, $path, $fieldSep);
 
         // 6.3. Insert into final table with conversions
         $areaExpr = pgNumericExpr('AREAkm2',      $decimalSep, $fieldSep);
@@ -564,13 +654,13 @@ try {
                 $flowExpr                      AS flow_out_cms,
                 $no3Expr                       AS no3_out_kg,
                 $sedExpr                       AS sed_out_t
-            FROM tmp_rch_import
+            FROM {$tmpRch}
             WHERE YEAR > 0 AND MON > 0;
         ";
         $pdo->exec($sql);
 
         // 6.4. Cleanup staging
-        $pdo->exec("DROP TABLE tmp_rch_import");
+        $pdo->exec("DROP TABLE IF EXISTS {$tmpRch}");
     }
 
     // ------------------------------------------------------------------
@@ -598,8 +688,8 @@ try {
 
         // 7.1. Create staging table
         $pdo->exec("
-            DROP TABLE IF EXISTS tmp_snu_import;
-            CREATE UNLOGGED TABLE tmp_snu_import (
+            DROP TABLE IF EXISTS {$tmpSnu};
+            CREATE UNLOGGED TABLE {$tmpSnu} (
                 YEAR     INTEGER,
                 DAY      INTEGER,
                 HRUGIS   INTEGER,
@@ -614,15 +704,7 @@ try {
         ");
 
         // 7.2. COPY CSV into staging
-        $sep = $fieldSep === "\t" ? '\t' : $fieldSep;
-        $copySql = "
-            COPY tmp_snu_import FROM " . $pdo->quote($path) . " WITH (
-                FORMAT csv,
-                HEADER true,
-                DELIMITER '$sep'
-            )
-        ";
-        $pdo->exec($copySql);
+        pgCopyFromCsvFile($pg, $tmpSnu, $path, $fieldSep);
 
         // 7.3. Insert into final table with conversions + DOY→date
         $solPExpr   = pgNumericExpr('SOL_P',   $decimalSep, $fieldSep);
@@ -651,13 +733,13 @@ try {
                 $orgPExpr                  AS org_p,
                 $cnExpr                    AS cn,
                 $solRsdExpr                AS sol_rsd
-            FROM tmp_snu_import
+            FROM {$tmpSnu}
             WHERE YEAR > 0 AND DAY > 0;
         ";
         $pdo->exec($sql);
 
         // 7.4. Cleanup staging
-        $pdo->exec("DROP TABLE tmp_snu_import");
+        $pdo->exec("DROP TABLE IF EXISTS {$tmpSnu}");
     }
 
     // ------------------------------------------------------------------
@@ -682,6 +764,7 @@ try {
     }
 
     $pdo->commit();
+    if (isset($pg) && $pg) @pg_close($pg);
 
     // Clean any previous output, then send clean JSON
     if (ob_get_level()) {
@@ -693,6 +776,19 @@ try {
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
+    }
+
+    // Always attempt cleanup if names exist
+    if (isset($tmpHru, $tmpRch, $tmpSnu)) {
+        try {
+            dropStagingTables($pdo, $tmpHru, $tmpRch, $tmpSnu);
+        } catch (Throwable $ignored) {
+            error_log('[import_run] staging cleanup failed: ' . $ignored->getMessage());
+        }
+    }
+
+    if (isset($pg) && $pg) {
+        @pg_close($pg);
     }
 
     // Log server-side for debugging
