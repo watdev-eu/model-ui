@@ -196,6 +196,9 @@ function pgCopyFromCsvFile($pg, string $table, string $path, string $fieldSep): 
 
     // Start COPY FROM STDIN (client-side)
     $copySql = "COPY {$table} FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER " . pg_escape_literal($pg, $sep) . ")";
+
+    error_log('[import_run] COPY SQL: ' . $copySql);
+
     $res = @pg_query($pg, $copySql);
     if ($res === false) {
         throw new RuntimeException('COPY start failed: ' . pg_last_error($pg));
@@ -250,6 +253,8 @@ try {
     // Apply same performance settings on the pgsql session too (COPY happens there)
     pgExec($pg, "SET synchronous_commit = OFF");
     pgExec($pg, "SET temp_buffers = '64MB'");
+
+    pgExec($pg, "SET search_path = public");
 
     // ------------------------------------------------------------------
     // 2. Check uniqueness within study area
