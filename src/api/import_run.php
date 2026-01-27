@@ -87,9 +87,15 @@ $in = [
 // Helper to normalize decimal separator in a copy of the file
 function normalize_decimal_if_needed(string $srcPath, string $decimalSep, string $fieldSep): string
 {
+    error_log('[import_run] normalize_decimal_if_needed called with: ' . $srcPath);
+
     if (!is_file($srcPath)) {
+        error_log('[import_run] File missing. ls /temp: ' . shell_exec('ls -l /temp 2>&1'));
+        error_log('[import_run] File missing. ls /tmp: ' . shell_exec('ls -l /tmp 2>&1'));
         throw new RuntimeException('CSV file not found: ' . $srcPath);
     }
+
+    error_log('[import_run] File exists, size=' . filesize($srcPath));
     return $srcPath;
 }
 
@@ -187,23 +193,60 @@ try {
 
     if ($in['hru_csv']) {
         $csv['hru'] = $uploadDir . '/hru_' . uniqid() . '.csv';
+        error_log('[import_run] HRU target path: ' . $csv['hru']);
         // move_uploaded_file returns false if source is not an uploaded file
-        if (!@move_uploaded_file($in['hru_csv'], $csv['hru'])) {
-            @copy($in['hru_csv'], $csv['hru']);
+        if (is_uploaded_file($in['hru_csv'])) {
+            if (!move_uploaded_file($in['hru_csv'], $csv['hru'])) {
+                throw new RuntimeException('Failed to move uploaded HRU CSV');
+            }
+            error_log('[import_run] HRU file moved successfully');
+        } else {
+            error_log('[import_run] HRU source is NOT an uploaded file, trying copy');
+            if (!copy($in['hru_csv'], $csv['hru'])) {
+                throw new RuntimeException('Failed to copy HRU CSV from ' . $in['hru_csv']);
+            }
         }
     }
     if ($in['rch_csv']) {
         $csv['rch'] = $uploadDir . '/rch_' . uniqid() . '.csv';
-        if (!@move_uploaded_file($in['rch_csv'], $csv['rch'])) {
-            @copy($in['rch_csv'], $csv['rch']);
+        error_log('[import_run] RCH target path: ' . $csv['rch']);
+        if (is_uploaded_file($in['rch_csv'])) {
+            if (!move_uploaded_file($in['rch_csv'], $csv['rch'])) {
+                throw new RuntimeException('Failed to move uploaded RCH CSV');
+            }
+            error_log('[import_run] RCH file moved successfully');
+        } else {
+            error_log('[import_run] RCH source is NOT an uploaded file, trying copy');
+            if (!copy($in['rch_csv'], $csv['rch'])) {
+                throw new RuntimeException('Failed to copy RCH CSV from ' . $in['rch_csv']);
+            }
         }
     }
     if ($in['snu_csv']) {
         $csv['snu'] = $uploadDir . '/snu_' . uniqid() . '.csv';
-        if (!@move_uploaded_file($in['snu_csv'], $csv['snu'])) {
-            @copy($in['snu_csv'], $csv['snu']);
+        error_log('[import_run] SNU target path: ' . $csv['snu']);
+        if (is_uploaded_file($in['snu_csv'])) {
+            if (!move_uploaded_file($in['snu_csv'], $csv['snu'])) {
+                throw new RuntimeException('Failed to move uploaded SNU CSV');
+            }
+            error_log('[import_run] SNU file moved successfully');
+        } else {
+            error_log('[import_run] SNU source is NOT an uploaded file, trying copy');
+            if (!copy($in['snu_csv'], $csv['snu'])) {
+                throw new RuntimeException('Failed to copy SNU CSV from ' . $in['snu_csv']);
+            }
         }
     }
+
+    error_log('[import_run] _FILES: ' . print_r($_FILES, true));
+    error_log('[import_run] POST paths: ' . print_r([
+            'hru_csv_path' => $_POST['hru_csv_path'] ?? null,
+            'rch_csv_path' => $_POST['rch_csv_path'] ?? null,
+            'snu_csv_path' => $_POST['snu_csv_path'] ?? null,
+        ], true));
+    error_log('[import_run] upload_tmp_dir: ' . ini_get('upload_tmp_dir'));
+    error_log('[import_run] sys_temp_dir: ' . sys_get_temp_dir());
+    error_log('[import_run] cwd: ' . getcwd());
 
     if (!$csv['hru'] && !$csv['rch'] && !$csv['snu']) {
         throw new RuntimeException('No input CSV files provided (HRU/RCH/SNU).');
