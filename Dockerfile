@@ -32,6 +32,8 @@ RUN chown -R www-data:www-data /var/www/db/migrations \
 
 RUN mkdir -p /shared/uploads \
  && chown -R www-data:www-data /shared/uploads
+RUN mkdir -p /temp \
+ && chown -R www-data:www-data /temp
 
 EXPOSE 80
 CMD ["apache2-foreground"]
