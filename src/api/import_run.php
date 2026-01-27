@@ -117,6 +117,11 @@ function pgValue($pg, string $sql, array $params = [])
     return array_values($row)[0] ?? null;
 }
 
+function pgIdent($pg, string $schema, string $name): string
+{
+    return pg_escape_identifier($pg, $schema) . '.' . pg_escape_identifier($pg, $name);
+}
+
 // Build case-insensitive header index
 function makeHeaderIndex(array $header): array
 {
@@ -234,7 +239,21 @@ function dropStagingTablesPg($pg, ?string ...$tables): void
 {
     foreach ($tables as $t) {
         if (!$t) continue;
-        if (!preg_match('/^tmp_(hru|rch|snu)_import_\d+$/', $t)) continue;
+
+        // allow "tmp_*" or "public.tmp_*"
+        if (!preg_match('/^(public\.)?tmp_(hru|rch|snu)_import_\d+$/', $t)) {
+            continue;
+        }
+
+        // If caller passed unqualified, drop as public.<name>
+        if (strpos($t, '.') === false) {
+            $t = pg_escape_identifier($pg, 'public') . '.' . pg_escape_identifier($pg, $t);
+        } else {
+            // already qualified like public.tmp_hru_import_8
+            [$schema, $name] = explode('.', $t, 2);
+            $t = pg_escape_identifier($pg, $schema) . '.' . pg_escape_identifier($pg, $name);
+        }
+
         @pg_query($pg, "DROP TABLE IF EXISTS {$t}");
     }
 }
@@ -244,27 +263,6 @@ $txStarted = false;
 $runId = null;
 
 try {
-    $pg = pgConnFromEnv();
-    pgExec($pg, "SET synchronous_commit = OFF");
-    pgExec($pg, "SET temp_buffers = '64MB'");
-    pgExec($pg, "SET search_path = public");
-
-    pgExec($pg, "BEGIN");
-    $txStarted = true;
-
-    $exists = pgValue($pg,
-        "SELECT 1 FROM study_areas WHERE id = $1 AND enabled = TRUE",
-        [$studyAreaId]
-    );
-    if (!$exists) {
-        pgExec($pg, "ROLLBACK");
-        $txStarted = false;
-        http_response_code(400);
-        echo json_encode(['error' => 'Invalid or disabled study area']);
-        @pg_close($pg);
-        exit;
-    }
-
     $uploadDir = UPLOAD_DIR;
     if (!is_dir($uploadDir) && !mkdir($uploadDir, 0775, true)) {
         throw new RuntimeException("Failed to create upload dir: $uploadDir");
@@ -273,57 +271,9 @@ try {
         throw new RuntimeException("Upload dir not writable: $uploadDir");
     }
 
-    $res = pg_query($pg, "SELECT inet_server_addr() addr, inet_server_port() port, current_database() db, current_schema() schema, current_user usr");
-    error_log('[import_run] PG conn: ' . json_encode(pg_fetch_assoc($res)));
-
-    // ------------------------------------------------------------------
-    // 2. Check uniqueness within study area
-    // ------------------------------------------------------------------
-    $dup = pgValue($pg,
-        "SELECT 1 FROM swat_runs WHERE study_area = $1 AND run_label = $2",
-        [$studyAreaId, $runLabel]
-    );
-    if ($dup) {
-        if ($txStarted) { pgExec($pg, "ROLLBACK"); $txStarted = false; }
-        http_response_code(409);
-        echo json_encode(['error' => 'A run with this scenario name already exists for this study area; choose a different name']);
-        exit;
-    }
-
-    // ------------------------------------------------------------------
-    // 3. Create run
-    // ------------------------------------------------------------------
-    $row = pgOne($pg, "
-        INSERT INTO swat_runs
-          (study_area, run_label, run_date,
-           visibility, description, created_by,
-           period_start, period_end, time_step)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-        RETURNING id
-    ", [
-        $studyAreaId,
-        $runLabel,
-        $runDate,                               // can be null
-        $visibility,
-        $description !== '' ? $description : null,
-        null,                                   // created_by
-        null,                                   // period_start
-        null,                                   // period_end
-        'MONTHLY',
-    ]);
-
-    $runId = (int)($row['id'] ?? 0);
-    if ($runId <= 0) {
-        throw new RuntimeException('Failed to create swat_runs row');
-    }
-
-    $tmpHru = 'tmp_hru_import_' . $runId;
-    $tmpRch = 'tmp_rch_import_' . $runId;
-    $tmpSnu = 'tmp_snu_import_' . $runId;
-
-    // ------------------------------------------------------------------
-    // 4. Copy uploaded files to a safe place
-    // ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// 4. Copy uploaded files to a safe place
+// ------------------------------------------------------------------
     $csv = ['hru' => null, 'rch' => null, 'snu' => null];
 
     if ($in['hru_csv']) {
@@ -387,6 +337,83 @@ try {
         throw new RuntimeException('No input CSV files provided (HRU/RCH/SNU).');
     }
 
+    $pg = pgConnFromEnv();
+    pgExec($pg, "SET synchronous_commit = OFF");
+    pgExec($pg, "SET temp_buffers = '64MB'");
+    pgExec($pg, "SET search_path = public");
+
+    pgExec($pg, "BEGIN");
+    $txStarted = true;
+
+    $info = pgOne($pg, "SELECT current_schema() s, current_setting('search_path') sp");
+    error_log('[import_run] schema/search_path: ' . json_encode($info));
+
+    $exists = pgValue($pg,
+        "SELECT 1 FROM study_areas WHERE id = $1 AND enabled = TRUE",
+        [$studyAreaId]
+    );
+    if (!$exists) {
+        pgExec($pg, "ROLLBACK");
+        $txStarted = false;
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid or disabled study area']);
+        @pg_close($pg);
+        exit;
+    }
+
+    $res = pg_query($pg, "SELECT inet_server_addr() addr, inet_server_port() port, current_database() db, current_schema() schema, current_user usr");
+    error_log('[import_run] PG conn: ' . json_encode(pg_fetch_assoc($res)));
+
+    // ------------------------------------------------------------------
+    // 2. Check uniqueness within study area
+    // ------------------------------------------------------------------
+    $dup = pgValue($pg,
+        "SELECT 1 FROM swat_runs WHERE study_area = $1 AND run_label = $2",
+        [$studyAreaId, $runLabel]
+    );
+    if ($dup) {
+        if ($txStarted) { pgExec($pg, "ROLLBACK"); $txStarted = false; }
+        @pg_close($pg);
+        http_response_code(409);
+        echo json_encode(['error' => 'A run with this scenario name already exists for this study area; choose a different name']);
+        exit;
+    }
+
+    // ------------------------------------------------------------------
+    // 3. Create run
+    // ------------------------------------------------------------------
+    $row = pgOne($pg, "
+        INSERT INTO swat_runs
+          (study_area, run_label, run_date,
+           visibility, description, created_by,
+           period_start, period_end, time_step)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        RETURNING id
+    ", [
+        $studyAreaId,
+        $runLabel,
+        $runDate,                               // can be null
+        $visibility,
+        $description !== '' ? $description : null,
+        null,                                   // created_by
+        null,                                   // period_start
+        null,                                   // period_end
+        'MONTHLY',
+    ]);
+
+    $runId = (int)($row['id'] ?? 0);
+    if ($runId <= 0) {
+        throw new RuntimeException('Failed to create swat_runs row');
+    }
+
+    $tmpHru = 'tmp_hru_import_' . $runId;
+    $tmpRch = 'tmp_rch_import_' . $runId;
+    $tmpSnu = 'tmp_snu_import_' . $runId;
+
+    $tmpHruQ = pgIdent($pg, 'public', $tmpHru);
+    $tmpRchQ = pgIdent($pg, 'public', $tmpRch);
+    $tmpSnuQ = pgIdent($pg, 'public', $tmpSnu);
+
     // ------------------------------------------------------------------
     // 5. HRU KPI via COPY + staging
     // ------------------------------------------------------------------
@@ -417,8 +444,8 @@ try {
         assertRequiredColumns($idx, $requiredHru, 'HRU');
 
         // 5.1. Create staging table with full SWAT HRU layout (UNLOGGED = faster)
-        pgExec($pg, "DROP TABLE IF EXISTS {$tmpHru}");
-        pgExec($pg, "CREATE UNLOGGED TABLE {$tmpHru} (
+        pgExec($pg, "DROP TABLE IF EXISTS {$tmpHruQ}");
+        pgExec($pg, "CREATE UNLOGGED TABLE {$tmpHruQ} (
                 LULC        VARCHAR(16),
                 HRU         INTEGER,
                 HRUGIS      INTEGER,
@@ -506,8 +533,13 @@ try {
             )
         ");
 
-        // 5.2. COPY from CSV into staging table
-        pgCopyFromCsvFile($pg, $tmpHru, $path, $fieldSep);
+        $tbl = pgValue($pg, "SELECT to_regclass($1)", ["public.$tmpHru"]);
+        error_log('[import_run] to_regclass HRU = ' . var_export($tbl, true));
+        if (!$tbl) {
+            throw new RuntimeException("Staging table missing right before COPY: public.$tmpHru");
+        }
+
+        pgCopyFromCsvFile($pg, $tmpHruQ, $path, $fieldSep);
 
         // 5.3. Insert into final table with conversion and filtering
         $areaExpr   = pgNumericExpr('AREAkm2',    $decimalSep, $fieldSep);
@@ -567,13 +599,13 @@ try {
                 $pGrazExpr                     AS pgraz_kg_ha,
                 $nCfrtExpr                     AS cfertn_kg_ha,
                 $pCfrtExpr                     AS cfertp_kg_ha
-            FROM {$tmpHru}
+            FROM {$tmpHruQ}
             WHERE YEAR > 0 AND MON > 0
         ";
         pgExec($pg, $sql);
 
         // 5.4. Cleanup staging
-        pgExec($pg, "DROP TABLE IF EXISTS {$tmpHru}");
+        pgExec($pg, "DROP TABLE IF EXISTS {$tmpHruQ}");
     }
 
     // ------------------------------------------------------------------
@@ -600,8 +632,8 @@ try {
         assertRequiredColumns($idx, $requiredRch, 'RCH');
 
         // 6.1. Create staging table (UNLOGGED = faster)
-        pgExec($pg, "DROP TABLE IF EXISTS {$tmpRch}");
-        pgExec($pg, "CREATE UNLOGGED TABLE {$tmpRch} (
+        pgExec($pg, "DROP TABLE IF EXISTS {$tmpRchQ}");
+        pgExec($pg, "CREATE UNLOGGED TABLE {$tmpRchQ} (
                 SUB           INTEGER,
                 YEAR          INTEGER,
                 MON           INTEGER,
@@ -655,8 +687,13 @@ try {
                 YYYYMM        INTEGER
             )");
 
-        // 6.2. COPY CSV into staging table
-        pgCopyFromCsvFile($pg, $tmpRch, $path, $fieldSep);
+        $tbl = pgValue($pg, "SELECT to_regclass($1)", ["public.$tmpRch"]);
+        error_log('[import_run] to_regclass RCH = ' . var_export($tbl, true));
+        if (!$tbl) {
+            throw new RuntimeException("Staging table missing right before COPY: public.$tmpRch");
+        }
+
+        pgCopyFromCsvFile($pg, $tmpRchQ, $path, $fieldSep);
 
         // 6.3. Insert into final table with conversions
         $areaExpr = pgNumericExpr('AREAkm2',      $decimalSep, $fieldSep);
@@ -680,13 +717,13 @@ try {
                 $flowExpr                      AS flow_out_cms,
                 $no3Expr                       AS no3_out_kg,
                 $sedExpr                       AS sed_out_t
-            FROM {$tmpRch}
+            FROM {$tmpRchQ}
             WHERE YEAR > 0 AND MON > 0;
         ";
         pgExec($pg, $sql);
 
         // 6.4. Cleanup staging
-        pgExec($pg, "DROP TABLE IF EXISTS {$tmpRch}");
+        pgExec($pg, "DROP TABLE IF EXISTS {$tmpRchQ}");
     }
 
     // ------------------------------------------------------------------
@@ -713,8 +750,8 @@ try {
         assertRequiredColumns($idx, $requiredSnu, 'SNU');
 
         // 7.1. Create staging table
-        pgExec($pg, "DROP TABLE IF EXISTS {$tmpSnu}");
-        pgExec($pg, "CREATE UNLOGGED TABLE {$tmpSnu} (
+        pgExec($pg, "DROP TABLE IF EXISTS {$tmpSnuQ}");
+        pgExec($pg, "CREATE UNLOGGED TABLE {$tmpSnuQ} (
                 YEAR     INTEGER,
                 DAY      INTEGER,
                 HRUGIS   INTEGER,
@@ -727,8 +764,13 @@ try {
                 YYYYDDD  INTEGER
             )");
 
-        // 7.2. COPY CSV into staging
-        pgCopyFromCsvFile($pg, $tmpSnu, $path, $fieldSep);
+        $tbl = pgValue($pg, "SELECT to_regclass($1)", ["public.$tmpSnu"]);
+        error_log('[import_run] to_regclass SNU = ' . var_export($tbl, true));
+        if (!$tbl) {
+            throw new RuntimeException("Staging table missing right before COPY: public.$tmpSnu");
+        }
+
+        pgCopyFromCsvFile($pg, $tmpSnuQ, $path, $fieldSep);
 
         // 7.3. Insert into final table with conversions + DOY→date
         $solPExpr   = pgNumericExpr('SOL_P',   $decimalSep, $fieldSep);
@@ -757,13 +799,13 @@ try {
                 $orgPExpr                  AS org_p,
                 $cnExpr                    AS cn,
                 $solRsdExpr                AS sol_rsd
-            FROM {$tmpSnu}
+            FROM {$tmpSnuQ}
             WHERE YEAR > 0 AND DAY > 0
         ";
         pgExec($pg, $sql);
 
         // 7.4. Cleanup staging
-        pgExec($pg, "DROP TABLE IF EXISTS {$tmpSnu}");
+        pgExec($pg, "DROP TABLE IF EXISTS {$tmpSnuQ}");
     }
 
     // ------------------------------------------------------------------
@@ -805,9 +847,17 @@ try {
     }
 
     // Always attempt cleanup if names exist
-    if (isset($pg) && $pg && isset($tmpHru, $tmpRch, $tmpSnu)) {
+    if ($pg) {
         try {
-            dropStagingTablesPg($pg, $tmpHru, $tmpRch, $tmpSnu);
+            dropStagingTablesPg(
+                $pg,
+                $tmpHruQ ?? null,
+                $tmpRchQ ?? null,
+                $tmpSnuQ ?? null,
+                $tmpHru  ?? null,
+                $tmpRch  ?? null,
+                $tmpSnu  ?? null
+            );
         } catch (Throwable $ignored) {
             error_log('[import_run] staging cleanup failed: ' . $ignored->getMessage());
         }
