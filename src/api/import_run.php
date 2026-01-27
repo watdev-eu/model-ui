@@ -122,6 +122,62 @@ function pgIdent($pg, string $schema, string $name): string
     return pg_escape_identifier($pg, $schema) . '.' . pg_escape_identifier($pg, $name);
 }
 
+function normalizeCsvToTemp(string $srcPath, string $delimiter, string $enclosure = '"', string $escape = "\\"): string
+{
+    $in = fopen($srcPath, 'rb');
+    if (!$in) throw new RuntimeException("Cannot open CSV: $srcPath");
+
+    $tmp = tempnam(sys_get_temp_dir(), 'csvnorm_');
+    $out = fopen($tmp, 'wb');
+    if (!$out) throw new RuntimeException("Cannot create temp CSV: $tmp");
+
+    // Read header
+    $headerLine = fgets($in);
+    if ($headerLine === false) throw new RuntimeException("CSV empty: $srcPath");
+
+    $header = str_getcsv(rtrim($headerLine, "\r\n"), $delimiter, $enclosure, $escape);
+    $expectedCols = count($header);
+
+    // Write header back out cleanly
+    fputcsv($out, $header, $delimiter, $enclosure, $escape);
+
+    $buffer = '';
+    $lineNo = 1;
+
+    while (!feof($in)) {
+        $line = fgets($in);
+        if ($line === false) break;
+        $lineNo++;
+
+        $buffer .= $line;
+
+        // Try to parse current buffer as a CSV record
+        $record = str_getcsv(rtrim($buffer, "\r\n"), $delimiter, $enclosure, $escape);
+
+        // If it doesn't match expected col count, it might be a multiline field: keep buffering
+        if (count($record) !== $expectedCols) {
+            continue;
+        }
+
+        // It matches: write normalized record and reset buffer
+        fputcsv($out, $record, $delimiter, $enclosure, $escape);
+        $buffer = '';
+    }
+
+    // If buffer left, it means last record never matched expected columns
+    if (trim($buffer) !== '') {
+        fclose($in);
+        fclose($out);
+        @unlink($tmp);
+        throw new RuntimeException("CSV appears malformed near end (unfinished record).");
+    }
+
+    fclose($in);
+    fclose($out);
+
+    return $tmp;
+}
+
 // Build case-insensitive header index
 function makeHeaderIndex(array $header): array
 {
@@ -361,8 +417,8 @@ try {
         exit;
     }
 
-    $res = pg_query($pg, "SELECT inet_server_addr() addr, inet_server_port() port, current_database() db, current_schema() schema, current_user usr");
-    error_log('[import_run] PG conn: ' . json_encode(pg_fetch_assoc($res)));
+    $ctx = pgOne($pg, "SELECT inet_server_addr() addr, inet_server_port() port, current_database() db, current_schema() schema, current_user usr");
+    error_log('[import_run] PG conn: ' . json_encode($ctx));
 
     // ------------------------------------------------------------------
     // 2. Check uniqueness within study area
@@ -539,7 +595,9 @@ try {
             throw new RuntimeException("Staging table missing right before COPY: public.$tmpHru");
         }
 
-        pgCopyFromCsvFile($pg, $tmpHruQ, $path, $fieldSep);
+        $normalized = normalizeCsvToTemp($path, $fieldSep);
+        pgCopyFromCsvFile($pg, $tmpHruQ, $normalized, $fieldSep);
+        @unlink($normalized);
 
         // 5.3. Insert into final table with conversion and filtering
         $areaExpr   = pgNumericExpr('AREAkm2',    $decimalSep, $fieldSep);
@@ -693,7 +751,9 @@ try {
             throw new RuntimeException("Staging table missing right before COPY: public.$tmpRch");
         }
 
-        pgCopyFromCsvFile($pg, $tmpRchQ, $path, $fieldSep);
+        $normalized = normalizeCsvToTemp($path, $fieldSep);
+        pgCopyFromCsvFile($pg, $tmpRchQ, $normalized, $fieldSep);
+        @unlink($normalized);
 
         // 6.3. Insert into final table with conversions
         $areaExpr = pgNumericExpr('AREAkm2',      $decimalSep, $fieldSep);
@@ -770,7 +830,9 @@ try {
             throw new RuntimeException("Staging table missing right before COPY: public.$tmpSnu");
         }
 
-        pgCopyFromCsvFile($pg, $tmpSnuQ, $path, $fieldSep);
+        $normalized = normalizeCsvToTemp($path, $fieldSep);
+        pgCopyFromCsvFile($pg, $tmpSnuQ, $normalized, $fieldSep);
+        @unlink($normalized);
 
         // 7.3. Insert into final table with conversions + DOY→date
         $solPExpr   = pgNumericExpr('SOL_P',   $decimalSep, $fieldSep);

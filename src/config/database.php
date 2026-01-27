@@ -1,4 +1,5 @@
 <?php
+//config/database.php
 require_once __DIR__ . '/app.php';
 
 final class Database {
