@@ -127,7 +127,7 @@ if ($varSet) {
         ON vvc.crop_code = c.code
        AND vvc.variable_id = v.id
        AND vvc.variable_set_id = :vs
-      WHERE v.key IN ('crop_price_usd_per_t','prod_cost_ref_usd_per_t')
+      WHERE v.key IN ('crop_price_usd_per_t')
       ORDER BY c.code, v.key
     ");
     $stmt->execute([':vs' => (int)$varSet['id']]);
@@ -196,17 +196,17 @@ if ($varSet) {
     // 2) BMP cost per crop per run
     if ($runId > 0) {
         $stmt = $pdo->prepare("
-      SELECT c.code crop_code, c.name crop_name, v.key, v.data_type,
-             vvcr.value_num, vvcr.value_text, vvcr.value_bool
-      FROM crops c
-      JOIN mca_variables v ON v.key = 'prod_cost_bmp_usd_ha'
-      LEFT JOIN mca_variable_values_crop_run vvcr
-        ON vvcr.crop_code = c.code
-       AND vvcr.variable_id = v.id
-       AND vvcr.variable_set_id = :vs
-       AND vvcr.run_id = :run
-      ORDER BY c.code
-    ");
+          SELECT c.code crop_code, c.name crop_name, v.key, v.data_type,
+                 vvcr.value_num, vvcr.value_text, vvcr.value_bool
+          FROM crops c
+          JOIN mca_variables v ON v.key = 'prod_cost_bmp_usd_ha'
+          LEFT JOIN mca_variable_values_crop_run vvcr
+            ON vvcr.crop_code = c.code
+           AND vvcr.variable_id = v.id
+           AND vvcr.variable_set_id = :vs
+           AND vvcr.run_id = :run
+          ORDER BY c.code
+        ");
         $stmt->execute([':vs' => (int)$varSet['id'], ':run' => $runId]);
         $cropBmp = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
@@ -214,17 +214,17 @@ if ($varSet) {
     // 3) REF cost per crop per baseline run
     if ($baselineRunId > 0) {
         $stmt = $pdo->prepare("
-      SELECT c.code crop_code, c.name crop_name, v.key, v.data_type,
-             vvcr.value_num, vvcr.value_text, vvcr.value_bool
-      FROM crops c
-      JOIN mca_variables v ON v.key = 'prod_cost_ref_usd_per_t'
-      LEFT JOIN mca_variable_values_crop_run vvcr
-        ON vvcr.crop_code = c.code
-       AND vvcr.variable_id = v.id
-       AND vvcr.variable_set_id = :vs
-       AND vvcr.run_id = :run
-      ORDER BY c.code
-    ");
+          SELECT c.code crop_code, c.name crop_name, v.key, v.data_type,
+                 vvcr.value_num, vvcr.value_text, vvcr.value_bool
+          FROM crops c
+          JOIN mca_variables v ON v.key = 'prod_cost_bmp_usd_ha'
+          LEFT JOIN mca_variable_values_crop_run vvcr
+            ON vvcr.crop_code = c.code
+           AND vvcr.variable_id = v.id
+           AND vvcr.variable_set_id = :vs
+           AND vvcr.run_id = :run
+          ORDER BY c.code
+        ");
         $stmt->execute([':vs' => (int)$varSet['id'], ':run' => $baselineRunId]);
         $cropRef = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }

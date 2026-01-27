@@ -339,6 +339,99 @@ $runs       = SwatRunRepository::all();
         </div>
     </div>
 
+    <!-- MCA defaults -->
+    <div class="card mb-4" id="mca-defaults-card"
+         data-api-url="/api/mca_defaults_admin.php"
+         data-csrf="<?= htmlspecialchars($csrfToken, ENT_QUOTES) ?>">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h2 class="h5 mb-0">MCA defaults</h2>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="mcaDefaultsReloadBtn">
+                    Reload
+                </button>
+                <button type="button" class="btn btn-sm btn-primary" id="mcaDefaultsSaveBtn" disabled>
+                    Save MCA defaults
+                </button>
+            </div>
+        </div>
+
+        <div class="card-body">
+            <p class="text-muted">
+                Manage study-area MCA defaults and per-crop baseline values used in MCA. Scenario overrides come later.
+            </p>
+
+            <div class="row g-3 align-items-end mb-3">
+                <div class="col-12 col-md-6">
+                    <label class="form-label mb-1">Study area</label>
+                    <select class="form-select form-select-sm" id="mcaDefaultsStudyAreaSelect">
+                        <option value="">Loading study areas…</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-6">
+                    <div class="small text-muted">
+                        Variable set: <span class="mono" id="mcaDefaultsVarSetLabel">—</span>
+                    </div>
+                    <div class="small text-muted">
+                        Crops in runs: <span class="mono" id="mcaDefaultsCropsCount">—</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row g-3 align-items-end mb-3">
+                <div class="col-12 col-md-6">
+                    <label class="form-label mb-1">Scenario (optional override)</label>
+                    <select class="form-select form-select-sm" id="mcaDefaultsRunSelect" disabled>
+                        <option value="">Use study-area defaults</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="row g-3 mt-1">
+                <div class="col-12">
+                    <div class="border rounded p-3">
+                        <div class="fw-semibold mb-2">Scenario inputs (selected run)</div>
+
+                        <div class="small text-muted mb-2">
+                            Select a scenario above to edit run-specific inputs.
+                        </div>
+
+                        <div class="row g-2" id="mcaDefaultsRunForm"><!-- filled by JS --></div>
+
+                        <div class="mt-3" id="mcaDefaultsRunCropBlock" style="display:none;">
+                            <div class="fw-semibold mb-2">Crop BMP production cost (crops in this scenario)</div>
+                            <div class="table-responsive" id="mcaDefaultsRunCropTableWrap"><!-- filled by JS --></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="mcaDefaultsStatus" class="small text-muted mb-2"></div>
+
+            <div class="row g-3">
+                <div class="col-12">
+                    <div class="border rounded p-3">
+                        <div class="fw-semibold mb-2">Global defaults (study area)</div>
+                        <div class="row g-2" id="mcaDefaultsGlobalForm">
+                            <!-- filled by JS -->
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12">
+                    <div class="border rounded p-3">
+                        <div class="fw-semibold mb-2">Crop defaults (from crops present in model runs)</div>
+                        <div class="table-responsive" id="mcaDefaultsCropTableWrap">
+                            <!-- filled by JS -->
+                        </div>
+                        <div class="form-text small mt-2">
+                            Only crops that occur in imported runs for this study area are listed.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
 <!-- Crop delete confirmation modal -->
 <div class="modal fade" id="cropDeleteModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -416,4 +509,5 @@ $runs       = SwatRunRepository::all();
 
 <script src="/assets/js/data-crops.js"></script>
 <script src="/assets/js/data-runs.js"></script>
+<script src="/assets/js/data-mca-defaults.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/ol@latest/dist/ol.js"></script>

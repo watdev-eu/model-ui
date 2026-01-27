@@ -16,6 +16,9 @@ export function initMcaController({ apiBase, els }) {
 
     let runCropsById = {}; // runId -> [crop codes]
 
+    let baselineRunId = null;
+    let cropRefByCrop = new Map(); // crop_code -> value_num (baseline prod_cost_bmp_usd_ha)
+
     // Scenario state
     let availableRuns = [];           // [{id,label,run_date}]
     let includedRunIds = new Set();   // approach 1: defaults to selected runs
@@ -87,7 +90,7 @@ export function initMcaController({ apiBase, els }) {
         { key: 'time_horizon_years',   label: 'Time horizon / economic life (years)', type: 'number' },
         { key: 'discount_rate',        label: 'Discount rate (0–1)', type: 'number' },
         { key: 'bmp_invest_cost_usd_ha',label: 'BMP investment cost (USD/ha)', type: 'number' },
-        { key: 'bmp_annual_cost_usd_ha',label: 'BMP annual cost (USD/ha/yr)', type: 'number' },
+        { key: 'bmp_annual_om_cost_usd_ha', label: 'BMP annual O&M cost (USD/ha/year)', type: 'number' },
     ];
 
     function upsertRunVarValue(runId, key, numOrNull) {
@@ -240,10 +243,6 @@ export function initMcaController({ apiBase, els }) {
         } else {
             allowedCropSet = new Set(cropCodes.map(c => String(c)));
         }
-        // Crop table in modal depends on allowed crops
-        if (els.mcaCropVarsForm && currentCropVars.length) {
-            // re-render only if modal is open; safe no-op otherwise
-        }
         // Scenario cards show crop BMP costs too
         renderScenarioCards();
     }
@@ -375,7 +374,7 @@ export function initMcaController({ apiBase, els }) {
 
         const KEYS = [
             { key: 'crop_price_usd_per_t', label: 'Crop price (USD/t)' },
-            { key: 'prod_cost_ref_usd_per_t', label: 'Production cost REF (USD/t)' },
+            { key: 'prod_cost_ref_usd_ha', label: 'Production cost REF (USD/ha — baseline default)' },
         ];
 
         const byCrop = new Map();
@@ -419,18 +418,41 @@ export function initMcaController({ apiBase, els }) {
                       <div class="text-muted small mono">${escapeHtml(c.crop_code)}</div>
                     </td>
                     ${KEYS.map(k => {
-                const row = c.vars.find(v => v.key === k.key);
-                const val = row?.value_num ?? '';
-                return `
+                        if (k.key === 'crop_price_usd_per_t') {
+                            const row = c.vars.find(v => v.key === 'crop_price_usd_per_t');
+                            const val = row?.value_num ?? '';
+                            return `
+                              <td>
+                                <input class="form-control form-control-sm mono mca-crop-global"
+                                       data-crop="${escapeHtml(c.crop_code)}"
+                                       data-key="crop_price_usd_per_t"
+                                       type="number" step="any"
+                                       value="${escapeHtml(String(val ?? ''))}">
+                              </td>
+                            `;
+                        }
+                        
+                        // REF: allow override stored in currentCropVars; fallback to baseline
+                        const overrideRow = c.vars.find(v => v.key === 'prod_cost_ref_usd_ha');
+                        const overrideVal = (overrideRow?.value_num == null) ? null : Number(overrideRow.value_num);
+            
+                        const baseVal = cropRefByCrop.get(String(c.crop_code));
+                        const shownVal = (overrideVal != null && Number.isFinite(overrideVal)) ? overrideVal : baseVal;
+            
+                        const shown = (shownVal == null) ? '' : String(shownVal);
+                        const hint  = baselineRunId ? `baseline run_id: ${baselineRunId}` : 'baseline not found';
+            
+                        return `
                           <td>
-                            <input class="form-control form-control-sm mono mca-crop-global"
+                            <input class="form-control form-control-sm mono mca-crop-ref"
                                    data-crop="${escapeHtml(c.crop_code)}"
-                                   data-key="${escapeHtml(k.key)}"
+                                   data-key="prod_cost_ref_usd_ha"
                                    type="number" step="any"
-                                   value="${escapeHtml(String(val ?? ''))}">
+                                   value="${escapeHtml(shown)}">
+                            <div class="form-text small text-muted">${escapeHtml(hint)}</div>
                           </td>
                         `;
-            }).join('')}
+                    }).join('')}
                   </tr>
                 `).join('')}
               </tbody>
@@ -442,6 +464,20 @@ export function initMcaController({ apiBase, els }) {
             inp.addEventListener('input', () => {
                 const crop = inp.dataset.crop;
                 const key  = inp.dataset.key;
+                const txt  = String(inp.value ?? '').trim();
+                const num  = (txt === '') ? null : Number(txt);
+
+                upsert(crop, key, {
+                    data_type: 'number',
+                    value_num: (num !== null && Number.isFinite(num)) ? num : null
+                });
+            });
+        });
+
+        els.mcaCropGlobalsWrap.querySelectorAll('.mca-crop-ref').forEach(inp => {
+            inp.addEventListener('input', () => {
+                const crop = inp.dataset.crop;
+                const key  = inp.dataset.key; // prod_cost_ref_usd_ha
                 const txt  = String(inp.value ?? '').trim();
                 const num  = (txt === '') ? null : Number(txt);
 
@@ -742,7 +778,7 @@ export function initMcaController({ apiBase, els }) {
         els.mcaComputeBtn.disabled = !ok;
     }
 
-    // ---------- Modal editor ----------
+    // ---------- MCA form rendering ----------
     function renderVarsForm(vars, targetEl = els.mcaVarsForm) {
         if (!targetEl) return;
 
@@ -802,95 +838,6 @@ export function initMcaController({ apiBase, els }) {
         });
     }
 
-    function renderCropVarsForm(rows) {
-        if (!els.mcaCropVarsForm) return;
-
-        const KEYS = [
-            { key: 'crop_price_usd_per_t', label: 'Crop price (USD/t)', type: 'number' },
-            { key: 'prod_cost_bmp_usd_ha', label: 'Production cost BMP (USD/ha)', type: 'number' },
-            { key: 'prod_cost_ref_usd_per_t', label: 'Production cost REF (USD/t)', type: 'number' },
-        ];
-
-        const byCrop = new Map();
-        for (const r of rows) {
-            const code = r.crop_code;
-            if (!byCrop.has(code)) byCrop.set(code, { crop_code: code, crop_name: r.crop_name, vars: [] });
-            byCrop.get(code).vars.push(r);
-        }
-
-        let crops = Array.from(byCrop.values());
-        if (allowedCropSet) {
-            crops = crops.filter(c => allowedCropSet.has(String(c.crop_code)));
-        }
-
-        els.mcaCropVarsForm.innerHTML = `
-      <div class="table-responsive">
-        <table class="table table-sm align-middle">
-          <thead>
-            <tr>
-              <th>Crop</th>
-              ${KEYS.map(k => `<th>${escapeHtml(k.label)}</th>`).join('')}
-            </tr>
-          </thead>
-          <tbody>
-            ${crops.map(c => {
-            return `
-                <tr>
-                  <td>
-                    <div class="fw-semibold">${escapeHtml(c.crop_name || c.crop_code)}</div>
-                    <div class="text-muted small mono">${escapeHtml(c.crop_code)}</div>
-                  </td>
-                  ${KEYS.map(k => {
-                const row = c.vars.find(v => v.key === k.key);
-                const val = row?.value_num ?? '';
-                return `
-                      <td style="min-width:180px">
-                        <input class="form-control form-control-sm mca-crop-var"
-                               data-crop="${escapeHtml(c.crop_code)}"
-                               data-key="${escapeHtml(k.key)}"
-                               type="${k.type}" step="any"
-                               value="${escapeHtml(String(val ?? ''))}">
-                      </td>
-                    `;
-            }).join('')}
-                </tr>
-              `;
-        }).join('')}
-          </tbody>
-        </table>
-      </div>
-      <div class="form-text small">
-        These are per-crop economic inputs used by the MCA post-processing indicators.
-      </div>
-    `;
-
-        function upsertCropVar(crop, key, patch) {
-            let row = rows.find(r => r.crop_code === crop && r.key === key);
-            if (!row) {
-                row = { crop_code: crop, crop_name: (byCrop.get(crop)?.crop_name ?? crop), key, data_type: 'number' };
-                rows.push(row);
-            }
-            Object.assign(row, patch);
-        }
-
-        els.mcaCropVarsForm.querySelectorAll('.mca-crop-var').forEach(inp => {
-            inp.addEventListener('input', () => {
-                const crop = inp.dataset.crop;
-                const key  = inp.dataset.key;
-                const txt  = String(inp.value ?? '').trim();
-                const num  = (txt === '') ? null : Number(txt);
-
-                upsertCropVar(crop, key, {
-                    data_type: 'number',
-                    value_num: (num !== null && Number.isFinite(num)) ? num : null
-                });
-
-                // refresh crop globals accordion quickly
-                renderCropGlobalsAccordion();
-            });
-        });
-    }
-
     async function loadActivePreset(saId) {
         studyAreaId = saId;
 
@@ -927,6 +874,16 @@ export function initMcaController({ apiBase, els }) {
 
         defaultVars = sortVars((json.variables || []).map(x => ({ ...x })));
         currentVars = sortVars((json.variables || []).map(x => ({ ...x })));
+
+        baselineRunId = Number(json.baseline_run_id ?? null);
+
+        // Build baseline REF map from API field crop_ref_cost
+        cropRefByCrop = new Map();
+        for (const r of (json.crop_ref_cost || [])) {
+            const code = String(r.crop_code);
+            const num  = (r.value_num == null) ? null : Number(r.value_num);
+            cropRefByCrop.set(code, Number.isFinite(num) ? num : null);
+        }
 
         renderIndicatorsAccordion();
         renderCropGlobalsAccordion();

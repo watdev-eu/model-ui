@@ -54,7 +54,7 @@ $runVarKeys = [
     'time_horizon_years',
     'discount_rate',
     'bmp_invest_cost_usd_ha',
-    'bmp_annual_cost_usd_ha',
+    'bmp_annual_om_cost_usd_ha',
 ];
 
 $placeholders = implode(',', array_fill(0, count($runVarKeys), '?'));
