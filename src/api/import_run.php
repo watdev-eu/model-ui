@@ -17,9 +17,6 @@ require_once __DIR__ . '/../config/database.php';
 
 header('Content-Type: application/json');
 
-$pdo = Database::pdo();
-$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-
 // ------------------------------------------------------------------
 // 1. Read & validate metadata
 // ------------------------------------------------------------------
@@ -32,15 +29,6 @@ $description = trim($_POST['description'] ?? '');
 if ($studyAreaId <= 0 || !$runLabel) {
     http_response_code(400);
     echo json_encode(['error' => 'study_area and run_label are required']);
-    exit;
-}
-
-// Validate that the study area exists (and maybe is enabled)
-$chk = $pdo->prepare("SELECT id FROM study_areas WHERE id = :id AND enabled = TRUE");
-$chk->execute([':id' => $studyAreaId]);
-if (!$chk->fetchColumn()) {
-    http_response_code(400);
-    echo json_encode(['error' => 'Invalid or disabled study area']);
     exit;
 }
 
@@ -72,14 +60,6 @@ if ($fieldSep === '\\t') {
 // - If field separator is comma, assume decimals are dots (standard CSV).
 // - Otherwise (semicolon or tab), assume European-style comma decimals.
 $decimalSep = ($fieldSep === ',') ? '.' : ',';
-
-$uploadDir = UPLOAD_DIR;
-if (!is_dir($uploadDir) && !mkdir($uploadDir, 0775, true)) {
-    throw new RuntimeException("Failed to create upload dir: $uploadDir");
-}
-if (!is_writable($uploadDir)) {
-    throw new RuntimeException("Upload dir not writable: $uploadDir");
-}
 
 $in = [
     'hru_csv' => $_FILES['hru_csv']['tmp_name'] ?? ($_POST['hru_csv_path'] ?? null),
@@ -117,6 +97,24 @@ function pgNumericExpr(string $col, string $decimalSep, string $fieldSep): strin
 
     // For standard dot-decimals
     return "NULLIF($col, '')::double precision";
+}
+
+function pgOne($pg, string $sql, array $params = []): ?array
+{
+    $res = pg_query_params($pg, $sql, $params);
+    if ($res === false) {
+        throw new RuntimeException('Postgres error: ' . pg_last_error($pg) . ' | SQL: ' . $sql);
+    }
+    $row = pg_fetch_assoc($res);
+    return $row ?: null;
+}
+
+function pgValue($pg, string $sql, array $params = [])
+{
+    $row = pgOne($pg, $sql, $params);
+    if (!$row) return null;
+    // return first column value
+    return array_values($row)[0] ?? null;
 }
 
 // Build case-insensitive header index
@@ -232,37 +230,61 @@ function pgCopyFromCsvFile($pg, string $table, string $path, string $fieldSep): 
     }
 }
 
-function dropStagingTables(PDO $pdo, ?string ...$tables): void
+function dropStagingTablesPg($pg, ?string ...$tables): void
 {
     foreach ($tables as $t) {
-        if ($t) {
-            $pdo->exec("DROP TABLE IF EXISTS {$t}");
-        }
+        if (!$t) continue;
+        if (!preg_match('/^tmp_(hru|rch|snu)_import_\d+$/', $t)) continue;
+        @pg_query($pg, "DROP TABLE IF EXISTS {$t}");
     }
 }
 
+$pg = null;
+$txStarted = false;
 $runId = null;
 
 try {
-    $pdo->beginTransaction();
-    $pdo->exec("SET LOCAL synchronous_commit = OFF;");
-    $pdo->exec("SET LOCAL temp_buffers = '64MB';");
-
     $pg = pgConnFromEnv();
-
-    // Apply same performance settings on the pgsql session too (COPY happens there)
     pgExec($pg, "SET synchronous_commit = OFF");
     pgExec($pg, "SET temp_buffers = '64MB'");
-
     pgExec($pg, "SET search_path = public");
+
+    pgExec($pg, "BEGIN");
+    $txStarted = true;
+
+    $exists = pgValue($pg,
+        "SELECT 1 FROM study_areas WHERE id = $1 AND enabled = TRUE",
+        [$studyAreaId]
+    );
+    if (!$exists) {
+        pgExec($pg, "ROLLBACK");
+        $txStarted = false;
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid or disabled study area']);
+        @pg_close($pg);
+        exit;
+    }
+
+    $uploadDir = UPLOAD_DIR;
+    if (!is_dir($uploadDir) && !mkdir($uploadDir, 0775, true)) {
+        throw new RuntimeException("Failed to create upload dir: $uploadDir");
+    }
+    if (!is_writable($uploadDir)) {
+        throw new RuntimeException("Upload dir not writable: $uploadDir");
+    }
+
+    $res = pg_query($pg, "SELECT inet_server_addr() addr, inet_server_port() port, current_database() db, current_schema() schema, current_user usr");
+    error_log('[import_run] PG conn: ' . json_encode(pg_fetch_assoc($res)));
 
     // ------------------------------------------------------------------
     // 2. Check uniqueness within study area
     // ------------------------------------------------------------------
-    $sel = $pdo->prepare("SELECT id FROM swat_runs WHERE study_area = ? AND run_label = ?");
-    $sel->execute([$studyAreaId, $runLabel]);
-    if ($sel->fetchColumn()) {
-        $pdo->rollBack();
+    $dup = pgValue($pg,
+        "SELECT 1 FROM swat_runs WHERE study_area = $1 AND run_label = $2",
+        [$studyAreaId, $runLabel]
+    );
+    if ($dup) {
+        if ($txStarted) { pgExec($pg, "ROLLBACK"); $txStarted = false; }
         http_response_code(409);
         echo json_encode(['error' => 'A run with this scenario name already exists for this study area; choose a different name']);
         exit;
@@ -271,27 +293,29 @@ try {
     // ------------------------------------------------------------------
     // 3. Create run
     // ------------------------------------------------------------------
-    $ins = $pdo->prepare("
+    $row = pgOne($pg, "
         INSERT INTO swat_runs
           (study_area, run_label, run_date,
            visibility, description, created_by,
            period_start, period_end, time_step)
-        VALUES (?,?,?,?,?,?,?,?,?)
-        RETURNING id;
-    ");
-
-    $ins->execute([
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        RETURNING id
+    ", [
         $studyAreaId,
         $runLabel,
-        $runDate,
+        $runDate,                               // can be null
         $visibility,
         $description !== '' ? $description : null,
-        null,   // created_by
-        null,   // period_start
-        null,   // period_end
+        null,                                   // created_by
+        null,                                   // period_start
+        null,                                   // period_end
         'MONTHLY',
     ]);
-    $runId = (int)$ins->fetchColumn();
+
+    $runId = (int)($row['id'] ?? 0);
+    if ($runId <= 0) {
+        throw new RuntimeException('Failed to create swat_runs row');
+    }
 
     $tmpHru = 'tmp_hru_import_' . $runId;
     $tmpRch = 'tmp_rch_import_' . $runId;
@@ -393,9 +417,8 @@ try {
         assertRequiredColumns($idx, $requiredHru, 'HRU');
 
         // 5.1. Create staging table with full SWAT HRU layout (UNLOGGED = faster)
-        $pdo->exec("
-            DROP TABLE IF EXISTS {$tmpHru};
-            CREATE UNLOGGED TABLE {$tmpHru} (
+        pgExec($pg, "DROP TABLE IF EXISTS {$tmpHru}");
+        pgExec($pg, "CREATE UNLOGGED TABLE {$tmpHru} (
                 LULC        VARCHAR(16),
                 HRU         INTEGER,
                 HRUGIS      INTEGER,
@@ -480,7 +503,7 @@ try {
                 TNO3kg_ha   TEXT,
                 LNO3kg_ha   TEXT,
                 YYYYMM      INTEGER
-            );
+            )
         ");
 
         // 5.2. COPY from CSV into staging table
@@ -545,12 +568,12 @@ try {
                 $nCfrtExpr                     AS cfertn_kg_ha,
                 $pCfrtExpr                     AS cfertp_kg_ha
             FROM {$tmpHru}
-            WHERE YEAR > 0 AND MON > 0;
+            WHERE YEAR > 0 AND MON > 0
         ";
-        $pdo->exec($sql);
+        pgExec($pg, $sql);
 
         // 5.4. Cleanup staging
-        $pdo->exec("DROP TABLE IF EXISTS {$tmpHru}");
+        pgExec($pg, "DROP TABLE IF EXISTS {$tmpHru}");
     }
 
     // ------------------------------------------------------------------
@@ -577,9 +600,8 @@ try {
         assertRequiredColumns($idx, $requiredRch, 'RCH');
 
         // 6.1. Create staging table (UNLOGGED = faster)
-        $pdo->exec("
-            DROP TABLE IF EXISTS {$tmpRch};
-            CREATE UNLOGGED TABLE {$tmpRch} (
+        pgExec($pg, "DROP TABLE IF EXISTS {$tmpRch}");
+        pgExec($pg, "CREATE UNLOGGED TABLE {$tmpRch} (
                 SUB           INTEGER,
                 YEAR          INTEGER,
                 MON           INTEGER,
@@ -631,8 +653,7 @@ try {
                 NO3CONCmg_l   TEXT,
                 WTMPdegc      TEXT,
                 YYYYMM        INTEGER
-            );
-        ");
+            )");
 
         // 6.2. COPY CSV into staging table
         pgCopyFromCsvFile($pg, $tmpRch, $path, $fieldSep);
@@ -662,10 +683,10 @@ try {
             FROM {$tmpRch}
             WHERE YEAR > 0 AND MON > 0;
         ";
-        $pdo->exec($sql);
+        pgExec($pg, $sql);
 
         // 6.4. Cleanup staging
-        $pdo->exec("DROP TABLE IF EXISTS {$tmpRch}");
+        pgExec($pg, "DROP TABLE IF EXISTS {$tmpRch}");
     }
 
     // ------------------------------------------------------------------
@@ -692,9 +713,8 @@ try {
         assertRequiredColumns($idx, $requiredSnu, 'SNU');
 
         // 7.1. Create staging table
-        $pdo->exec("
-            DROP TABLE IF EXISTS {$tmpSnu};
-            CREATE UNLOGGED TABLE {$tmpSnu} (
+        pgExec($pg, "DROP TABLE IF EXISTS {$tmpSnu}");
+        pgExec($pg, "CREATE UNLOGGED TABLE {$tmpSnu} (
                 YEAR     INTEGER,
                 DAY      INTEGER,
                 HRUGIS   INTEGER,
@@ -705,8 +725,7 @@ try {
                 ORG_P    TEXT,
                 CN       TEXT,
                 YYYYDDD  INTEGER
-            );
-        ");
+            )");
 
         // 7.2. COPY CSV into staging
         pgCopyFromCsvFile($pg, $tmpSnu, $path, $fieldSep);
@@ -739,37 +758,38 @@ try {
                 $cnExpr                    AS cn,
                 $solRsdExpr                AS sol_rsd
             FROM {$tmpSnu}
-            WHERE YEAR > 0 AND DAY > 0;
+            WHERE YEAR > 0 AND DAY > 0
         ";
-        $pdo->exec($sql);
+        pgExec($pg, $sql);
 
         // 7.4. Cleanup staging
-        $pdo->exec("DROP TABLE IF EXISTS {$tmpSnu}");
+        pgExec($pg, "DROP TABLE IF EXISTS {$tmpSnu}");
     }
 
     // ------------------------------------------------------------------
     // 8. Update period_start / period_end
     // ------------------------------------------------------------------
-    $stats = $pdo->prepare("
+    $range = pgOne($pg, "
         SELECT MIN(period_date) AS min_d, MAX(period_date) AS max_d
         FROM (
-            SELECT period_date FROM swat_hru_kpi WHERE run_id = :id
+            SELECT period_date FROM swat_hru_kpi WHERE run_id = $1
             UNION ALL
-            SELECT period_date FROM swat_rch_kpi WHERE run_id = :id
+            SELECT period_date FROM swat_rch_kpi WHERE run_id = $1
             UNION ALL
-            SELECT period_date FROM swat_snu_kpi WHERE run_id = :id
+            SELECT period_date FROM swat_snu_kpi WHERE run_id = $1
         ) AS u
-    ");
-    $stats->execute([':id' => $runId]);
-    $range = $stats->fetch(PDO::FETCH_ASSOC);
+    ", [$runId]);
 
-    if ($range && $range['min_d']) {
-        $upd = $pdo->prepare("UPDATE swat_runs SET period_start = ?, period_end = ? WHERE id = ?");
-        $upd->execute([$range['min_d'], $range['max_d'], $runId]);
+    if ($range && !empty($range['min_d'])) {
+        pgExec($pg, "UPDATE swat_runs SET period_start = " . pg_escape_literal($pg, $range['min_d']) .
+            ", period_end = " . pg_escape_literal($pg, $range['max_d']) .
+            " WHERE id = " . (int)$runId);
     }
 
-    $pdo->commit();
-    if (isset($pg) && $pg) @pg_close($pg);
+    pgExec($pg, "COMMIT");
+    $txStarted = false;
+
+    @pg_close($pg);
 
     // Clean any previous output, then send clean JSON
     if (ob_get_level()) {
@@ -779,14 +799,15 @@ try {
     exit;
 
 } catch (Throwable $e) {
-    if ($pdo->inTransaction()) {
-        $pdo->rollBack();
+    if ($pg && $txStarted) {
+        pgExec($pg, "ROLLBACK");
+        $txStarted = false;
     }
 
     // Always attempt cleanup if names exist
-    if (isset($tmpHru, $tmpRch, $tmpSnu)) {
+    if (isset($pg) && $pg && isset($tmpHru, $tmpRch, $tmpSnu)) {
         try {
-            dropStagingTables($pdo, $tmpHru, $tmpRch, $tmpSnu);
+            dropStagingTablesPg($pg, $tmpHru, $tmpRch, $tmpSnu);
         } catch (Throwable $ignored) {
             error_log('[import_run] staging cleanup failed: ' . $ignored->getMessage());
         }
