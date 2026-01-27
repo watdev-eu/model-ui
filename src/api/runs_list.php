@@ -38,6 +38,7 @@ try {
                 'id'        => (int)$r['id'],
                 'run_label' => $r['run_label'],
                 'is_default'=> (bool)$r['is_default'],
+                'is_baseline'=> (bool)($r['is_baseline'] ?? false),
                 'run_date'  => $r['run_date'] ?? null,
             ];
         }, $runs)

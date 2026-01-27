@@ -183,29 +183,80 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                     <h2 class="h6 mb-3">Multi-Criteria Analysis (MCA)</h2>
 
                     <div class="mb-2">
-                        <label class="form-label">Preset</label>
-                        <select id="mcaPresetSelect" class="form-select form-select-sm">
-                            <option value="">Select preset…</option>
-                        </select>
+                        <div class="small text-muted">Preset: <span class="fw-semibold">Default for this study area</span></div>
                     </div>
 
-                    <div class="d-flex gap-2 mb-2">
-                        <button class="btn btn-sm btn-outline-primary" id="mcaCloneBtn" disabled>
-                            Clone default
-                        </button>
-                        <button class="btn btn-sm btn-outline-secondary" id="mcaEditBtn" disabled>
-                            Edit weights
-                        </button>
+                    <div class="accordion" id="mcaAccordion">
+
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="mcaHeadIndicators">
+                                <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#mcaIndicators">
+                                    Indicators & weights
+                                </button>
+                            </h2>
+                            <div id="mcaIndicators" class="accordion-collapse collapse show" data-bs-parent="#mcaAccordion">
+                                <div class="accordion-body">
+                                    <div id="mcaIndicatorsTableWrap"></div>
+                                    <div class="d-flex justify-content-between align-items-center mt-2">
+                                        <div class="small text-muted">
+                                            Enabled weight sum: <span class="mono" id="mcaWeightSum">0</span>
+                                        </div>
+                                        <div class="small text-danger" id="mcaEditError" style="display:none"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="mcaHeadCropGlobals">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#mcaCropGlobals">
+                                    Crop variables (global)
+                                </button>
+                            </h2>
+                            <div id="mcaCropGlobals" class="accordion-collapse collapse" data-bs-parent="#mcaAccordion">
+                                <div class="accordion-body">
+                                    <div id="mcaCropGlobalsWrap"></div>
+                                    <div class="form-text small">
+                                        Global crop values used by all scenarios: Crop price and REF production cost.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="mcaHeadGlobals">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#mcaGlobals">
+                                    Variables (global)
+                                </button>
+                            </h2>
+                            <div id="mcaGlobals" class="accordion-collapse collapse" data-bs-parent="#mcaAccordion">
+                                <div class="accordion-body">
+                                    <div id="mcaVarsForm" class="row g-2"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="mcaHeadScenarios">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#mcaScenarios">
+                                    Scenarios in MCA
+                                </button>
+                            </h2>
+                            <div id="mcaScenarios" class="accordion-collapse collapse" data-bs-parent="#mcaAccordion">
+                                <div class="accordion-body">
+                                    <div class="mb-2" id="mcaScenarioPickerWrap"></div>
+                                    <div id="mcaScenarioCards" class="d-flex flex-column gap-2"></div>
+                                </div>
+                            </div>
+                        </div>
+
                     </div>
 
-                    <div class="d-grid mb-2">
-                        <button class="btn btn-sm btn-success" id="mcaComputeBtn" disabled>
-                            Compute MCA
-                        </button>
+                    <div class="d-grid mt-3">
+                        <button class="btn btn-sm btn-success" id="mcaComputeBtn" disabled>Compute MCA</button>
                     </div>
-
-                    <div class="form-text small">
-                        MCA scores are computed per scenario using the selected preset.
+                    <div class="form-text small mt-1">
+                        MCA scores are computed per included scenario.
                     </div>
                 </div>
             </div>
@@ -272,18 +323,15 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                     opacityRivers: document.getElementById('opacityRivers'),
                     opacityRiversVal: document.getElementById('opacityRiversVal'),
                     mapScenario: document.getElementById('mapScenarioSelect'),
-                    mcaPreset: document.getElementById('mcaPresetSelect'),
-                    mcaCloneBtn: document.getElementById('mcaCloneBtn'),
-                    mcaEditBtn: document.getElementById('mcaEditBtn'),
+
                     mcaComputeBtn: document.getElementById('mcaComputeBtn'),
-                    mcaEditModal: document.getElementById('mcaEditModal'),
-                    mcaEditTable: document.getElementById('mcaEditTable'),
+                    mcaIndicatorsTableWrap: document.getElementById('mcaIndicatorsTableWrap'),
                     mcaWeightSum: document.getElementById('mcaWeightSum'),
                     mcaEditError: document.getElementById('mcaEditError'),
-                    mcaResetBtn: document.getElementById('mcaResetBtn'),
-                    mcaSaveOverridesBtn: document.getElementById('mcaSaveOverridesBtn'),
                     mcaVarsForm: document.getElementById('mcaVarsForm'),
-                    mcaCropVarsForm: document.getElementById('mcaCropVarsForm'),
+                    mcaCropGlobalsWrap: document.getElementById('mcaCropGlobalsWrap'),
+                    mcaScenarioPickerWrap: document.getElementById('mcaScenarioPickerWrap'),
+                    mcaScenarioCards: document.getElementById('mcaScenarioCards'),
                 },
                 studyAreaId: initialAreaId,
                 indicators: INDICATORS,
@@ -314,69 +362,5 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
     </script>
 
 <?php endif; ?>
-
-    <!-- MCA Edit Modal -->
-    <div class="modal fade" id="mcaEditModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-scrollable">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">MCA settings</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-
-                <div class="modal-body">
-                    <div class="alert alert-info py-2 small mb-3">
-                        Changes here are temporary and will be used for the next computation.
-                        (Saving presets will be implemented later.)
-                    </div>
-
-                    <div class="mb-3">
-                        <h6 class="mb-2">Indicators</h6>
-                        <table class="table table-sm align-middle" id="mcaEditTable">
-                            <thead></thead>
-                            <tbody></tbody>
-                        </table>
-
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div class="small">
-                                Enabled weights sum:
-                                <span class="mono" id="mcaWeightSum">0.000</span>
-                                <span class="text-muted">(must be 1.000)</span>
-                            </div>
-                            <div class="small text-danger" id="mcaEditError" style="display:none"></div>
-                        </div>
-                    </div>
-
-                    <hr class="my-3">
-
-                    <div class="mb-2">
-                        <h6 class="mb-2">Post-processing variables</h6>
-                        <div id="mcaVarsForm" class="row g-2"></div>
-                        <div class="form-text small">
-                            These values are used for indicators like BCR, income change, labour, etc.
-                        </div>
-                    </div>
-
-                    <hr class="my-3">
-                    <div class="mb-2">
-                        <h6 class="mb-2">Crop variables</h6>
-                        <div id="mcaCropVarsForm" class="row g-2"></div>
-                        <div class="form-text small">
-                            Used for water economic efficiency (e.g., crop price).
-                        </div>
-                    </div>
-                </div>
-
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" id="mcaResetBtn">
-                        Reset to defaults
-                    </button>
-                    <button type="button" class="btn btn-primary" id="mcaSaveOverridesBtn">
-                        Use these values
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

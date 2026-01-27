@@ -81,19 +81,17 @@ export function initSubbasinDashboard({
     const mca = initMcaController({
         apiBase,
         els: {
-            mcaPreset: els.mcaPreset,
-            mcaCloneBtn: els.mcaCloneBtn,
-            mcaEditBtn: els.mcaEditBtn,
+            // buttons
             mcaComputeBtn: els.mcaComputeBtn,
 
-            // modal hooks
-            mcaEditModal: els.mcaEditModal,
-            mcaEditTable: els.mcaEditTable,
+            // accordion
+            mcaIndicatorsTableWrap: els.mcaIndicatorsTableWrap,
             mcaWeightSum: els.mcaWeightSum,
             mcaEditError: els.mcaEditError,
-            mcaResetBtn: els.mcaResetBtn,
-            mcaSaveOverridesBtn: els.mcaSaveOverridesBtn,
             mcaVarsForm: els.mcaVarsForm,
+            mcaCropGlobalsWrap: els.mcaCropGlobalsWrap,
+            mcaScenarioPickerWrap: els.mcaScenarioPickerWrap,
+            mcaScenarioCards: els.mcaScenarioCards,
         }
     });
     setIdleState();
@@ -124,6 +122,29 @@ export function initSubbasinDashboard({
 
             // Ensure data is loaded for all selected runs
             await Promise.all(selectedRunIds.map(id => ensureRunLoaded(id)));
+
+            // union crops across all selected runs
+            const cropSet = new Set();
+            for (const id of selectedRunIds) {
+                const rd = runsStore.get(id);
+                if (!rd) continue;
+                for (const c of rd.crops || []) cropSet.add(c);
+            }
+            mca.setAllowedCrops([...cropSet]);
+
+            // build runCropsById once after ensureRunLoaded for selectedRunIds
+            const runCropsById = {};
+            for (const id of selectedRunIds) {
+                const rd = runsStore.get(id);
+                runCropsById[id] = (rd?.crops || []).slice();
+            }
+
+            await mca.setAvailableRuns({
+                studyAreaId: currentStudyAreaId,
+                selectedRunIds,
+                runsMeta,
+                runCropsById,
+            });
 
             // Keep mapScenarioIds as subset of selectedRunIds
             mapScenarioIds = mapScenarioIds.filter(id => selectedRunIds.includes(id));
@@ -494,6 +515,12 @@ export function initSubbasinDashboard({
             if (els.seriesChart) Plotly.purge(els.seriesChart);
             if (els.cropChart)   Plotly.purge(els.cropChart);
 
+            await mca.setAvailableRuns({
+                studyAreaId: currentStudyAreaId,
+                selectedRunIds: [],
+                runsMeta
+            });
+
             return; // <- important: exit without error
         }
 
@@ -515,6 +542,31 @@ export function initSubbasinDashboard({
         activateRun(firstId);
 
         recomputeAndRedraw();
+
+        // union crops across all selected runs
+        const cropSet = new Set();
+        for (const id of selectedRunIds) {
+            const rd = runsStore.get(id);
+            if (!rd) continue;
+            for (const c of rd.crops || []) cropSet.add(c);
+        }
+        mca.setAllowedCrops([...cropSet]);
+
+        // build runCropsById once after ensureRunLoaded for selectedRunIds
+        const runCropsById = {};
+        for (const id of selectedRunIds) {
+            const rd = runsStore.get(id);
+            runCropsById[id] = (rd?.crops || []).slice();
+        }
+
+        await mca.setAvailableRuns({
+            studyAreaId: currentStudyAreaId,
+            selectedRunIds,
+            runsMeta,
+            runCropsById,
+        });
+
+        await mca.loadActivePreset(currentStudyAreaId);
     }
 
     async function loadCropLookup() {
@@ -1233,6 +1285,10 @@ export function initSubbasinDashboard({
         // --- Crop-specific or crop-agnostic
         const crop = def.requiresCrop ? (cropOverride || current.crop) : undefined;
 
+        const mcaInputs = (typeof mca?.getLocalInputsForRun === 'function')
+            ? mca.getLocalInputsForRun(rd.id)
+            : null;
+
         return def.calc({
             hruAnnual: hruWrapper,
             rchAnnual: rchWrapper,
@@ -1240,7 +1296,9 @@ export function initSubbasinDashboard({
             areaHa,
             sub,
             crop,
-            year
+            year,
+
+            mcaInputs,
         });
     }
 
@@ -1441,6 +1499,12 @@ export function initSubbasinDashboard({
         mapScenarioIds = [];
         current.runId = null;
         current.selectedSub = null;
+
+        await mca.setAvailableRuns({
+            studyAreaId: currentStudyAreaId,
+            selectedRunIds: [],
+            runsMeta: []
+        });
 
         if (els.dataset) {
             els.dataset.innerHTML = '<div class="text-muted small">Loading runs…</div>';
