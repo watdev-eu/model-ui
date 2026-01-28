@@ -401,8 +401,8 @@ try {
     pgExec($pg, "BEGIN");
     $txStarted = true;
 
-    $info = pgOne($pg, "SELECT current_schema() s, current_setting('search_path') sp");
-    error_log('[import_run] schema/search_path: ' . json_encode($info));
+    //$info = pgOne($pg, "SELECT current_schema() s, current_setting('search_path') sp");
+    //error_log('[import_run] schema/search_path: ' . json_encode($info));
 
     $exists = pgValue($pg,
         "SELECT 1 FROM study_areas WHERE id = $1 AND enabled = TRUE",
@@ -417,8 +417,8 @@ try {
         exit;
     }
 
-    $ctx = pgOne($pg, "SELECT inet_server_addr() addr, inet_server_port() port, current_database() db, current_schema() schema, current_user usr");
-    error_log('[import_run] PG conn: ' . json_encode($ctx));
+    //$ctx = pgOne($pg, "SELECT inet_server_addr() addr, inet_server_port() port, current_database() db, current_schema() schema_name, current_user usr");
+    //error_log('[import_run] PG conn: ' . json_encode($ctx));
 
     // ------------------------------------------------------------------
     // 2. Check uniqueness within study area
