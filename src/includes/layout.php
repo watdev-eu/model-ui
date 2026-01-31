@@ -163,6 +163,16 @@ $avatarUrl = false;
             ?>
         </ul>
 
+        <div class="px-3 pb-2 small text-white-50 border-top">
+            <span class="d-block mt-2">
+                <i class="bi bi-git me-1"></i>
+                v<?= h(app_version_short()) ?>
+                <?php $bd = app_build_date(); if ($bd): ?>
+                    <span class="ms-2"><i class="bi bi-clock me-1"></i><?= h($bd) ?></span>
+                <?php endif; ?>
+            </span>
+        </div>
+
         <!-- User dropdown -->
         <div class="dropdown mt-auto p-3 border-top">
             <a href="#" class="d-flex align-items-center text-white text-decoration-none dropdown-toggle"

@@ -41,3 +41,12 @@ function require_admin(): void {
     if (session_status() !== PHP_SESSION_ACTIVE) session_start();
     if (empty($_SESSION['is_admin'])) { http_response_code(403); exit('Forbidden'); }
 }
+
+function app_version_short(): string {
+    $sha = getenv('APP_VERSION') ?: env('APP_VERSION', 'unknown');
+    return substr((string)$sha, 0, 7);
+}
+
+function app_build_date(): string {
+    return (string)(getenv('APP_BUILD_DATE') ?: env('APP_BUILD_DATE', ''));
+}
