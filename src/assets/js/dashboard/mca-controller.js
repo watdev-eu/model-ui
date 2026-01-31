@@ -17,12 +17,12 @@ export function initMcaController({ apiBase, els }) {
     let runCropsById = {}; // runId -> [crop codes]
 
     let baselineRunId = null;
-    let cropRefByCrop = new Map(); // crop_code -> value_num (baseline prod_cost_bmp_usd_ha)
+    let cropRefFactorByCropKey = new Map(); // "CROP::key" -> number|null
 
     // Scenario state
     let availableRuns = [];           // [{id,label,run_date}]
     let includedRunIds = new Set();   // approach 1: defaults to selected runs
-    const runInputs = new Map();      // runId -> { ok, loading, error, variables_run, crop_bmp_cost }
+    const runInputs = new Map(); // runId -> { ok, loading, error, variables_run, crop_factors }
 
     // ---------- Local-only getters for inputs (no DB writes) ----------
     function normalizeVarValue(row) {
@@ -43,14 +43,16 @@ export function initMcaController({ apiBase, els }) {
         return m;
     }
 
-    function buildCropKeyIndex(list) {
-        // Map<crop_code, row>
-        const m = new Map();
-        for (const r of (list || [])) {
-            const c = r?.crop_code;
-            if (c != null) m.set(String(c), r);
-        }
-        return m;
+    function getCropFactorNum(runId, cropCode, key, fallback = null) {
+        const st = getRunState(runId);
+        if (!st) return fallback;
+
+        const row = (st._factorByCropKey instanceof Map)
+            ? st._factorByCropKey.get(`${String(cropCode)}::${String(key)}`)
+            : (st.crop_factors || []).find(r => String(r.crop_code)===String(cropCode) && String(r.key)===String(key));
+
+        const v = normalizeVarValue(row);
+        return Number.isFinite(Number(v)) ? Number(v) : fallback;
     }
 
     /**
@@ -86,12 +88,45 @@ export function initMcaController({ apiBase, els }) {
     }
 
     const SCENARIO_RUN_KEYS = [
-        { key: 'bmp_prod_cost_usd_ha', label: 'BMP production cost (USD/ha)', type: 'number' },
-        { key: 'time_horizon_years',   label: 'Time horizon / economic life (years)', type: 'number' },
-        { key: 'discount_rate',        label: 'Discount rate (0–1)', type: 'number' },
-        { key: 'bmp_invest_cost_usd_ha',label: 'BMP investment cost (USD/ha)', type: 'number' },
+        { key: 'economic_life_years',       label: 'Economic life (years)', type: 'number' },
+        { key: 'discount_rate',            label: 'Discount rate (%)', type: 'number' },
+        { key: 'bmp_invest_cost_usd_ha',    label: 'BMP investment cost (USD/ha)', type: 'number' },
         { key: 'bmp_annual_om_cost_usd_ha', label: 'BMP annual O&M cost (USD/ha/year)', type: 'number' },
+
+        { key: 'water_cost_usd_m3',         label: 'Water cost (USD/m³)', type: 'number' },
+        { key: 'water_use_fee_usd_ha',      label: 'Water use fee (USD/ha)', type: 'number' },
     ];
+
+    const BASELINE_LABOUR_KEYS = [
+        { key: 'bmp_labour_land_preparation_pd_ha', label: 'Land preparation' },
+        { key: 'bmp_labour_planting_pd_ha', label: 'Planting' },
+        { key: 'bmp_labour_fertilizer_application_pd_ha', label: 'Fertilizer application' },
+        { key: 'bmp_labour_weeding_pd_ha', label: 'Weeding' },
+        { key: 'bmp_labour_pest_control_pd_ha', label: 'Pest control' },
+        { key: 'bmp_labour_irrigation_pd_ha', label: 'Irrigation' },
+        { key: 'bmp_labour_harvesting_pd_ha', label: 'Harvesting' },
+        { key: 'bmp_labour_other_pd_ha', label: 'Other' },
+    ];
+
+    const BASELINE_MATERIAL_KEYS = [
+        { key: 'bmp_material_seeds_usd_ha', label: 'Seeds / planting material' },
+        { key: 'bmp_material_mineral_fertilisers_usd_ha', label: 'Mineral fertilisers' },
+        { key: 'bmp_material_organic_amendments_usd_ha', label: 'Organic amendments' },
+        { key: 'bmp_material_pesticides_usd_ha', label: 'Pesticides' },
+        { key: 'bmp_material_tractor_usage_usd_ha', label: 'Tractor usage' },
+        { key: 'bmp_material_equipment_usage_usd_ha', label: 'Equipment usage' },
+        { key: 'bmp_material_other_usd_ha', label: 'Other' },
+    ];
+
+    function getBaselineFactorNum(cropCode, key, fallback = null) {
+        const v = cropRefFactorByCropKey.get(`${String(cropCode)}::${String(key)}`);
+        return Number.isFinite(Number(v)) ? Number(v) : fallback;
+    }
+
+    function setBaselineFactorNum(cropCode, key, numOrNull) {
+        const k = `${String(cropCode)}::${String(key)}`;
+        cropRefFactorByCropKey.set(k, (numOrNull != null && Number.isFinite(Number(numOrNull))) ? Number(numOrNull) : null);
+    }
 
     function upsertRunVarValue(runId, key, numOrNull) {
         const st = runInputs.get(runId);
@@ -110,45 +145,21 @@ export function initMcaController({ apiBase, els }) {
         st._varsByKey = buildKeyIndex(st.variables_run, 'key');
     }
 
-    function upsertCropBmpCostValue(runId, cropCode, numOrNull) {
-        const st = runInputs.get(runId);
-        if (!st || !Array.isArray(st.crop_bmp_cost)) return;
-
-        const c = String(cropCode);
-        let row = st.crop_bmp_cost.find(r => String(r.crop_code) === c);
-
-        if (!row) {
-            row = { crop_code: c, crop_name: c, key: 'prod_cost_bmp_usd_ha', data_type: 'number', value_num: null };
-            st.crop_bmp_cost.push(row);
-        }
-
-        row.data_type = 'number';
-        row.key = row.key || 'prod_cost_bmp_usd_ha';
-        row.value_num = (numOrNull != null && Number.isFinite(Number(numOrNull))) ? Number(numOrNull) : null;
-
-        st._bmpByCrop = buildCropKeyIndex(st.crop_bmp_cost);
-    }
-
     function getRunCropList(runId) {
         return (runCropsById && runCropsById[runId]) ? runCropsById[runId].map(String) : [];
     }
 
-    /**
-     * Run-level MCA variable value (from mca_run_inputs.php): variables_run by key.
-     * Example: getRunVarNum(runId, 'bmp_invest_cost_usd_ha')
-     */
     function getRunVarRow(runId, key) {
         const st = getRunState(runId);
         if (!st) return null;
 
-        // Fast path if indices exist (we create them in ensureRunInputsLoaded)
         if (st._varsByKey instanceof Map) {
             return st._varsByKey.get(String(key)) || null;
         }
 
-        // Fallback
         return (st.variables_run || []).find(v => String(v.key) === String(key)) || null;
     }
+
     function getRunVar(runId, key) {
         return normalizeVarValue(getRunVarRow(runId, key));
     }
@@ -183,28 +194,6 @@ export function initMcaController({ apiBase, els }) {
     }
 
     /**
-     * Crop BMP cost rows (from mca_run_inputs.php): crop_bmp_cost by crop_code for THIS run.
-     * Example: getCropBmpCostNum(runId, 'WHEAT')
-     */
-    function getCropBmpCostRow(runId, cropCode) {
-        const st = getRunState(runId);
-        if (!st) return null;
-
-        // Fast path if index exists
-        if (st._bmpByCrop instanceof Map) {
-            return st._bmpByCrop.get(String(cropCode)) || null;
-        }
-
-        // Fallback
-        return (st.crop_bmp_cost || []).find(r => String(r.crop_code) === String(cropCode)) || null;
-    }
-    function getCropBmpCostNum(runId, cropCode, fallback = null) {
-        const row = getCropBmpCostRow(runId, cropCode);
-        const v = normalizeVarValue(row);
-        return Number.isFinite(Number(v)) ? Number(v) : fallback;
-    }
-
-    /**
      * One convenience object you can pass into indicator calculations.
      * Everything is local memory. If run inputs not loaded yet, returns safe fallbacks.
      */
@@ -217,13 +206,15 @@ export function initMcaController({ apiBase, els }) {
             variables_global: currentVars || [],
             variables_run: st?.variables_run || [],
             crop_variables_global: currentCropVars || [],
-            crop_bmp_cost: st?.crop_bmp_cost || [],
+            crop_factors: st?.crop_factors || [],
 
             // getters (typed)
             getGlobalVar,
             getGlobalVarNum,
             getGlobalVarBool,
             getGlobalVarText,
+            getCropFactorNum,
+            getBaselineFactorNum,
 
             getRunVar,
             getRunVarNum,
@@ -232,8 +223,6 @@ export function initMcaController({ apiBase, els }) {
 
             getCropGlobal,
             getCropGlobalNum,
-
-            getCropBmpCostNum,
         };
     }
 
@@ -243,7 +232,7 @@ export function initMcaController({ apiBase, els }) {
         } else {
             allowedCropSet = new Set(cropCodes.map(c => String(c)));
         }
-        // Scenario cards show crop BMP costs too
+        // Scenario cards show per-crop factors
         renderScenarioCards();
     }
 
@@ -374,7 +363,6 @@ export function initMcaController({ apiBase, els }) {
 
         const KEYS = [
             { key: 'crop_price_usd_per_t', label: 'Crop price (USD/t)' },
-            { key: 'prod_cost_ref_usd_ha', label: 'Production cost REF (USD/ha — baseline default)' },
         ];
 
         const byCrop = new Map();
@@ -401,6 +389,50 @@ export function initMcaController({ apiBase, els }) {
             Object.assign(row, patch);
         }
 
+        function renderBaselineFactorTable(title, unit, keys, crops) {
+            return `
+                <div class="mt-3">
+                  <div class="small text-muted mb-1">
+                    ${escapeHtml(title)} <span class="text-muted">(${escapeHtml(unit)})</span>
+                    ${baselineRunId ? `<span class="text-muted ms-2">baseline run_id: ${baselineRunId}</span>` : `<span class="text-danger ms-2">baseline not found</span>`}
+                  </div>
+                  <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                      <thead>
+                        <tr>
+                          <th style="min-width:180px">Crop</th>
+                          ${keys.map(k => `<th style="min-width:220px">${escapeHtml(k.label)}</th>`).join('')}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${crops.map(c => `
+                          <tr>
+                            <td>
+                              <div class="fw-semibold">${escapeHtml(c.crop_name || c.crop_code)}</div>
+                              <div class="text-muted small mono">${escapeHtml(c.crop_code)}</div>
+                            </td>
+                            ${keys.map(k => {
+                                const v = getBaselineFactorNum(c.crop_code, k.key, null);
+                                const shown = (v == null) ? '' : String(v);
+                                return `
+                                    <td>
+                                      <input class="form-control form-control-sm mono mca-baseline-factor"
+                                             data-crop="${escapeHtml(c.crop_code)}"
+                                             data-key="${escapeHtml(k.key)}"
+                                             type="number" step="any"
+                                             value="${escapeHtml(shown)}">
+                                    </td>
+                              `;
+                            }).join('')}
+                          </tr>
+                        `).join('')}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              `;
+        }
+
         els.mcaCropGlobalsWrap.innerHTML = `
           <div class="table-responsive">
             <table class="table table-sm align-middle mb-0">
@@ -418,39 +450,16 @@ export function initMcaController({ apiBase, els }) {
                       <div class="text-muted small mono">${escapeHtml(c.crop_code)}</div>
                     </td>
                     ${KEYS.map(k => {
-                        if (k.key === 'crop_price_usd_per_t') {
-                            const row = c.vars.find(v => v.key === 'crop_price_usd_per_t');
-                            const val = row?.value_num ?? '';
-                            return `
-                              <td>
+                        const row = c.vars.find(v => v.key === 'crop_price_usd_per_t');
+                        const val = row?.value_num ?? '';
+                        return `
+                            <td>
                                 <input class="form-control form-control-sm mono mca-crop-global"
                                        data-crop="${escapeHtml(c.crop_code)}"
                                        data-key="crop_price_usd_per_t"
                                        type="number" step="any"
                                        value="${escapeHtml(String(val ?? ''))}">
-                              </td>
-                            `;
-                        }
-                        
-                        // REF: allow override stored in currentCropVars; fallback to baseline
-                        const overrideRow = c.vars.find(v => v.key === 'prod_cost_ref_usd_ha');
-                        const overrideVal = (overrideRow?.value_num == null) ? null : Number(overrideRow.value_num);
-            
-                        const baseVal = cropRefByCrop.get(String(c.crop_code));
-                        const shownVal = (overrideVal != null && Number.isFinite(overrideVal)) ? overrideVal : baseVal;
-            
-                        const shown = (shownVal == null) ? '' : String(shownVal);
-                        const hint  = baselineRunId ? `baseline run_id: ${baselineRunId}` : 'baseline not found';
-            
-                        return `
-                          <td>
-                            <input class="form-control form-control-sm mono mca-crop-ref"
-                                   data-crop="${escapeHtml(c.crop_code)}"
-                                   data-key="prod_cost_ref_usd_ha"
-                                   type="number" step="any"
-                                   value="${escapeHtml(shown)}">
-                            <div class="form-text small text-muted">${escapeHtml(hint)}</div>
-                          </td>
+                            </td>
                         `;
                     }).join('')}
                   </tr>
@@ -458,6 +467,9 @@ export function initMcaController({ apiBase, els }) {
               </tbody>
             </table>
           </div>
+        
+          ${renderBaselineFactorTable('Baseline labour factors', 'person-days/ha', BASELINE_LABOUR_KEYS, crops)}
+          ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATERIAL_KEYS, crops)}
         `;
 
         els.mcaCropGlobalsWrap.querySelectorAll('.mca-crop-global').forEach(inp => {
@@ -474,17 +486,13 @@ export function initMcaController({ apiBase, els }) {
             });
         });
 
-        els.mcaCropGlobalsWrap.querySelectorAll('.mca-crop-ref').forEach(inp => {
+        els.mcaCropGlobalsWrap.querySelectorAll('.mca-baseline-factor').forEach(inp => {
             inp.addEventListener('input', () => {
-                const crop = inp.dataset.crop;
-                const key  = inp.dataset.key; // prod_cost_ref_usd_ha
+                const crop = String(inp.dataset.crop || '');
+                const key  = String(inp.dataset.key || '');
                 const txt  = String(inp.value ?? '').trim();
                 const num  = (txt === '') ? null : Number(txt);
-
-                upsert(crop, key, {
-                    data_type: 'number',
-                    value_num: (num !== null && Number.isFinite(num)) ? num : null
-                });
+                setBaselineFactorNum(crop, key, (num != null && Number.isFinite(num)) ? num : null);
             });
         });
     }
@@ -581,18 +589,68 @@ export function initMcaController({ apiBase, els }) {
         }
 
         const included = availableRuns.filter(r => includedRunIds.has(r.id));
-
         if (!included.length) {
             els.mcaScenarioCards.innerHTML = `
-      <div class="alert alert-warning py-2 small mb-0">
-        No scenarios included. Tick at least one scenario above to compute MCA.
-      </div>
-    `;
+              <div class="alert alert-warning py-2 small mb-0">
+                No scenarios included. Tick at least one scenario above to compute MCA.
+              </div>
+            `;
             return;
         }
 
+        function renderFactorSection(title, unit, keys, runId, runCrops, st) {
+            const idx = (st?._factorByCropKey instanceof Map) ? st._factorByCropKey : null;
+
+            return `
+              <div class="mt-2">
+                <div class="small text-muted mb-1">${escapeHtml(title)} <span class="text-muted">(${escapeHtml(unit)})</span></div>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th style="min-width:180px">Crop</th>
+                        ${keys.map(k => `<th style="min-width:220px">${escapeHtml(k.label)}</th>`).join('')}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${runCrops.map(code => {
+                        const anyRow = (st.crop_factors || []).find(x => String(x.crop_code) === String(code));
+                        const name = anyRow?.crop_name || code;
+        
+                        return `
+                          <tr>
+                            <td>
+                              <div class="fw-semibold">${escapeHtml(name)}</div>
+                              <div class="text-muted small mono">${escapeHtml(code)}</div>
+                            </td>
+                            ${keys.map(k => {
+                                const row = idx ? idx.get(`${String(code)}::${String(k.key)}`) : null;
+                                const val = (row && row.value_num != null) ? row.value_num : '';
+                                return `
+                                    <td>
+                                      <input class="form-control form-control-sm mono mca-crop-factor"
+                                             data-run-id="${runId}"
+                                             data-crop="${escapeHtml(code)}"
+                                             data-key="${escapeHtml(k.key)}"
+                                             type="number" step="any"
+                                             value="${escapeHtml(String(val))}">
+                                    </td>
+                                `;
+                            }).join('')}
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+        }
+
+        // 1) Render HTML
         els.mcaScenarioCards.innerHTML = included.map(r => {
             const st = runInputs.get(r.id) || { loading: false };
+
             const badge = st.loading
                 ? `<span class="badge text-bg-secondary">Loading inputs…</span>`
                 : st.error
@@ -601,13 +659,6 @@ export function initMcaController({ apiBase, els }) {
                         ? `<span class="badge text-bg-success">Inputs ready</span>`
                         : `<span class="badge text-bg-secondary">Inputs pending</span>`;
 
-            const bmpCount = Array.isArray(st.crop_bmp_cost) ? st.crop_bmp_cost.length : 0;
-
-            // Run-specific crops
-            const runCrops = getRunCropList(r.id);
-            const cropRows = (st.crop_bmp_cost || []).filter(row => runCrops.includes(String(row.crop_code)));
-
-            // current values for the 5 scenario vars
             const varsByKey = (st._varsByKey instanceof Map) ? st._varsByKey : buildKeyIndex(st.variables_run || [], 'key');
 
             const varsHtml = SCENARIO_RUN_KEYS.map(v => {
@@ -625,47 +676,12 @@ export function initMcaController({ apiBase, els }) {
                   `;
             }).join('');
 
-            const cropTable = runCrops.length ? `
-              <div class="mt-2">
-                <div class="small text-muted mb-1">Crop BMP production cost (USD/ha) — crops in this scenario</div>
-                <div class="table-responsive">
-                  <table class="table table-sm align-middle mb-0">
-                    <thead>
-                      <tr>
-                        <th>Crop</th>
-                        <th style="width:220px">Production cost BMP (USD/ha)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      ${runCrops.map(code => {
-                        const row = cropRows.find(x => String(x.crop_code) === String(code));
-                        const name = row?.crop_name || code;
-                        const val = (row?.value_num != null) ? row.value_num : '';
-                        return `
-                          <tr>
-                            <td>
-                              <div class="fw-semibold">${escapeHtml(name)}</div>
-                              <div class="text-muted small mono">${escapeHtml(code)}</div>
-                            </td>
-                            <td>
-                              <input class="form-control form-control-sm mono mca-crop-bmp"
-                                     data-run-id="${r.id}"
-                                     data-crop="${escapeHtml(code)}"
-                                     type="number" step="any"
-                                     value="${escapeHtml(String(val))}">
-                            </td>
-                          </tr>
-                        `;
-                    }).join('')}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ` : `
-              <div class="mt-2 small text-muted">
-                No crop list available for this scenario (run ${r.id}).
-              </div>
-            `;
+            const runCrops = getRunCropList(r.id);
+
+            const cropTables = runCrops.length ? `
+              ${renderFactorSection('Labour inputs', 'person-days/ha', BASELINE_LABOUR_KEYS, r.id, runCrops, st)}
+              ${renderFactorSection('Material inputs', 'USD/ha', BASELINE_MATERIAL_KEYS, r.id, runCrops, st)}
+            ` : `<div class="mt-2 small text-muted">No crop list available for this scenario (run ${r.id}).</div>`;
 
             return `
               <div class="card">
@@ -683,26 +699,20 @@ export function initMcaController({ apiBase, els }) {
                     </div>
                   </div>
         
-                  <div class="mt-2 small text-muted">
-                    Run inputs: ${st.ok ? 'loaded' : 'not loaded'} • BMP cost rows: ${bmpCount}
-                  </div>
-        
                   ${st.error ? `<div class="small text-danger mt-1">${escapeHtml(st.error)}</div>` : ``}
         
                   <div class="mt-2">
                     <div class="small text-muted mb-1">Scenario variables (local edits, not saved)</div>
-                    <div class="row g-2">
-                      ${varsHtml}
-                    </div>
+                    <div class="row g-2">${varsHtml}</div>
                   </div>
         
-                  ${cropTable}
+                  ${cropTables}
                 </div>
               </div>
             `;
         }).join('');
 
-        // wire reload
+        // 2) Wire events AFTER rendering
         els.mcaScenarioCards.querySelectorAll('.mca-reload-run').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const rid = Number(btn.dataset.runId);
@@ -714,7 +724,6 @@ export function initMcaController({ apiBase, els }) {
             });
         });
 
-        // wire scenario var edits
         els.mcaScenarioCards.querySelectorAll('.mca-run-var').forEach(inp => {
             inp.addEventListener('input', () => {
                 const runId = Number(inp.dataset.runId);
@@ -722,19 +731,29 @@ export function initMcaController({ apiBase, els }) {
                 const txt = String(inp.value ?? '').trim();
                 const num = (txt === '') ? null : Number(txt);
                 upsertRunVarValue(runId, key, (num != null && Number.isFinite(num)) ? num : null);
-                // no re-render needed; but safe to keep consistent:
-                // renderScenarioCards();
             });
         });
 
-        // wire crop bmp edits
-        els.mcaScenarioCards.querySelectorAll('.mca-crop-bmp').forEach(inp => {
+        els.mcaScenarioCards.querySelectorAll('.mca-crop-factor').forEach(inp => {
             inp.addEventListener('input', () => {
                 const runId = Number(inp.dataset.runId);
-                const crop = String(inp.dataset.crop || '');
-                const txt = String(inp.value ?? '').trim();
-                const num = (txt === '') ? null : Number(txt);
-                upsertCropBmpCostValue(runId, crop, (num != null && Number.isFinite(num)) ? num : null);
+                const crop  = String(inp.dataset.crop || '');
+                const key   = String(inp.dataset.key || '');
+                const txt   = String(inp.value ?? '').trim();
+                const num   = (txt === '') ? null : Number(txt);
+
+                const st = runInputs.get(runId);
+                if (!st || !Array.isArray(st.crop_factors)) return;
+
+                let row = st.crop_factors.find(r => String(r.crop_code) === crop && String(r.key) === key);
+                if (!row) {
+                    row = { crop_code: crop, crop_name: crop, key, data_type: 'number', value_num: null, value_text: null, value_bool: null };
+                    st.crop_factors.push(row);
+                }
+                row.data_type = 'number';
+                row.value_num = (num != null && Number.isFinite(num)) ? num : null;
+
+                st._factorByCropKey = buildCropKeyIndex2(st.crop_factors);
             });
         });
     }
@@ -761,11 +780,11 @@ export function initMcaController({ apiBase, els }) {
                 error: null,
 
                 variables_run: json.variables_run || [],
-                crop_bmp_cost: json.crop_bmp_cost || [],
+                crop_factors: json.crop_factors || [],
 
                 // indexes for fast lookups (still local memory)
                 _varsByKey: buildKeyIndex(json.variables_run || [], 'key'),
-                _bmpByCrop: buildCropKeyIndex(json.crop_bmp_cost || []),
+                _factorByCropKey: buildCropKeyIndex2(json.crop_factors || []),
             });
         } catch (e) {
             runInputs.set(runId, { loading: false, ok: false, error: e.message || String(e) });
@@ -776,6 +795,17 @@ export function initMcaController({ apiBase, els }) {
         if (!els.mcaComputeBtn) return;
         const ok = !!presetId && includedRunIds.size > 0;
         els.mcaComputeBtn.disabled = !ok;
+    }
+
+    function buildCropKeyIndex2(list) {
+        // Map<"crop::key", row>
+        const m = new Map();
+        for (const r of (list || [])) {
+            const c = r?.crop_code;
+            const k = r?.key;
+            if (c != null && k != null) m.set(`${String(c)}::${String(k)}`, r);
+        }
+        return m;
     }
 
     // ---------- MCA form rendering ----------
@@ -856,7 +886,7 @@ export function initMcaController({ apiBase, els }) {
 
         const VAR_ORDER = [
             'discount_rate',
-            'time_horizon_years',
+            'economic_life_years',
             'baseline_net_income_usd_ha',
             'net_income_after_usd_ha',
             'labour_hours_per_ha',
@@ -878,11 +908,13 @@ export function initMcaController({ apiBase, els }) {
         baselineRunId = Number(json.baseline_run_id ?? null);
 
         // Build baseline REF map from API field crop_ref_cost
-        cropRefByCrop = new Map();
-        for (const r of (json.crop_ref_cost || [])) {
-            const code = String(r.crop_code);
+        // Baseline (reference) factors: store rows by crop+key
+        cropRefFactorByCropKey = new Map();
+        for (const r of (json.crop_ref_factors || [])) {
+            const crop = String(r.crop_code);
+            const key  = String(r.key);
             const num  = (r.value_num == null) ? null : Number(r.value_num);
-            cropRefByCrop.set(code, Number.isFinite(num) ? num : null);
+            cropRefFactorByCropKey.set(`${crop}::${key}`, Number.isFinite(num) ? num : null);
         }
 
         renderIndicatorsAccordion();
@@ -950,6 +982,19 @@ export function initMcaController({ apiBase, els }) {
                     value_bool: r.value_bool ?? null,
                 }))
             ));
+            fd.append('crop_ref_factors_json', JSON.stringify(
+                Array.from(cropRefFactorByCropKey.entries()).map(([k, v]) => {
+                    const [crop_code, key] = k.split('::');
+                    return {
+                        crop_code,
+                        key,
+                        data_type: 'number',
+                        value_num: (v == null ? null : Number(v)),
+                        value_text: null,
+                        value_bool: null,
+                    };
+                })
+            ));
 
             const res = await fetch(`${apiBase}/mca_compute.php`, { method: 'POST', body: fd });
             const json = await res.json();
@@ -983,7 +1028,6 @@ export function initMcaController({ apiBase, els }) {
         ensureRunInputsLoaded,
         getLocalInputsForRun,
         getRunVarNum,
-        getCropBmpCostNum,
         getCropGlobalNum,
         getGlobalVarNum,
     };

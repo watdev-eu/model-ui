@@ -58,8 +58,7 @@ $varSet = $stmt->fetch(PDO::FETCH_ASSOC);
 $globalKeys = [
     'farm_size_ha',
     'land_rent_usd_ha_yr',
-    'water_use_fee_usd_m3',
-    'water_cost_usd_m3',
+    'labour_day_cost_usd_per_pd',
 ];
 
 $place = implode(',', array_fill(0, count($globalKeys), '?'));
@@ -106,6 +105,28 @@ $stmt = $pdo->prepare("
 ");
 $stmt->execute([':ps' => (int)$preset['id']]);
 $scenarios = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$factorKeys = [
+    // labour (person-days/ha)
+    'bmp_labour_land_preparation_pd_ha',
+    'bmp_labour_planting_pd_ha',
+    'bmp_labour_fertilizer_application_pd_ha',
+    'bmp_labour_weeding_pd_ha',
+    'bmp_labour_pest_control_pd_ha',
+    'bmp_labour_irrigation_pd_ha',
+    'bmp_labour_harvesting_pd_ha',
+    'bmp_labour_other_pd_ha',
+
+    // materials (USD/ha)
+    'bmp_material_seeds_usd_ha',
+    'bmp_material_mineral_fertilisers_usd_ha',
+    'bmp_material_organic_amendments_usd_ha',
+    'bmp_material_pesticides_usd_ha',
+    'bmp_material_tractor_usage_usd_ha',
+    'bmp_material_equipment_usage_usd_ha',
+    'bmp_material_other_usd_ha',
+];
+
 
 $cropVariables = [];
 if ($varSet) {
@@ -165,6 +186,7 @@ if ($varSet && $runId > 0) {
       'time_horizon_years',
       'bmp_invest_cost_usd_ha',
       'bmp_annual_om_cost_usd_ha',
+      'water_cost_usd_m3',
       'water_use_fee_usd_m3'
     )
     ORDER BY v.key
@@ -174,59 +196,54 @@ if ($varSet && $runId > 0) {
 }
 
 $cropPrice = [];
-$cropBmp   = [];
-$cropRef   = [];
+
+$cropBmpFactors = [];
+$cropRefFactors = [];
 
 if ($varSet) {
-    // 1) crop price global
-    $stmt = $pdo->prepare("
-    SELECT c.code crop_code, c.name crop_name, v.key, v.data_type,
-           vvc.value_num, vvc.value_text, vvc.value_bool
-    FROM crops c
-    JOIN mca_variables v ON v.key = 'crop_price_usd_per_t'
-    LEFT JOIN mca_variable_values_crop vvc
-      ON vvc.crop_code = c.code
-     AND vvc.variable_id = v.id
-     AND vvc.variable_set_id = :vs
-    ORDER BY c.code
-  ");
-    $stmt->execute([':vs' => (int)$varSet['id']]);
-    $cropPrice = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $vsId = (int)$varSet['id'];
 
-    // 2) BMP cost per crop per run
-    if ($runId > 0) {
-        $stmt = $pdo->prepare("
-          SELECT c.code crop_code, c.name crop_name, v.key, v.data_type,
-                 vvcr.value_num, vvcr.value_text, vvcr.value_bool
+    // helper: fetch factors for a given run_id
+    $fetchFactorsForRun = function(int $runId) use ($pdo, $vsId, $factorKeys) {
+        if ($runId <= 0) return [];
+
+        $inKeys = implode(',', array_fill(0, count($factorKeys), '?'));
+
+        $sql = "
+          SELECT
+            c.code AS crop_code,
+            c.name AS crop_name,
+            v.key,
+            v.name,
+            v.unit,
+            v.description,
+            v.data_type,
+            vvcr.value_num,
+            vvcr.value_text,
+            vvcr.value_bool
           FROM crops c
-          JOIN mca_variables v ON v.key = 'prod_cost_bmp_usd_ha'
+          JOIN mca_variables v ON v.key IN ($inKeys)
           LEFT JOIN mca_variable_values_crop_run vvcr
             ON vvcr.crop_code = c.code
            AND vvcr.variable_id = v.id
-           AND vvcr.variable_set_id = :vs
-           AND vvcr.run_id = :run
-          ORDER BY c.code
-        ");
-        $stmt->execute([':vs' => (int)$varSet['id'], ':run' => $runId]);
-        $cropBmp = $stmt->fetchAll(PDO::FETCH_ASSOC);
+           AND vvcr.variable_set_id = ?
+           AND vvcr.run_id = ?
+          ORDER BY c.code, v.key
+        ";
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(array_merge($factorKeys, [$vsId, $runId]));
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    };
+
+    // selected scenario factors (for scenario cards / preview)
+    if ($runId > 0) {
+        $cropBmpFactors = $fetchFactorsForRun($runId);
     }
 
-    // 3) REF cost per crop per baseline run
+    // baseline reference factors (for Crop variables accordion)
     if ($baselineRunId > 0) {
-        $stmt = $pdo->prepare("
-          SELECT c.code crop_code, c.name crop_name, v.key, v.data_type,
-                 vvcr.value_num, vvcr.value_text, vvcr.value_bool
-          FROM crops c
-          JOIN mca_variables v ON v.key = 'prod_cost_bmp_usd_ha'
-          LEFT JOIN mca_variable_values_crop_run vvcr
-            ON vvcr.crop_code = c.code
-           AND vvcr.variable_id = v.id
-           AND vvcr.variable_set_id = :vs
-           AND vvcr.run_id = :run
-          ORDER BY c.code
-        ");
-        $stmt->execute([':vs' => (int)$varSet['id'], ':run' => $baselineRunId]);
-        $cropRef = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $cropRefFactors = $fetchFactorsForRun($baselineRunId);
     }
 }
 
@@ -247,8 +264,8 @@ echo json_encode([
     'variables_global' => $variables,
     'variables_run'    => $variablesRun,
     'crop_price'       => $cropPrice,
-    'crop_bmp_cost'    => $cropBmp,
-    'crop_ref_cost'    => $cropRef,
+    'crop_bmp_factors' => $cropBmpFactors,
+    'crop_ref_factors' => $cropRefFactors,
     'run_id'           => $runId,
     'baseline_run_id'  => $baselineRunId,
 ]);
