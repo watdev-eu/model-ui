@@ -1,4 +1,7 @@
 <?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../config/app.php';
 function h($v){ return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 
 $displayName = 'User';
@@ -163,16 +166,6 @@ $avatarUrl = false;
             ?>
         </ul>
 
-        <div class="px-3 pb-2 small text-white-50 border-top">
-            <span class="d-block mt-2">
-                <i class="bi bi-git me-1"></i>
-                v<?= h(app_version_short()) ?>
-                <?php $bd = app_build_date(); if ($bd): ?>
-                    <span class="ms-2"><i class="bi bi-clock me-1"></i><?= h($bd) ?></span>
-                <?php endif; ?>
-            </span>
-        </div>
-
         <!-- User dropdown -->
         <div class="dropdown mt-auto p-3 border-top">
             <a href="#" class="d-flex align-items-center text-white text-decoration-none dropdown-toggle"
@@ -198,6 +191,13 @@ $avatarUrl = false;
                 <li><hr class="dropdown-divider"></li>
                 <li><a class="dropdown-item" href="#">Logout</a></li>
             </ul>
+            <span class="d-block mt-2">
+                <i class="bi bi-git me-1"></i>
+                v<?= h(app_version_short()) ?>
+                <?php $bd = app_build_date(); if ($bd): ?>
+                    <span class="ms-2"><i class="bi bi-clock me-1"></i><?= h($bd) ?></span>
+                <?php endif; ?>
+            </span>
         </div>
     </nav>
 
