@@ -203,58 +203,93 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!runCropWrap || !runCropBlock) return;
 
         const runCrops = (cropCodesInRun || []).map(String);
-
         if (!runCrops.length) {
             runCropWrap.innerHTML = `<div class="text-muted small">No crops found for this scenario.</div>`;
             runCropBlock.style.display = '';
             return;
         }
 
-        // index rows by crop_code
-        const byCrop = new Map();
-        for (const r of (rows || [])) byCrop.set(String(r.crop_code), r);
+        const LABOUR_KEYS = [
+            { key: 'bmp_labour_land_preparation_pd_ha', label: 'Land preparation' },
+            { key: 'bmp_labour_planting_pd_ha', label: 'Planting' },
+            { key: 'bmp_labour_fertilizer_application_pd_ha', label: 'Fertilizer application' },
+            { key: 'bmp_labour_weeding_pd_ha', label: 'Weeding' },
+            { key: 'bmp_labour_pest_control_pd_ha', label: 'Pest control' },
+            { key: 'bmp_labour_irrigation_pd_ha', label: 'Irrigation' },
+            { key: 'bmp_labour_harvesting_pd_ha', label: 'Harvesting' },
+            { key: 'bmp_labour_other_pd_ha', label: 'Other' },
+        ];
 
-        runCropWrap.innerHTML = `
-            <table class="table table-sm align-middle mb-0">
-              <thead class="table-light">
-                <tr>
-                  <th>Crop</th>
-                  <th style="min-width:260px">Production cost BMP (USD/ha)</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${runCrops.map(code => {
-                    const row = byCrop.get(code);
-                    const name = row?.crop_name || code;
+        const MATERIAL_KEYS = [
+            { key: 'bmp_material_seeds_usd_ha', label: 'Seeds / planting material' },
+            { key: 'bmp_material_mineral_fertilisers_usd_ha', label: 'Mineral fertilisers' },
+            { key: 'bmp_material_organic_amendments_usd_ha', label: 'Organic amendments' },
+            { key: 'bmp_material_pesticides_usd_ha', label: 'Pesticides' },
+            { key: 'bmp_material_tractor_usage_usd_ha', label: 'Tractor usage' },
+            { key: 'bmp_material_equipment_usage_usd_ha', label: 'Equipment usage' },
+            { key: 'bmp_material_other_usd_ha', label: 'Other' },
+        ];
+
+        // index existing rows by crop+key
+        const byCropKey = new Map();
+        for (const r of (rows || [])) {
+            byCropKey.set(`${r.crop_code}::${r.key}`, r);
+        }
+
+        const renderSection = (title, unitLabel, keys) => `
+            <div class="fw-semibold mb-2">${escHtml(title)} <span class="text-muted small">(${escHtml(unitLabel)})</span></div>
+                <div class="table-responsive mb-3">
+                    <table class="table table-sm align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                        <th style="min-width:180px">Crop</th>
+                            ${keys.map(k => `<th style="min-width:220px">${escHtml(k.label)}</th>`).join('')}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${runCrops.map(code => {
+                        const anyRow = (rows || []).find(x => String(x.crop_code) === code);
+                        const name = anyRow?.crop_name || code;
+
+                return `
+                      <tr>
+                        <td>
+                          <div class="fw-semibold">${escHtml(name)}</div>
+                          <div class="text-muted small mono">${escHtml(code)}</div>
+                        </td>
+                        ${keys.map(k => {
+                    const row = byCropKey.get(`${code}::${k.key}`);
                     const val = (row?.value_num ?? '') === null ? '' : String(row?.value_num ?? '');
                     return `
-                    <tr>
-                      <td>
-                        <div class="fw-semibold">${escHtml(name)}</div>
-                        <div class="text-muted small mono">${escHtml(code)}</div>
-                      </td>
-                      <td>
-                        <input class="form-control form-control-sm mono mca-run-crop"
-                               data-crop="${escHtml(code)}"
-                               type="number" step="any"
-                               value="${escHtml(val)}">
-                      </td>
-                    </tr>
-                  `;
+                              <td>
+                                <input class="form-control form-control-sm mono mca-run-crop-factor"
+                                       data-crop="${escHtml(code)}"
+                                       data-key="${escHtml(k.key)}"
+                                       type="number" step="any"
+                                       value="${escHtml(val)}">
+                              </td>
+                            `;
                 }).join('')}
+                      </tr>
+                    `;
+            }).join('')}
               </tbody>
             </table>
-          `;
+          </div>
+        `;
+
+        runCropWrap.innerHTML =
+            renderSection('Labour inputs', 'person-days/ha', LABOUR_KEYS) +
+            renderSection('Material inputs', 'USD/ha', MATERIAL_KEYS);
 
         runCropBlock.style.display = '';
 
-        runCropWrap.querySelectorAll('.mca-run-crop').forEach(inp => {
+        runCropWrap.querySelectorAll('.mca-run-crop-factor').forEach(inp => {
             inp.addEventListener('input', () => {
                 const crop = String(inp.dataset.crop || '');
+                const key  = String(inp.dataset.key || '');
                 const txt  = String(inp.value ?? '').trim();
                 const num  = (txt === '') ? null : Number(txt);
-
-                const key = 'prod_cost_bmp_usd_ha';
 
                 let row = state.runCropVars.find(r => String(r.crop_code) === crop && String(r.key) === key);
                 if (!row) {

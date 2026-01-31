@@ -398,7 +398,7 @@ $runs       = SwatRunRepository::all();
                         <div class="row g-2" id="mcaDefaultsRunForm"><!-- filled by JS --></div>
 
                         <div class="mt-3" id="mcaDefaultsRunCropBlock" style="display:none;">
-                            <div class="fw-semibold mb-2">Crop BMP production cost (crops in this scenario)</div>
+                            <div class="fw-semibold mb-2">BMP production cost factors (crops in this scenario)</div>
                             <div class="table-responsive" id="mcaDefaultsRunCropTableWrap"><!-- filled by JS --></div>
                         </div>
                     </div>

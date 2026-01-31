@@ -127,11 +127,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     if ($runId > 0) {
         // run keys you want editable
         $runKeys = [
-            'bmp_prod_cost_usd_ha',
-            'time_horizon_years',
             'discount_rate',
+            'economic_life_years',
             'bmp_invest_cost_usd_ha',
             'bmp_annual_om_cost_usd_ha',
+            'water_cost_usd_m3',
+            'water_use_fee_usd_ha',
         ];
 
         $place = implode(',', array_fill(0, count($runKeys), '?'));
@@ -166,7 +167,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         )));
 
         $runCropVars = [];
-        $runCropKeys = ['prod_cost_bmp_usd_ha'];
+        $runCropKeys = [
+            // labour (person-days/ha)
+            'bmp_labour_land_preparation_pd_ha',
+            'bmp_labour_planting_pd_ha',
+            'bmp_labour_fertilizer_application_pd_ha',
+            'bmp_labour_weeding_pd_ha',
+            'bmp_labour_pest_control_pd_ha',
+            'bmp_labour_irrigation_pd_ha',
+            'bmp_labour_harvesting_pd_ha',
+            'bmp_labour_other_pd_ha',
+
+            // materials (USD/ha)
+            'bmp_material_seeds_usd_ha',
+            'bmp_material_mineral_fertilisers_usd_ha',
+            'bmp_material_organic_amendments_usd_ha',
+            'bmp_material_pesticides_usd_ha',
+            'bmp_material_tractor_usage_usd_ha',
+            'bmp_material_equipment_usage_usd_ha',
+            'bmp_material_other_usd_ha',
+        ];
 
         if ($runCropCodes) {
             $valuesSql = implode(',', array_fill(0, count($runCropCodes), '(?)'));
@@ -221,8 +241,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     // 3) define which global keys we manage in phase 1
     $globalKeys = [
         'farm_size_ha',
-        'water_cost_usd_m3',
-        'water_use_fee_usd_m3',
+        'land_rent_usd_ha_yr',
+        'labour_day_cost_usd_per_pd',
     ];
 
     // Fetch variable definitions + current values
@@ -487,7 +507,24 @@ try {
                           value_bool = EXCLUDED.value_bool
         ");
 
-        $allowedRunCropKeys = ['prod_cost_bmp_usd_ha'];
+        $allowedRunCropKeys = [
+            'bmp_labour_land_preparation_pd_ha',
+            'bmp_labour_planting_pd_ha',
+            'bmp_labour_fertilizer_application_pd_ha',
+            'bmp_labour_weeding_pd_ha',
+            'bmp_labour_pest_control_pd_ha',
+            'bmp_labour_irrigation_pd_ha',
+            'bmp_labour_harvesting_pd_ha',
+            'bmp_labour_other_pd_ha',
+
+            'bmp_material_seeds_usd_ha',
+            'bmp_material_mineral_fertilisers_usd_ha',
+            'bmp_material_organic_amendments_usd_ha',
+            'bmp_material_pesticides_usd_ha',
+            'bmp_material_tractor_usage_usd_ha',
+            'bmp_material_equipment_usage_usd_ha',
+            'bmp_material_other_usd_ha',
+        ];
 
         foreach ($runCrops as $cv) {
             $crop = trim((string)($cv['crop_code'] ?? ''));
