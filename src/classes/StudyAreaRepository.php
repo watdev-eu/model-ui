@@ -14,13 +14,14 @@ final class StudyAreaRepository
                 sa.id,
                 sa.name,
                 sa.enabled,
+                sa.has_rch_results,
                 ST_AsGeoJSON(sa.geom)::json AS geom,
                 COUNT(DISTINCT ss.id) AS subbasins,
                 COUNT(DISTINCT sr.id) AS reaches
             FROM study_areas sa
             LEFT JOIN study_area_subbasins ss ON ss.study_area_id = sa.id
             LEFT JOIN study_area_reaches   sr ON sr.study_area_id = sa.id
-            GROUP BY sa.id, sa.name, sa.enabled, sa.geom
+            GROUP BY sa.id, sa.name, sa.enabled, sa.has_rch_results, sa.geom
             ORDER BY sa.name
         ";
         return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
@@ -34,6 +35,7 @@ final class StudyAreaRepository
                 id,
                 name,
                 enabled,
+                has_rch_results,
                 ST_AsGeoJSON(geom)::json AS geom
             FROM study_areas
             WHERE id = :id
@@ -84,6 +86,34 @@ final class StudyAreaRepository
         $stmt->bindValue(':id', $id, PDO::PARAM_INT);
         $stmt->bindValue(':enabled', $enabled, PDO::PARAM_BOOL);
 
+        $stmt->execute();
+    }
+
+    public static function hasRchResults(int $studyAreaId): bool
+    {
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare("
+        SELECT has_rch_results
+        FROM study_areas
+        WHERE id = :id
+    ");
+        $stmt->execute([':id' => $studyAreaId]);
+        $val = $stmt->fetchColumn();
+
+        // If study area missing, treat as false
+        return $val === true || $val === 't' || $val === 1 || $val === '1';
+    }
+
+    public static function setHasRchResults(int $studyAreaId, bool $has): void
+    {
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare("
+        UPDATE study_areas
+        SET has_rch_results = :has
+        WHERE id = :id
+    ");
+        $stmt->bindValue(':id', $studyAreaId, PDO::PARAM_INT);
+        $stmt->bindValue(':has', $has, PDO::PARAM_BOOL);
         $stmt->execute();
     }
 
