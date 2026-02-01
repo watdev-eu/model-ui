@@ -145,13 +145,6 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                     </div>
 
                     <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="avgAllYears" checked>
-                            <label class="form-check-label" for="avgAllYears">Average across all years</label>
-                        </div>
-                    </div>
-
-                    <div class="mb-3">
                         <label class="form-label" for="yearSlider">Year</label>
                         <input type="range" class="form-range" id="yearSlider" min="0" max="0" step="1" value="0" disabled>
                         <div class="d-flex justify-content-between">
@@ -286,7 +279,6 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
     <!-- module that wires switching -->
     <script type="module">
         import { initSubbasinDashboard } from '/assets/js/dashboard/subbasin-dashboard.js';
-        import { INDICATORS } from '/assets/js/dashboard/indicators.js';
 
         const initialAreaId = 0; // start idle, no data loaded
 
@@ -302,7 +294,6 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                     indicatorHelp: document.getElementById('indicatorHelp'),
                     cropGroup: document.getElementById('cropGroup'),
                     crop: document.getElementById('cropSelect'),
-                    avgAllYears: document.getElementById('avgAllYears'),
                     yearSlider: document.getElementById('yearSlider'),
                     yearMin: document.getElementById('yearMin'),
                     yearMax: document.getElementById('yearMax'),
@@ -334,7 +325,6 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                     mcaScenarioCards: document.getElementById('mcaScenarioCards'),
                 },
                 studyAreaId: initialAreaId,
-                indicators: INDICATORS,
                 apiBase: '/api'
             });
 

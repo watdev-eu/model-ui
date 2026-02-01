@@ -19,6 +19,7 @@ final class SwatIndicatorRegistry
             'sector'    => 'Groundwater',
             'name'      => 'Nitrate in groundwater',
             'unit'      => 'kg/ha',
+            'description' => 'Average nitrate leaching to groundwater per hectare, aggregated to subbasin and crop.',
             'source'    => 'hru',
             'grain'     => 'sub_crop',
             'hru'       => [
@@ -34,6 +35,7 @@ final class SwatIndicatorRegistry
             'sector'    => 'Soil',
             'name'      => 'Area with soil erosion (classified)',
             'unit'      => 'bool',
+            'description' => '',
             'source'    => 'hru',
             'grain'     => 'sub_crop',
             'hru'       => [
@@ -50,6 +52,7 @@ final class SwatIndicatorRegistry
             'sector'    => 'Soil',
             'name'      => 'Soil erosion',
             'unit'      => 't/ha',
+            'description' => '',
             'source'    => 'hru',
             'grain'     => 'sub_crop',
             'hru'       => [
@@ -64,6 +67,7 @@ final class SwatIndicatorRegistry
             'sector' => 'Soil',
             'name'   => 'Soil organic carbon',
             'unit'   => 'kg/ha',
+            'description' => '',
             'source' => 'snu',
             'grain'  => 'sub',
             'snu'    => [
@@ -78,6 +82,7 @@ final class SwatIndicatorRegistry
             'sector' => 'Soil',
             'name'   => 'Soil fertility SOC',
             'unit'   => 'kg/ha',
+            'description' => '',
             'source' => 'snu',
             'grain'  => 'sub',
             'snu'    => [
@@ -91,6 +96,7 @@ final class SwatIndicatorRegistry
             'sector' => 'Soil',
             'name'   => 'Soil fertility N',
             'unit'   => 'kg/ha',
+            'description' => '',
             'source' => 'snu',
             'grain'  => 'sub',
             'snu'    => [
@@ -104,6 +110,7 @@ final class SwatIndicatorRegistry
             'sector' => 'Soil',
             'name'   => 'Soil fertility soluble P',
             'unit'   => 'kg/ha',
+            'description' => '',
             'source' => 'snu',
             'grain'  => 'sub',
             'snu'    => [
@@ -117,6 +124,7 @@ final class SwatIndicatorRegistry
             'sector' => 'Soil',
             'name'   => 'Soil fertility organic P',
             'unit'   => 'kg/ha',
+            'description' => '',
             'source' => 'snu',
             'grain'  => 'sub',
             'snu'    => [
@@ -131,6 +139,7 @@ final class SwatIndicatorRegistry
             'sector' => 'Crop',
             'name'   => 'Crop yield per farm',
             'unit'   => 't/ha',
+            'description' => '',
             'source' => 'hru',
             'grain'  => 'sub_crop',
             'hru'    => [
@@ -145,6 +154,7 @@ final class SwatIndicatorRegistry
             'sector' => 'Crop',
             'name'   => 'Nutrient (N) use efficiency',
             'unit'   => '%',
+            'description' => '',
             'source' => 'hru',
             'grain'  => 'sub_crop',
             'hru'    => [
@@ -157,6 +167,7 @@ final class SwatIndicatorRegistry
             'sector' => 'Crop',
             'name'   => 'Nutrient (P) use efficiency',
             'unit'   => '%',
+            'description' => '',
             'source' => 'hru',
             'grain'  => 'sub_crop',
             'hru'    => [
@@ -169,6 +180,7 @@ final class SwatIndicatorRegistry
             'sector' => 'Crop',
             'name'   => 'Irrigation water use',
             'unit'   => 'mm',
+            'description' => '',
             'source' => 'hru',
             'grain'  => 'sub_crop',
             'hru'    => [
@@ -183,6 +195,7 @@ final class SwatIndicatorRegistry
             'sector' => 'Crop',
             'name'   => 'Carbon sequestration in crop',
             'unit'   => 't/ha',
+            'description' => '',
             'source' => 'hru',
             'grain'  => 'sub_crop',
             'hru'    => [
@@ -197,6 +210,7 @@ final class SwatIndicatorRegistry
             'sector' => 'Surface water',
             'name'   => 'Nitrate content in surface water',
             'unit'   => 'kg/m3',
+            'description' => '',
             'source' => 'rch',
             'grain'  => 'sub',
             'rch'    => [
@@ -218,12 +232,13 @@ final class SwatIndicatorRegistry
     {
         $d = self::get($code);
         return [
-            'code'   => $code,
-            'sector' => $d['sector'],
-            'name'   => $d['name'],
-            'unit'   => $d['unit'],
-            'source' => $d['source'],
-            'grain'  => $d['grain'],
+            'code'          => $code,
+            'sector'        => $d['sector'],
+            'name'          => $d['name'],
+            'unit'          => $d['unit'],
+            'description'   => $d['description'] ?? '',
+            'source'        => $d['source'],
+            'grain'         => $d['grain'],
         ];
     }
 

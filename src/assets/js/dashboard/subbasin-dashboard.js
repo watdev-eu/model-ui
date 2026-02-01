@@ -3,7 +3,6 @@
 import { initMcaController } from './mca-controller.js';
 export function initSubbasinDashboard({
                                           els,
-                                          indicators,
                                           studyAreaId,
                                           apiBase = '/api',
                                       }) {
@@ -12,23 +11,19 @@ export function initSubbasinDashboard({
     let subbasinGeoUrl = `/api/study_area_subbasins_geo.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;
     let riversGeoUrl   = `/api/study_area_reaches_geo.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;
 
+    let indicatorDefs = []; // from swat_indicators_list.php
+    let subCropIndicatorIds = new Set(); // filled after registry load
+
     let map, subLayer, subSource, subFeatures = [];
     let vectorLayer;
     let rivLayer, rivSource;
-    let rows = [];      // monthly HRU rows
-    let rchRows = [];   // monthly RCH rows
-    let snuRows = [];
     let years = [];     // list of YEARs in data
     let crops = [];     // list of LULC codes
-    let colsetHru = new Set(); // available HRU columns
-    let colsetRch = new Set(); // available RCH columns
-    let colsetSnu = new Set();// available SNU columns
     let current = {
         datasetUrl: null,
         indicatorId: null,
         crop: null,
         aggMode: 'crop',
-        avgAllYears: true,
         yearIndex: 0,
         selectedSub: null
     };
@@ -36,38 +31,11 @@ export function initSubbasinDashboard({
     // runsStore[runId] = {
     //   meta: { id, label },
     //   years, crops,
-    //   colsetHru, colsetRch, colsetSnu,
-    //   hruAnnualData, rchAnnualData, snuAnnualData
     // }
     const runsStore = new Map();
     let selectedRunIds = [];   // run_ids currently selected in the checkbox list
     let mapScenarioIds = [];   // run_ids currently visualised on the map (0–2)
     let runsMeta = [];         // metadata from runs_list.php (id, run_label, run_date)
-
-    // Cached annual per-HRU sums by available columns
-    // hruAnnual.key = `${SUB}|${LULC}|${HRU}|${YEAR}`
-    // hruAnnual.rows: array of {SUB,LULC,HRU,YEAR, AREAkm2, <col>_sum ...}
-    const hruAnnual = {
-        data: [],
-        // helpers to fetch relevant slices quickly
-        bySubYear(sub, year) {
-            return this.data.filter(r => r.SUB === +sub && r.YEAR === +year);
-        },
-        bySubCropYear(sub, crop, year) {
-            return this.data.filter(r => r.SUB === +sub && r.LULC === crop && r.YEAR === +year);
-        }
-    };
-
-    const rchAnnual = {
-        data: [],
-        bySubYear(sub, year) {
-            return this.data.filter(r => r.SUB === +sub && r.YEAR === +year);
-        }
-    };
-
-    const snuAnnual = {
-        data: [],
-    };
 
     let cropLookup = {};
 
@@ -95,6 +63,9 @@ export function initSubbasinDashboard({
         }
     });
     setIdleState();
+    if (currentStudyAreaId > 0) {
+        bootstrapFromApi().catch(err => console.error('[bootstrap] failed', err));
+    }
 
     // ---------- UI ----------
     function wireUI() {
@@ -171,12 +142,6 @@ export function initSubbasinDashboard({
 
         els.crop.addEventListener('change', () => {
             current.crop = els.crop.value || null;
-            recomputeAndRedraw();
-        });
-
-        els.avgAllYears.addEventListener('change', () => {
-            current.avgAllYears = els.avgAllYears.checked;
-            els.yearSlider.disabled = current.avgAllYears;
             recomputeAndRedraw();
         });
 
@@ -261,232 +226,97 @@ export function initSubbasinDashboard({
     }
 
     // ---------- Data load ----------
+    async function loadIndicatorRegistry() {
+        const res = await fetch(`${apiBase}/swat_indicators_list.php`);
+        if (!res.ok) throw new Error(`swat_indicators_list HTTP ${res.status}`);
+        const json = await res.json();
+
+        indicatorDefs = (json.indicators || []).map(d => ({
+            ...d,
+            id: d.code ?? d.id,
+        }));
+
+        subCropIndicatorIds = new Set(
+            indicatorDefs
+                .filter(d => d.grain === 'sub_crop')
+                .map(d => d.id)
+        );
+    }
+
     // Load + aggregate all KPI data for a single run_id
     async function loadRunData(runId) {
-        const urlHru = `${apiBase}/hru_kpi.php?run_id=${encodeURIComponent(runId)}`;
-        const urlRch = `${apiBase}/rch_kpi.php?run_id=${encodeURIComponent(runId)}`;
-        const urlSnu = `${apiBase}/snu_kpi.php?run_id=${encodeURIComponent(runId)}`;
+        const res = await fetch(`${apiBase}/swat_indicators_yearly_all.php?run_id=${encodeURIComponent(runId)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
 
-        const [hruJson, rchJson, snuJson] = await Promise.all([
-            fetch(urlHru).then(r => r.json()),
-            fetch(urlRch).then(r => r.json()),
-            fetch(urlSnu).then(r => r.json())
-        ]).catch(err => {
-            console.error('[loadRunData] Failed:', err);
-            throw err;
-        });
+        const yearSet = new Set();
+        const cropSet = new Set();
 
-        // ---------- HRU rows ----------
-        const rows = (hruJson.rows || []).map(r => ({
-            ...r,
-            LULC: clean(r.LULC),
-            HRU: +r.HRU,
-            HRUGIS: +r.HRUGIS,
-            SUB: +r.SUB,
-            YEAR: +r.YEAR,
-            MON: +r.MON,
-            AREAkm2: toNum(r.AREAkm2)
-        }));
-        console.debug(`[loadRunData] HRU rows from DB for run ${runId}:`, rows.length);
+        const index = {}; // indicatorId -> { sub: Map("year|sub" -> value), sub_crop: Map("year|sub|crop" -> value), sub_crop_mean: Map("year|sub" -> mean) }
 
-        const colsetHru = new Set(Object.keys(rows[0] || {}));
+        for (const code in data) {
+            const payload = data[code];
+            const isSubCrop = subCropIndicatorIds.has(code);
 
-        const hruLookup = new Map();
-        for (const r of rows) {
-            hruLookup.set(r.HRUGIS, {
-                SUB: r.SUB,
-                LULC: r.LULC,
-                AREAkm2: r.AREAkm2
-            });
-        }
+            if (payload?.status !== 'ok') continue;
+            const rows = payload.rows || [];
 
-        // ---------- RCH rows ----------
-        const rchRows = (rchJson.rows || []).map(r => ({
-            ...r,
-            SUB: +r.SUB,
-            YEAR: +r.YEAR,
-            MON: +r.MON,
-            AREAkm2: toNum(r.AREAkm2),
-            FLOW_OUTcms: toNum(r.FLOW_OUTcms),
-            NO3_OUTkg: toNum(r.NO3_OUTkg),
-            SED_OUTtons: toNum(r.SED_OUTtons)
-        }));
-        console.debug(`[loadRunData] RCH rows from DB for run ${runId}:`, rchRows.length);
+            if (isSubCrop) {
+                const m = new Map();
+                const sum = new Map();  // "year|sub" -> sum
+                const cnt = new Map();  // "year|sub" -> count
 
-        const colsetRch = new Set(Object.keys(rchRows[0] || {}));
+                for (const r of rows) {
+                    const Y = +r.year, S = +r.sub;
+                    if (Number.isFinite(Y)) yearSet.add(Y);
 
-        // ---------- SNU rows ----------
-        const snuRows = (snuJson.rows || []).map(r => ({
-            ...r,
-            HRUGIS: +r.HRUGIS,
-            YEAR: +r.YEAR,
-            // keep raw NO3 / SOL_P / ORG_N / ORG_P / SOL_RSD; we call toNum() later
-        }));
-        console.debug(`[loadRunData] SNU rows from DB for run ${runId}:`, snuRows.length);
+                    if (r.crop && r.crop !== '-' && r.crop !== 'NULL') {
+                        cropSet.add(r.crop);
+                        const key = `${Y}|${S}|${r.crop}`;
+                        const v = num(r.value);
+                        if (Number.isFinite(v)) {
+                            m.set(key, v);
 
-        const colsetSnu = new Set(Object.keys(snuRows[0] || {}));
-
-        // ---------- Years / crops ----------
-        const years = [...new Set(rows.map(r => r.YEAR).filter(Number.isFinite))].sort((a, b) => a - b);
-        const crops = [...new Set(rows.map(r => r.LULC).filter(Boolean))].sort();
-
-        // ---------- Aggregate SNU -> annual per SUB–CROP–YEAR ----------
-        const snuAcc = new Map();  // key: SUB|LULC|YEAR
-
-        for (const r of snuRows) {
-            const h = hruLookup.get(+r.HRUGIS);
-            if (!h) continue;
-
-            const key = `${h.SUB}|${h.LULC}|${r.YEAR}`;
-            let obj = snuAcc.get(key);
-            if (!obj) {
-                obj = {
-                    SUB: h.SUB,
-                    LULC: h.LULC,
-                    YEAR: r.YEAR,
-                    AREAkm2: h.AREAkm2,
-                    ORG_N_sum: 0,
-                    NO3_sum: 0,
-                    SOL_P_sum: 0,
-                    ORG_P_sum: 0,
-                    SOL_RSD_sum: 0,
-                    count: 0
-                };
-                snuAcc.set(key, obj);
-            }
-
-            obj.ORG_N_sum += toNum(r.ORG_N);
-            obj.NO3_sum   += toNum(r.NO3);
-            obj.SOL_P_sum += toNum(r.SOL_P);
-            obj.ORG_P_sum += toNum(r.ORG_P);
-            obj.SOL_RSD_sum += toNum(r.SOL_RSD);
-            obj.count++;
-        }
-
-        const snuAnnualData = [...snuAcc.values()].map(o => ({
-            ...o,
-            ORG_N_mean: o.ORG_N_sum / o.count,
-            NO3_mean:   o.NO3_sum   / o.count,
-            SOL_P_mean: o.SOL_P_sum / o.count,
-            ORG_P_mean: o.ORG_P_sum / o.count,
-            SOL_RSD_mean: o.SOL_RSD_sum / o.count
-        }));
-
-        // ---------- Pre-aggregate HRU -> annual per HRU (SUB–LULC–HRU–YEAR) ----------
-        // Columns needed by HRU-based indicators
-        const neededHruCols = new Set();
-        for (const def of indicators) {
-            if (def.disabled) continue;
-            (def.needs || []).forEach(c => neededHruCols.add(c));
-        }
-
-        const keepHruCols = [...neededHruCols].filter(c => colsetHru.has(c));
-        const maxCols = new Set(['YLDt_ha', 'BIOMt_ha']); // also track annual max for these
-
-        const keyHru = r => `${r.SUB}|${r.LULC}|${r.HRU}|${r.YEAR}`;
-        const accHru = new Map();
-
-        for (const r of rows) {
-            if (!Number.isFinite(r.YEAR) || !Number.isFinite(r.MON)) continue;
-            const k = keyHru(r);
-            let obj = accHru.get(k);
-            if (!obj) {
-                obj = {
-                    SUB: r.SUB,
-                    LULC: r.LULC,
-                    HRU: r.HRU,
-                    YEAR: r.YEAR,
-                    AREAkm2: r.AREAkm2
-                };
-                for (const c of keepHruCols) {
-                    obj[`${c}_sum`] = 0;
-                    if (maxCols.has(c)) {
-                        obj[`${c}_max`] = Number.NEGATIVE_INFINITY;
+                            const k2 = `${Y}|${S}`;
+                            sum.set(k2, (sum.get(k2) || 0) + v);
+                            cnt.set(k2, (cnt.get(k2) || 0) + 1);
+                        }
                     }
                 }
-                accHru.set(k, obj);
-            }
 
-            for (const c of keepHruCols) {
-                const v = toNum(r[c]);
-                if (!Number.isFinite(v)) continue;
-
-                obj[`${c}_sum`] += v;
-                if (maxCols.has(c)) {
-                    obj[`${c}_max`] = Math.max(obj[`${c}_max`], v);
+                const mean = new Map();
+                for (const [k2, s] of sum.entries()) {
+                    mean.set(k2, s / (cnt.get(k2) || 1));
                 }
-            }
-        }
 
-        // Normalise "no data" max values
-        for (const obj of accHru.values()) {
-            for (const c of ['YLDt_ha', 'BIOMt_ha']) {
-                const kMax = `${c}_max`;
-                if (kMax in obj && obj[kMax] === Number.NEGATIVE_INFINITY) {
-                    obj[kMax] = NaN;
+                index[code] = { grain: 'sub_crop', m, mean };
+            } else {
+                // grain=sub
+                const m = new Map();
+                for (const r of rows) {
+                    const Y = +r.year, S = +r.sub;
+                    if (Number.isFinite(Y)) yearSet.add(Y);
+
+                    const v = num(r.value);
+                    if (Number.isFinite(v)) {
+                        m.set(`${Y}|${S}`, v);
+                    }
                 }
+                index[code] = { grain: 'sub', m };
             }
         }
 
-        const hruAnnualData = [...accHru.values()];
-
-        // ---------- Pre-aggregate RCH -> annual per SUB–YEAR ----------
-        const neededRchCols = new Set();
-        for (const def of indicators) {
-            if (def.disabled) continue;
-            (def.needsRch || []).forEach(c => neededRchCols.add(c));
-        }
-
-        const keepRchCols = [...neededRchCols].filter(c => colsetRch.has(c));
-
-        const keyRch = r => `${r.SUB}|${r.YEAR}`;
-        const accRch = new Map();
-
-        for (const r of rchRows) {
-            if (!Number.isFinite(r.YEAR) || !Number.isFinite(r.MON)) continue;
-            const k = keyRch(r);
-            let obj = accRch.get(k);
-            if (!obj) {
-                obj = {
-                    SUB: r.SUB,
-                    YEAR: r.YEAR
-                };
-                for (const c of keepRchCols) {
-                    obj[`${c}_sum`] = 0;
-                }
-                accRch.set(k, obj);
-            }
-
-            for (const c of keepRchCols) {
-                const v = toNum(r[c]);
-                if (!Number.isFinite(v)) continue;
-                obj[`${c}_sum`] += v;
-            }
-        }
-
-        const rchAnnualData = [...accRch.values()];
-
-        // ---------- Return structured run data ----------
         return {
             id: runId,
-            // raw monthly rows (optional but handy)
-            rows,
-            rchRows,
-            snuRows,
-            // meta
-            years,
-            crops,
-            colsetHru,
-            colsetRch,
-            colsetSnu,
-            // annual aggregates used by indicators
-            hruAnnualData,
-            rchAnnualData,
-            snuAnnualData
+            indicators: data,
+            years: [...yearSet].sort((a,b)=>a-b),
+            crops: [...cropSet].sort(),
+            index,
         };
     }
 
     async function bootstrapFromApi() {
+        await loadIndicatorRegistry();
         await loadCropLookup();
 
         const [subGJ, rivGJ] = await Promise.all([
@@ -567,6 +397,10 @@ export function initSubbasinDashboard({
         });
 
         await mca.loadActivePreset(currentStudyAreaId);
+    }
+
+    function timeLabelText() {
+        return `Year ${years[current.yearIndex] ?? '—'}`;
     }
 
     async function loadCropLookup() {
@@ -669,17 +503,18 @@ export function initSubbasinDashboard({
 
         const geoFmt = new ol.format.GeoJSON();
 
+        const subDataProj = guessGeoJSONProjection(subGJ);
+        const rivDataProj = guessGeoJSONProjection(rivGJ);
+
         subFeatures = geoFmt.readFeatures(subGJ, {
-            dataProjection: 'EPSG:3857',
-            featureProjection: 'EPSG:3857'
+            dataProjection: subDataProj,
+            featureProjection: 'EPSG:3857',
         }) || [];
-        console.debug('[SUB] features:', subFeatures.length);
 
         let rivFeatures = geoFmt.readFeatures(rivGJ, {
-            dataProjection: 'EPSG:3857',
-            featureProjection: 'EPSG:3857'
+            dataProjection: rivDataProj,
+            featureProjection: 'EPSG:3857',
         }) || [];
-        console.debug('[RIV] features:', rivFeatures.length);
 
         if (!map) {
             // ---------- First time: create sources + layers ----------
@@ -896,7 +731,6 @@ export function initSubbasinDashboard({
         if (mapScenarioIds.length === 1) {
             return valueForSubRun(mapScenarioIds[0], sub);
         }
-
         // Two scenarios: absolute difference between them
         const v1 = valueForSubRun(mapScenarioIds[0], sub);
         const v2 = valueForSubRun(mapScenarioIds[1], sub);
@@ -905,51 +739,23 @@ export function initSubbasinDashboard({
         return Math.abs(v2 - v1);
     }
 
-    function computeIndicatorValue(def, sub, year) {
-        // Area helper (ha)
-        const areaHa = r => (Number.isFinite(r.AREAkm2) ? r.AREAkm2 * 100 : NaN);
-
-        if (current.aggMode === 'sub' && def.requiresCrop) {
-            // Weighted mean across all crops for this sub+year
-            let wsum = 0, vsum = 0;
-            for (const c of crops) {
-                const rows = hruAnnual.bySubCropYear(sub, c, year);
-                if (!rows.length) continue;
-                // area for this crop in this sub-year
-                let area = 0; for (const r of rows) area += areaHa(r);
-                const v = def.calc({
-                    hruAnnual,
-                    rchAnnual,
-                    snuAnnual,
-                    areaHa,
-                    sub,
-                    crop: c,
-                    year
-                });
-                if (Number.isFinite(v) && area > 0) { wsum += area; vsum += v * area; }
-            }
-            return wsum ? vsum / wsum : NaN;
-        }
-
-        // Default path: crop-specific if needed, otherwise sub-only
-        const crop = def.requiresCrop ? current.crop : undefined;
-
-        return def.calc({
-            hruAnnual,
-            rchAnnual,
-            snuAnnual,
-            areaHa,
-            sub,
-            crop,
-            year
-        });
+    function num(v) {
+        const n = (typeof v === 'number') ? v : parseFloat(String(v).replace(',','.'));
+        return Number.isFinite(n) ? n : NaN;
     }
 
-    function valueForSubRun(runId, sub) {
+    function rowsForIndicator(rd, indicatorId) {
+        const payload = rd?.indicators?.[indicatorId];
+        if (!payload || payload.status !== 'ok') return [];
+        return payload.rows || [];
+    }
+
+    function valueForSubRun(runId, sub, yearOverride = null) {
         const def = currentIndicator();
         if (!def) return NaN;
 
-        if (def.isMca) {
+        // MCA still special
+        if (def.id === 'mca_score' || def.isMca) {
             const v = mca.getScenarioScore(runId);
             return Number.isFinite(v) ? v : NaN;
         }
@@ -957,20 +763,30 @@ export function initSubbasinDashboard({
         const rd = runsStore.get(runId);
         if (!rd) return NaN;
 
-        if (current.avgAllYears) {
-            // average across all years available in this run
-            const vals = rd.years
-                .map(Y => computeIndicatorValueForRun(def, rd, sub, Y))
-                .filter(Number.isFinite);
-            if (!vals.length) return NaN;
-            return vals.reduce((a, b) => a + b, 0) / vals.length;
+        const baseYear = years[current.yearIndex];
+        const year =
+            (yearOverride != null) ? yearOverride :
+                (rd.years.includes(baseYear) ? baseYear : rd.years[rd.years.length - 1]);
+
+        if (!Number.isFinite(+year)) return NaN;
+
+        const idx = rd.index?.[def.id];
+        if (!idx) return NaN;
+
+        if (idx.grain === 'sub') {
+            const v = idx.m.get(`${year}|${+sub}`);
+            return Number.isFinite(v) ? v : NaN;
         }
 
-        // specific year: use the year index from the *active* run
-        const year = years[current.yearIndex];
-        if (!Number.isFinite(year)) return NaN;
+        // sub_crop
+        if (current.aggMode === 'sub') {
+            const v = idx.mean.get(`${year}|${+sub}`);
+            return Number.isFinite(v) ? v : NaN;
+        }
 
-        return computeIndicatorValueForRun(def, rd, sub, year);
+        if (!current.crop) return NaN;
+        const v = idx.m.get(`${year}|${+sub}|${current.crop}`);
+        return Number.isFinite(v) ? v : NaN;
     }
 
     // ---------- Time series for clicked sub ----------
@@ -995,7 +811,7 @@ export function initSubbasinDashboard({
 
             const xs = rd.years.slice();
             const ys = rd.years.map(Y => {
-                const v = computeIndicatorValueForRun(def, rd, current.selectedSub, Y);
+                const v = valueForSubRun(runId, current.selectedSub, Y);
                 return Number.isFinite(v) ? v : null;
             });
 
@@ -1026,42 +842,50 @@ export function initSubbasinDashboard({
     }
 
     // ---------- UI population ----------
-    function isIndicatorAvailable(def) {
-        if (def?.disabled) return false;
-
-        const needsHru = def.needs || [];
-        const needsRch = def.needsRch || [];
-        const needsSnu = def.needsSnu || [];
-
-        const okHru = needsHru.length === 0 || needsHru.every(c => colsetHru.has(c));
-        const okRch = needsRch.length === 0 || needsRch.every(c => colsetRch.has(c));
-        const okSnu = needsSnu.length === 0 || needsSnu.every(c => colsetSnu.has(c));
-
-        return okHru && okRch && okSnu;
-    }
-
     function populateMetricsCombined() {
-        // mark availability per indicator, group by sector
-        const defs = indicators.map(d => ({ ...d, enabled: isIndicatorAvailable(d) }));
+        if (!els.metric) return;
+
+        // Use the active run to decide what is available
+        const rd = runsStore.get(current.runId);
+        const defs = (indicatorDefs || []).map(d => {
+            const payload = rd?.indicators?.[d.id];
+            const enabled = !!payload && payload.status === 'ok';
+            return { ...d, enabled };
+        });
+
+        // group by sector
         const bySector = new Map();
         for (const d of defs) {
-            if (!bySector.has(d.sector)) bySector.set(d.sector, []);
-            bySector.get(d.sector).push(d);
+            const sector = d.sector || 'Other';
+            if (!bySector.has(sector)) bySector.set(sector, []);
+            bySector.get(sector).push(d);
         }
-        const html = [...bySector.entries()].sort(([a],[b]) => a.localeCompare(b))
+
+        const html = [...bySector.entries()]
+            .sort(([a], [b]) => a.localeCompare(b))
             .map(([sector, list]) => {
-                const opts = list.map(d =>
-                    `<option value="${escAttr(d.id)}" ${!d.enabled ? 'disabled' : ''}>
-                        ${escHtml(d.name)}${!d.enabled ? ' — (not available)' : ''}
-                    </option>`).join('');
+                const opts = list
+                    .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+                    .map(d => `
+          <option value="${escAttr(d.id)}" ${d.enabled ? '' : 'disabled'}>
+            ${escHtml(d.name)}${d.enabled ? '' : ' — (not available)'}
+          </option>
+        `).join('');
                 return `<optgroup label="${escAttr(sector)}">${opts}</optgroup>`;
             }).join('');
+
         els.metric.innerHTML = html;
-        // pick first enabled
-        const firstEnabled = defs.find(d => d.enabled);
-        if (firstEnabled) els.metric.value = firstEnabled.id;
-        current.indicatorId = els.metric.value || null;
-        els.indicatorHelp.textContent = currentIndicator()?.description || '';
+
+        // Keep current selection if possible
+        const stillValid = defs.find(d => d.enabled && d.id === current.indicatorId);
+        const pick = stillValid || defs.find(d => d.enabled);
+
+        if (pick) {
+            els.metric.value = pick.id;
+            current.indicatorId = pick.id;
+        } else {
+            current.indicatorId = null;
+        }
         updateCropVisibility();
     }
 
@@ -1092,7 +916,6 @@ export function initSubbasinDashboard({
         els.yearSlider.min = 0;
         els.yearSlider.max = Math.max(0, years.length - 1);
 
-        // Clamp current.yearIndex to the new range
         if (current.yearIndex < 0 || current.yearIndex >= years.length) {
             current.yearIndex = 0;
         }
@@ -1102,15 +925,41 @@ export function initSubbasinDashboard({
         els.yearMax.textContent   = years[years.length - 1] ?? '—';
         els.yearLabel.textContent = years[current.yearIndex] ?? '—';
 
-        // Important: use current.avgAllYears as the source of truth
-        els.yearSlider.disabled = current.avgAllYears;
+        els.yearSlider.disabled = years.length <= 1; // enable unless trivial
     }
 
     function updateCropVisibility() {
         const def = currentIndicator();
-        const show = !!def?.requiresCrop && current.aggMode !== 'sub';
-        els.cropGroup.style.display = show ? 'block' : 'none';
-        els.indicatorHelp.textContent = def?.description || '';
+        const needsCrop = def?.grain === 'sub_crop';
+        const showCropSelect = needsCrop && current.aggMode !== 'sub';
+
+        if (els.cropGroup) els.cropGroup.style.display = showCropSelect ? 'block' : 'none';
+
+        // Help text: prefer description, otherwise fallback
+        if (els.indicatorHelp) {
+            const fallback = def
+                ? `Source: ${String(def.source || '').toUpperCase()} · ${def.grain === 'sub_crop' ? 'Subbasin + crop' : 'Subbasin'}`
+                : '';
+            els.indicatorHelp.textContent = (def?.description || fallback || '');
+        }
+
+        // Guard: if crop required but we have no crops, disable crop selector + show message
+        if (needsCrop && current.aggMode !== 'sub') {
+            const hasCrops = Array.isArray(crops) && crops.length > 0;
+            if (els.crop) els.crop.disabled = !hasCrops;
+            if (!hasCrops) {
+                current.crop = null;
+                if (els.crop) els.crop.value = '';
+
+                if (els.indicatorHelp) {
+                    els.indicatorHelp.textContent =
+                        (def?.description ? `${def.description} ` : '') +
+                        'No crop codes found for this run (cannot display crop-specific values).';
+                }
+            }
+        } else {
+            if (els.crop) els.crop.disabled = false;
+        }
     }
 
     // ---------- Helpers ----------
@@ -1204,106 +1053,33 @@ export function initSubbasinDashboard({
 
         const prevCrop = preserveCrop ? current.crop : null;
 
-        // Copy to globals used everywhere else:
         years = rd.years.slice();
         crops = rd.crops.slice();
-
-        colsetHru = new Set(rd.colsetHru);
-        colsetRch = new Set(rd.colsetRch);
-        colsetSnu = new Set(rd.colsetSnu);
-
-        hruAnnual.data = rd.hruAnnualData;
-        rchAnnual.data = rd.rchAnnualData;
-        snuAnnual.data = rd.snuAnnualData;
-
         current.runId = runId;
 
-        // Keep avgAllYears UI in sync with state
-        if (els.avgAllYears) {
-            els.avgAllYears.checked = current.avgAllYears;
-        }
-
-        // Rebuild crops but try to keep the previous selection if possible
         populateCrops(prevCrop);
-
-        // Rebuild slider for this run while respecting current.avgAllYears + current.yearIndex
         initYearSlider();
-
-        // Rebuild metric list (availability may change per run)
         populateMetricsCombined();
     }
 
-    function computeIndicatorValueForRun(def, rd, sub, year, cropOverride = null) {
-        const areaHa = r => (Number.isFinite(r.AREAkm2) ? r.AREAkm2 * 100 : NaN);
-
-        const hruWrapper = {
-            data: rd.hruAnnualData,
-            bySubYear(s, y) {
-                return this.data.filter(r => r.SUB === +s && r.YEAR === y);
-            },
-            bySubCropYear(s, c, y) {
-                return this.data.filter(r => r.SUB === +s && r.LULC === c && r.YEAR === y);
-            }
-        };
-
-        const rchWrapper = {
-            data: rd.rchAnnualData,
-            bySubYear(s, y) {
-                return this.data.filter(r => r.SUB === +s && r.YEAR === y);
-            }
-        };
-
-        const snuWrapper = { data: rd.snuAnnualData };
-
-        // --- Aggregated across crops (aggMode === 'sub' and no explicit crop override)
-        if (current.aggMode === 'sub' && def.requiresCrop && !cropOverride) {
-            let wsum = 0, vsum = 0;
-            for (const c of rd.crops) {
-                const rows = hruWrapper.bySubCropYear(sub, c, year);
-                if (!rows.length) continue;
-
-                let area = 0; for (const r of rows) area += areaHa(r);
-
-                const v = def.calc({
-                    hruAnnual: hruWrapper,
-                    rchAnnual: rchWrapper,
-                    snuAnnual: snuWrapper,
-                    areaHa,
-                    sub,
-                    crop: c,
-                    year
-                });
-
-                if (Number.isFinite(v) && area > 0) {
-                    wsum += area;
-                    vsum += v * area;
-                }
-            }
-            return wsum ? vsum / wsum : NaN;
+    function drawCropChart(def) {
+        if (!current.selectedSub || !selectedRunIds.length) {
+            Plotly.purge(els.cropChart);
+            return;
         }
 
-        // --- Crop-specific or crop-agnostic
-        const crop = def.requiresCrop ? (cropOverride || current.crop) : undefined;
+        const year = years[current.yearIndex];
+        if (!Number.isFinite(+year)) {
+            Plotly.purge(els.cropChart);
+            return;
+        }
 
-        const mcaInputs = (typeof mca?.getLocalInputsForRun === 'function')
-            ? mca.getLocalInputsForRun(rd.id)
-            : null;
+        // Only meaningful for sub_crop indicators
+        if (def.grain !== 'sub_crop') {
+            Plotly.purge(els.cropChart);
+            return;
+        }
 
-        return def.calc({
-            hruAnnual: hruWrapper,
-            rchAnnual: rchWrapper,
-            snuAnnual: snuWrapper,
-            areaHa,
-            sub,
-            crop,
-            year,
-
-            mcaInputs,
-        });
-    }
-
-    function drawCropChart(def) {
-        const yr = current.avgAllYears ? null : (years[current.yearIndex] ?? null);
         const traces = [];
 
         for (const runId of selectedRunIds) {
@@ -1313,21 +1089,19 @@ export function initSubbasinDashboard({
             const meta = runsMeta.find(r => r.id === runId);
             const runLabel = meta ? meta.run_label : `Run ${runId}`;
 
+            const rows = rowsForIndicator(rd, def.id)
+                .filter(r => +r.sub === +current.selectedSub && +r.year === +year && r.crop);
+
+            if (!rows.length) continue;
+
+            // build bars per crop
             const x = [];
             const y = [];
 
-            for (const c of rd.crops) {
-                const yearsToUse = (yr == null ? rd.years : [yr]);
-                const vals = yearsToUse.map(Y =>
-                    computeIndicatorValueForRun(def, rd, current.selectedSub, Y, c)
-                ).filter(Number.isFinite);
-
-                if (!vals.length) continue;
-                x.push(displayCrop(c));
-                y.push(vals.reduce((a, b) => a + b, 0) / vals.length);
+            for (const r of rows) {
+                x.push(displayCrop(r.crop));
+                y.push(num(r.value));
             }
-
-            if (!x.length) continue;
 
             traces.push({
                 type: 'bar',
@@ -1345,11 +1119,9 @@ export function initSubbasinDashboard({
 
         Plotly.newPlot(els.cropChart, traces, {
             margin: { t: 30, r: 10, b: 80, l: 55 },
-            title: `Crop breakdown — Subbasin ${current.selectedSub} — ${def.name}`,
+            title: `Crop breakdown — Subbasin ${current.selectedSub} — ${def.name} — ${year}`,
             xaxis: { title: 'Crop', tickangle: -30, automargin: true },
-            yaxis: {
-                title: `${def.name}${unitText() ? ` (${unitText()})` : ''}`
-            },
+            yaxis: { title: `${def.name}${unitText() ? ` (${unitText()})` : ''}` },
             barmode: 'group',
             showlegend: false,
             colorway: COLORWAY
@@ -1357,19 +1129,15 @@ export function initSubbasinDashboard({
     }
 
     function currentIndicator() {
-        return indicators.find(d => d.id === current.indicatorId) || null;
+        return (indicatorDefs || []).find(d => d.id === current.indicatorId) || null;
     }
     function cropSuffix() {
         const def = currentIndicator();
-        return def?.requiresCrop && current.crop
-            ? ` — ${displayCrop(current.crop)}`
-            : '';
+        const needsCrop = def?.grain === 'sub_crop';
+        return needsCrop && current.crop ? ` — ${displayCrop(current.crop)}` : '';
     }
     function unitText() {
         return currentIndicator()?.unit || '';
-    }
-    function timeLabelText() {
-        return current.avgAllYears ? 'Average across all years' : `Year ${years[current.yearIndex] ?? ''}`;
     }
 
     function getProp(f, key) {
