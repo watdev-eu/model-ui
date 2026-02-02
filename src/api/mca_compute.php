@@ -1,87 +1,81 @@
 <?php
+// src/api/mca_compute.php
 declare(strict_types=1);
 
-if (session_status() !== PHP_SESSION_ACTIVE) session_start();
-
 require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../config/database.php';
+
 require_once __DIR__ . '/../classes/McaComputeService.php';
 
 header('Content-Type: application/json');
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode(['ok' => false, 'error' => 'Method not allowed']);
+function bad(int $code, string $msg): void {
+    http_response_code($code);
+    echo json_encode(['ok' => false, 'error' => $msg]);
     exit;
 }
 
-$presetSetId = (int)($_POST['preset_set_id'] ?? 0);
-$cropCode    = trim((string)($_POST['crop_code'] ?? ''));
-
-if ($presetSetId <= 0) {
-    http_response_code(422);
-    echo json_encode(['ok' => false, 'error' => 'preset_set_id is required']);
-    exit;
+// --- CSRF (adjust if you have a helper already) ---
+$csrf = (string)($_POST['csrf'] ?? '');
+if (empty($_SESSION['csrf_token']) || !hash_equals((string)$_SESSION['csrf_token'], $csrf)) {
+    bad(403, 'Invalid CSRF token');
 }
 
-$varsOverrides = null;
-$varsJson = trim((string)($_POST['variables_json'] ?? ''));
-if ($varsJson !== '') {
-    $tmp = json_decode($varsJson, true);
-    if (!is_array($tmp)) {
-        http_response_code(422);
-        echo json_encode(['ok'=>false,'error'=>'variables_json invalid JSON']);
-        exit;
-    }
-    $varsOverrides = $tmp;
-}
+// --- Parse inputs ---
+$presetSetId = isset($_POST['preset_set_id']) ? (int)$_POST['preset_set_id'] : 0;
+if ($presetSetId <= 0) bad(400, 'preset_set_id is required');
 
-$cropVarsOverrides = null;
-$cropVarsJson = trim((string)($_POST['crop_variables_json'] ?? ''));
-if ($cropVarsJson !== '') {
-    $tmp = json_decode($cropVarsJson, true);
-    if (!is_array($tmp)) {
-        http_response_code(422);
-        echo json_encode(['ok'=>false,'error'=>'crop_variables_json invalid JSON']);
-        exit;
-    }
-    $cropVarsOverrides = $tmp;
-}
+$cropCode = isset($_POST['crop_code']) && $_POST['crop_code'] !== '' ? (string)$_POST['crop_code'] : null;
+
+$runIds = [];
+$runIdsJson = (string)($_POST['run_ids_json'] ?? '[]');
+$decoded = json_decode($runIdsJson, true);
+if (is_array($decoded)) $runIds = $decoded;
+
+$presetItems = [];
+$pj = (string)($_POST['preset_items_json'] ?? '[]');
+$decoded = json_decode($pj, true);
+if (is_array($decoded)) $presetItems = $decoded;
+
+$variables = [];
+$vj = (string)($_POST['variables_json'] ?? '[]');
+$decoded = json_decode($vj, true);
+if (is_array($decoded)) $variables = $decoded;
+
+$cropVars = [];
+$cvj = (string)($_POST['crop_variables_json'] ?? '[]');
+$decoded = json_decode($cvj, true);
+if (is_array($decoded)) $cropVars = $decoded;
+
+$refFactors = [];
+$rfj = (string)($_POST['crop_ref_factors_json'] ?? '[]');
+$decoded = json_decode($rfj, true);
+if (is_array($decoded)) $refFactors = $decoded;
+
+$runInputs = [];
+$rij = (string)($_POST['run_inputs_json'] ?? '[]');
+$decoded = json_decode($rij, true);
+if (is_array($decoded)) $runInputs = $decoded;
 
 try {
-    // --- optional: CSRF check if app uses it ---
-    // if (!hash_equals($_SESSION['csrf_token'] ?? '', (string)($_POST['csrf'] ?? ''))) {
-    //     http_response_code(403);
-    //     echo json_encode(['ok' => false, 'error' => 'Invalid CSRF token']);
-    //     exit;
-    // }
+    $payload = [
+        'preset_set_id'     => $presetSetId,
+        'crop_code'         => $cropCode,
 
-    // --- preset item overrides (weights/direction/enabled) ---
-    $overrideItems = null;
-    $presetItemsJson = trim((string)($_POST['preset_items_json'] ?? ''));
-    if ($presetItemsJson !== '') {
-        $tmp = json_decode($presetItemsJson, true);
-        if (!is_array($tmp)) {
-            http_response_code(422);
-            echo json_encode(['ok' => false, 'error' => 'preset_items_json invalid JSON']);
-            exit;
-        }
-        $overrideItems = $tmp;
-    }
+        'run_ids'           => $runIds,
 
-    $result = McaComputeService::compute(
-        $presetSetId,
-        $cropCode !== '' ? $cropCode : null,
-        $overrideItems,
-        $varsOverrides,
-        $cropVarsOverrides
-    );
+        'preset_items'      => $presetItems,
+        'variables'         => $variables,
+        'crop_variables'    => $cropVars,
+        'crop_ref_factors'  => $refFactors,
 
-    echo json_encode(['ok' => true] + $result);
+        'run_inputs'        => $runInputs,
+    ];
+
+    $out = McaComputeService::compute($payload);
+    echo json_encode($out);
 } catch (InvalidArgumentException $e) {
-    http_response_code(422);
-    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+    bad(400, $e->getMessage());
 } catch (Throwable $e) {
-    error_log('[mca_compute] ' . $e->getMessage());
-    http_response_code(500);
-    echo json_encode(['ok' => false, 'error' => 'Server error']);
+    bad(500, $e->getMessage());
 }

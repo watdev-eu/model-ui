@@ -168,6 +168,22 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
         </div>
     </div>
 
+    <!-- charts row -->
+    <div class="row mt-3">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <h2 class="h6 mb-2">Visualizations</h2>
+                    <div class="text-muted small mb-2" id="seriesHint">Click a subbasin to load its time series and crop breakdown.</div>
+                    <div class="row g-3">
+                        <div class="col-12 col-lg-6"><div id="seriesChart" style="height:360px"></div></div>
+                        <div class="col-12 col-lg-6"><div id="cropChart" style="height:360px"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Post-processing row (MCA) -->
     <div class="row mt-3">
         <div class="col-12">
@@ -251,21 +267,48 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                     <div class="form-text small mt-1">
                         MCA scores are computed per included scenario.
                     </div>
-                </div>
-            </div>
-        </div>
-    </div>
 
-    <!-- charts row -->
-    <div class="row mt-3">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-body">
-                    <h2 class="h6 mb-2">Visualizations</h2>
-                    <div class="text-muted small mb-2" id="seriesHint">Click a subbasin to load its time series and crop breakdown.</div>
-                    <div class="row g-3">
-                        <div class="col-12 col-lg-6"><div id="seriesChart" style="height:360px"></div></div>
-                        <div class="col-12 col-lg-6"><div id="cropChart" style="height:360px"></div></div>
+                    <hr class="my-3">
+
+                    <div id="mcaVizWrap" style="display:none;">
+                        <h3 class="h6 mb-2">MCA visualisations</h3>
+
+                        <div class="row g-3">
+                            <div class="col-12 col-lg-6">
+                                <div class="card">
+                                    <div class="card-body">
+                                        <div class="small text-muted mb-2">Spider chart (normalized 0–1)</div>
+                                        <div id="mcaRadarChart" style="height:380px;"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-12 col-lg-6">
+                                <div class="card">
+                                    <div class="card-body">
+                                        <div class="small text-muted mb-2">Overall MCA score (weighted total)</div>
+                                        <div id="mcaTotalsChart" style="height:380px;"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card mt-3">
+                            <div class="card-body">
+                                <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                                    <div class="small text-muted">Raw indicator time series (unweighted)</div>
+
+                                    <select id="mcaIndicatorSelect" class="form-select form-select-sm" style="max-width:360px;">
+                                        <!-- options populated after compute -->
+                                    </select>
+                                </div>
+
+                                <div id="mcaRawTsChart" style="height:420px;"></div>
+                                <div class="form-text small">
+                                    This chart plots <span class="mono">results.raw.by_run[run_id][indicator].series</span> (no weighting, no normalization).
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -323,6 +366,12 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                     mcaCropGlobalsWrap: document.getElementById('mcaCropGlobalsWrap'),
                     mcaScenarioPickerWrap: document.getElementById('mcaScenarioPickerWrap'),
                     mcaScenarioCards: document.getElementById('mcaScenarioCards'),
+
+                    mcaVizWrap: document.getElementById('mcaVizWrap'),
+                    mcaRadarChart: document.getElementById('mcaRadarChart'),
+                    mcaTotalsChart: document.getElementById('mcaTotalsChart'),
+                    mcaIndicatorSelect: document.getElementById('mcaIndicatorSelect'),
+                    mcaRawTsChart: document.getElementById('mcaRawTsChart'),
                 },
                 studyAreaId: initialAreaId,
                 apiBase: '/api'

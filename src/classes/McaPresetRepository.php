@@ -115,15 +115,22 @@ final class McaPresetRepository
     {
         $pdo = Database::pdo();
 
-        // validate sum of enabled weights = 1 (same as Excel)
-        $sum = 0.0;
+        $sum = 0;
         foreach ($items as $it) {
             if (!is_array($it)) continue;
-            $enabled = !empty($it['is_enabled']);
-            if ($enabled) $sum += (float)($it['weight'] ?? 0);
+            if (empty($it['is_enabled'])) continue;
+
+            $w = $it['weight'] ?? 0;
+
+            if (!is_numeric($w) || (int)$w < 0) {
+                throw new InvalidArgumentException('Weights must be integers >= 0');
+            }
+
+            $sum += (int)$w;
         }
-        if (abs($sum - 1.0) > 0.000001) {
-            throw new InvalidArgumentException('Weights of enabled indicators must sum to 1');
+
+        if ($sum <= 0) {
+            throw new InvalidArgumentException('At least one enabled indicator must have weight > 0');
         }
 
         $pdo->beginTransaction();
@@ -159,7 +166,7 @@ final class McaPresetRepository
                 $stmtUp->execute([
                     ':ps'  => $presetSetId,
                     ':ind' => (int)$indId,
-                    ':w'   => (float)($it['weight'] ?? 0),
+                    ':w'   => (int)($it['weight'] ?? 0),
                     ':dir' => $dir,
                     ':en'  => !empty($it['is_enabled']),
                 ]);

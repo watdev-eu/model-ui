@@ -16,6 +16,8 @@ export function initMcaController({ apiBase, els }) {
 
     let runCropsById = {}; // runId -> [crop codes]
 
+    let mcaSelectedIndicator = null;
+
     let baselineRunId = null;
     let cropRefFactorByCropKey = new Map(); // "CROP::key" -> number|null
 
@@ -34,6 +36,224 @@ export function initMcaController({ apiBase, els }) {
         return row.value_text ?? null;
     }
 
+    function runLabel(runId) {
+        const r = (availableRuns || []).find(x => Number(x.id) === Number(runId));
+        return r ? r.label : `Run ${runId}`;
+    }
+
+    function ensureVizVisible(show) {
+        if (!els.mcaVizWrap) return;
+        els.mcaVizWrap.style.display = show ? 'block' : 'none';
+    }
+
+    function getEnabledIndicatorCodesFromResults(json) {
+        // safest: use response enabled_mca (already sorted)
+        const list = json?.enabled_mca || [];
+        return Array.isArray(list) ? list.map(String) : [];
+    }
+
+    function getIndicatorMetaMap(json) {
+        const list = Array.isArray(json?.enabled_mca_meta) ? json.enabled_mca_meta : [];
+        const m = new Map();
+        for (const r of list) {
+            const ck = String(r?.calc_key ?? '');
+            if (!ck) continue;
+            m.set(ck, {
+                name: String(r?.name ?? ck),
+                unit: r?.unit ? String(r.unit) : null,
+                code: r?.code ? String(r.code) : null,
+            });
+        }
+        return m;
+    }
+
+    function indicatorLabel(metaMap, code) {
+        const m = metaMap.get(String(code));
+        return m?.name || String(code);
+    }
+
+    function renderRadar(json) {
+        if (!els.mcaRadarChart) return;
+
+        const enabled = getEnabledIndicatorCodesFromResults(json);
+        const metaMap = getIndicatorMetaMap(json);
+        const runIds = (json?.run_ids || []).map(Number);
+
+        const normRoot = json?.results?.normalized || {};
+        const normByRun = normRoot.by_run || normRoot;
+        if (!enabled.length || !runIds.length) {
+            Plotly.purge(els.mcaRadarChart);
+            return;
+        }
+
+        if (!enabled.length) console.warn('[MCA radar] enabled_mca empty', json);
+        if (!runIds.length) console.warn('[MCA radar] run_ids empty', json);
+        if (!normByRun || !Object.keys(normByRun).length) {
+            console.warn('[MCA radar] normalized.by_run missing/empty', json?.results);
+        }
+
+        const axisLabels = enabled.map(code => indicatorLabel(metaMap, code));
+
+        const traces = runIds.map((rid) => {
+            const row = normByRun?.[rid] || normByRun?.[String(rid)] || {};
+            const rVals = enabled.map(code => {
+                const v = row?.[code];
+                return Number.isFinite(Number(v)) ? Number(v) : null;
+            });
+
+            const theta = axisLabels.concat(axisLabels[0]);
+            const r = rVals.concat(rVals[0]);
+
+            return {
+                type: 'scatterpolar',
+                mode: 'lines+markers',
+                name: runLabel(rid),
+                theta,
+                r,
+                connectgaps: true,
+            };
+        });
+
+        Plotly.newPlot(els.mcaRadarChart, traces, {
+            margin: { t: 10, r: 10, b: 10, l: 10 },
+            polar: { radialaxis: { range: [0, 1], tickformat: '.1f' } },
+            showlegend: true,
+        }, { displayModeBar: false, responsive: true });
+    }
+
+    function renderTotalsBar(json) {
+        if (!els.mcaTotalsChart) return;
+
+        const rows = Array.isArray(json?.totals) ? json.totals : [];
+        if (!rows.length) {
+            Plotly.purge(els.mcaTotalsChart);
+            console.warn('[MCA totals] totals empty', json);
+            return;
+        }
+
+        const x = rows.map(r => runLabel(r.run_id));
+        const y = rows.map(r => (Number.isFinite(Number(r.total_weighted_score)) ? Number(r.total_weighted_score) : null));
+
+        Plotly.newPlot(els.mcaTotalsChart, [{
+            type: 'bar',
+            x, y,
+            hovertemplate: '%{x}<br>%{y:.3f}<extra></extra>',
+        }], {
+            margin: { t: 10, r: 10, b: 70, l: 60 },
+            xaxis: { tickangle: -25, automargin: true },
+            yaxis: { title: 'Total weighted score' },
+            showlegend: false,
+        }, { displayModeBar: false, responsive: true });
+    }
+
+    function populateIndicatorSelect(json) {
+        if (!els.mcaIndicatorSelect) return;
+
+        const enabled = getEnabledIndicatorCodesFromResults(json); // calc_keys
+        const metaMap = getIndicatorMetaMap(json);                 // Map(calc_key -> {name, unit, code})
+
+        if (!enabled.length) {
+            els.mcaIndicatorSelect.innerHTML = '';
+            mcaSelectedIndicator = null;
+            return;
+        }
+
+        if (!mcaSelectedIndicator || !enabled.includes(mcaSelectedIndicator)) {
+            mcaSelectedIndicator = enabled[0];
+        }
+
+        els.mcaIndicatorSelect.innerHTML = enabled.map(calcKey => {
+            const meta = metaMap.get(String(calcKey));
+            const label = meta?.name || String(calcKey);
+            const shownCode = meta?.code || String(calcKey); // SDG-style code if present
+
+            return `<option value="${escapeHtml(calcKey)}">${escapeHtml(label)} (${escapeHtml(shownCode)})</option>`;
+        }).join('');
+
+        els.mcaIndicatorSelect.value = mcaSelectedIndicator;
+    }
+
+    function renderRawTimeseries(json) {
+        if (!els.mcaRawTsChart) return;
+
+        const code = mcaSelectedIndicator;
+        if (!code) {
+            Plotly.purge(els.mcaRawTsChart);
+            return;
+        }
+
+        const metaMap = getIndicatorMetaMap(json);
+        const meta = metaMap.get(String(code));
+        const yTitle = meta?.unit ? `${meta.name} (${meta.unit})` : (meta?.name || code);
+
+        const runIds = (json?.run_ids || []).map(Number);
+        const rawRoot = json?.results?.raw || {};
+        const rawByRun = rawRoot.by_run || rawRoot;
+
+        if (!rawByRun || !Object.keys(rawByRun).length) {
+            console.warn('[MCA raw TS] raw.by_run missing/empty', json?.results);
+        }
+
+        // union years across runs for this indicator
+        const yearSet = new Set();
+        for (const rid of runIds) {
+            const rBlock = rawByRun?.[rid] || rawByRun?.[String(rid)];
+            const series = rBlock?.[code]?.series || rBlock?.[code];
+            if (series && typeof series === 'object') {
+                Object.keys(series).forEach(y => yearSet.add(Number(y)));
+            }
+        }
+        const years = [...yearSet].filter(Number.isFinite).sort((a,b)=>a-b);
+
+        if (!years.length) {
+            Plotly.purge(els.mcaRawTsChart);
+            console.warn('[MCA raw TS] no years found for indicator', code, json?.results);
+            return;
+        }
+
+        const traces = runIds.map((rid) => {
+            const rBlock = rawByRun?.[rid] || rawByRun?.[String(rid)] || {};
+            const series = rBlock?.[code]?.series || rBlock?.[code] || {};
+
+            const y = years.map(yr => {
+                const v = series?.[yr];
+                return Number.isFinite(Number(v)) ? Number(v) : null;
+            });
+
+            return {
+                type: 'scatter',
+                mode: 'lines',
+                connectgaps: true,
+                name: runLabel(rid),
+                x: years,
+                y,
+                hovertemplate: `${runLabel(rid)}<br>%{x}<br>%{y:.4f}<extra></extra>`,
+            };
+        });
+
+        Plotly.newPlot(els.mcaRawTsChart, traces, {
+            margin: { t: 20, r: 10, b: 40, l: 60 },
+            xaxis: { title: 'Year' },
+            yaxis: { title: yTitle },
+            showlegend: true,
+        }, { displayModeBar: false, responsive: true });
+    }
+
+    function renderMcaViz(json) {
+        const ok = !!json?.ok && !!json?.results;
+        ensureVizVisible(ok);
+
+        if (!ok) return;
+
+        // 1) radar + totals
+        renderRadar(json);
+        renderTotalsBar(json);
+
+        // 2) selector + raw ts
+        populateIndicatorSelect(json);
+        renderRawTimeseries(json);
+    }
+
     function buildKeyIndex(list, keyField = 'key') {
         const m = new Map();
         for (const r of (list || [])) {
@@ -41,6 +261,14 @@ export function initMcaController({ apiBase, els }) {
             if (k != null) m.set(String(k), r);
         }
         return m;
+    }
+
+    function allIncludedRunsReady() {
+        for (const rid of includedRunIds) {
+            const st = runInputs.get(Number(rid));
+            if (!st?.ok) return false;
+        }
+        return true;
     }
 
     function getCropFactorNum(runId, cropCode, key, fallback = null) {
@@ -533,6 +761,8 @@ export function initMcaController({ apiBase, els }) {
         // preload inputs for included runs
         await Promise.all([...includedRunIds].map(rid => ensureRunInputsLoaded(rid)));
         renderScenarioCards();
+        updateComputeEnabled();
+        debugComputeGate('after setAvailableRuns preload');
     }
 
     function renderScenarioPicker() {
@@ -767,6 +997,7 @@ export function initMcaController({ apiBase, els }) {
 
         runInputs.set(runId, { loading: true, ok: false, error: null });
         renderScenarioCards();
+        updateComputeEnabled();
 
         try {
             const url = `${apiBase}/mca_run_inputs.php?study_area_id=${encodeURIComponent(studyAreaId)}&run_id=${encodeURIComponent(runId)}`;
@@ -786,15 +1017,53 @@ export function initMcaController({ apiBase, els }) {
                 _varsByKey: buildKeyIndex(json.variables_run || [], 'key'),
                 _factorByCropKey: buildCropKeyIndex2(json.crop_factors || []),
             });
+            renderScenarioCards();
         } catch (e) {
             runInputs.set(runId, { loading: false, ok: false, error: e.message || String(e) });
         }
+        updateComputeEnabled();
     }
 
     function updateComputeEnabled() {
         if (!els.mcaComputeBtn) return;
-        const ok = !!presetId && includedRunIds.size > 0;
-        els.mcaComputeBtn.disabled = !ok;
+
+        let reason = null;
+
+        if (!presetId) reason = 'No preset loaded (presetId missing).';
+        else if (includedRunIds.size <= 0) reason = 'No scenarios included.';
+        else if (!allIncludedRunsReady()) {
+            const bad = [...includedRunIds].map(rid => ({ rid: Number(rid), st: runInputs.get(Number(rid)) }))
+                .filter(x => !x.st?.ok)
+                .map(x => `run ${x.rid}: ${x.st?.loading ? 'loading' : (x.st?.error ? x.st.error : 'not loaded')}`);
+            reason = `Scenario inputs not ready: ${bad.join(' | ')}`;
+        }
+
+        els.mcaComputeBtn.disabled = !!reason;
+        els.mcaComputeBtn.title = reason || 'Compute MCA';
+    }
+
+    function debugComputeGate(where = '') {
+        const states = [...includedRunIds].map(rid => {
+            const st = runInputs.get(Number(rid));
+            return {
+                run_id: Number(rid),
+                ok: !!st?.ok,
+                loading: !!st?.loading,
+                error: st?.error || null,
+                vars: Array.isArray(st?.variables_run) ? st.variables_run.length : null,
+                factors: Array.isArray(st?.crop_factors) ? st.crop_factors.length : null,
+            };
+        });
+
+        console.log('[MCA compute gate]', where, {
+            studyAreaId,
+            presetId,
+            presetIdTruthy: !!presetId,
+            includedRunIds: [...includedRunIds],
+            includedCount: includedRunIds.size,
+            allIncludedRunsReady: allIncludedRunsReady(),
+            states,
+        });
     }
 
     function buildCropKeyIndex2(list) {
@@ -876,7 +1145,20 @@ export function initMcaController({ apiBase, els }) {
         if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
 
         // IMPORTANT: set presetId so compute can enable
-        presetId = Number(json.preset_set_id ?? json.preset_id ?? json.id ?? null);
+        const pidRaw =
+            json.preset_set_id ??
+            json.preset_id ??
+            json.id ??
+            json.preset?.id ??
+            json.preset?.preset_set_id ??
+            json.preset?.preset_id ??
+            json.variable_set?.id; // if your backend calls it this
+
+        presetId = Number.isFinite(Number(pidRaw)) ? Number(pidRaw) : null;
+
+        if (!presetId) {
+            console.error('Preset id missing from mca_preset_active response:', json);
+        }
 
         defaultPresetItems = (json.items || []).map(x => ({ ...x }));
         currentPresetItems = (json.items || []).map(x => ({ ...x }));
@@ -924,6 +1206,12 @@ export function initMcaController({ apiBase, els }) {
         renderVarsForm(currentVars, els.mcaVarsForm);
 
         updateComputeEnabled();
+        debugComputeGate('after loadActivePreset');
+
+        ensureVizVisible(false);
+        if (els.mcaRadarChart) Plotly.purge(els.mcaRadarChart);
+        if (els.mcaTotalsChart) Plotly.purge(els.mcaTotalsChart);
+        if (els.mcaRawTsChart) Plotly.purge(els.mcaRawTsChart);
     }
 
     async function compute(cropCode = null) {
@@ -936,6 +1224,7 @@ export function initMcaController({ apiBase, els }) {
             const fd = new FormData();
             fd.append('csrf', window.CSRF_TOKEN);
             fd.append('preset_set_id', presetId);
+            fd.append('preset_id', presetId);
             if (cropCode) fd.append('crop_code', cropCode);
 
             // IMPORTANT: send included run ids
@@ -953,11 +1242,10 @@ export function initMcaController({ apiBase, els }) {
             fd.append('preset_items_json', JSON.stringify(
                 currentPresetItems.map(it => {
                     const wInt = Math.max(0, Math.round(Number(it.weight) || 0));
-                    const wNorm = it.is_enabled ? (wInt / sumW) : 0;
                     return {
-                        indicator_code: it.indicator_code,
-                        // normalized proportional weight for enabled indicators only
-                        weight: wNorm,
+                        indicator_calc_key: it.indicator_calc_key,
+                        indicator_code: it.indicator_code,         // optional (debug/display)
+                        weight: it.is_enabled ? wInt : 0,
                         direction: it.direction,
                         is_enabled: !!it.is_enabled,
                     };
@@ -995,12 +1283,35 @@ export function initMcaController({ apiBase, els }) {
                     };
                 })
             ));
+            // Build per-run inputs payload (honor local edits)
+            const runInputsPayload = [...includedRunIds].map(runId => {
+                const st = runInputs.get(Number(runId));
+                return {
+                    run_id: Number(runId),
+                    variables_run: st?.variables_run || [],
+                    crop_factors: st?.crop_factors || [],
+                };
+            });
+
+            fd.append('run_inputs_json', JSON.stringify(runInputsPayload));
 
             const res = await fetch(`${apiBase}/mca_compute.php`, { method: 'POST', body: fd });
             const json = await res.json();
+            console.log('[MCA compute] HTTP', res.status, 'ok?', res.ok);
+            console.log('[MCA compute] payload keys', Object.keys(json || {}));
+            console.log('[MCA compute] summary', {
+                ok: json?.ok,
+                hasResults: !!json?.results,
+                run_ids: json?.run_ids,
+                enabled_mca: json?.enabled_mca?.length,
+                totals_len: Array.isArray(json?.totals) ? json.totals.length : null,
+                norm_keys: json?.results?.normalized?.by_run ? Object.keys(json.results.normalized.by_run) : null,
+                raw_keys: json?.results?.raw?.by_run ? Object.keys(json.results.raw.by_run) : null,
+            });
             if (!json.ok) throw new Error(json.error || 'MCA compute failed');
 
             resultsCache = json;
+            renderMcaViz(json);
             return json;
         } finally {
             els.mcaComputeBtn.textContent = 'Compute MCA';
@@ -1016,6 +1327,11 @@ export function initMcaController({ apiBase, els }) {
 
     // ---- UI wiring ----
     els.mcaComputeBtn?.addEventListener('click', () => compute());
+
+    els.mcaIndicatorSelect?.addEventListener('change', () => {
+        mcaSelectedIndicator = String(els.mcaIndicatorSelect.value || '');
+        if (resultsCache) renderRawTimeseries(resultsCache);
+    });
 
     return {
         loadActivePreset,

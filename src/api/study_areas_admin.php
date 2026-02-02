@@ -131,6 +131,19 @@ try {
                 exit;
             }
 
+            $rawHas = $_POST['has_rch_results'] ?? null;
+
+            // default true when missing (checkbox default checked)
+            if ($rawHas === null) {
+                $hasRchResults = true;
+            } else {
+                // accept "1"/"0" and true/false variants
+                $hasRchResults = filter_var($rawHas, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                if ($hasRchResults === null) {
+                    throw new InvalidArgumentException('Invalid has_rch_results value');
+                }
+            }
+
             $subFile = $_FILES['subbasins'] ?? null;
             $rivFile = $_FILES['reaches']   ?? null;
 
@@ -153,9 +166,10 @@ try {
             $pdo->beginTransaction();
 
             // 1) Create study area row
-            $studyAreaId = StudyAreaRepository::create($name);
+            $created = StudyAreaRepository::createWithMcaDefaults($name, (bool)$hasRchResults);
+            $studyAreaId = (int)$created['study_area_id'];
 
-            // 2) Insert subbasins (always store in 3857)
+            // 4) Insert subbasins (always store in 3857)
             $stmtSub = $pdo->prepare("
                 INSERT INTO study_area_subbasins (study_area_id, sub, geom, properties)
                 VALUES (
@@ -240,6 +254,7 @@ try {
                 'name'      => $name,
                 'subbasins' => count($subFeatures),
                 'reaches'   => count($rivFeatures),
+                'has_rch_results' => (bool)$hasRchResults,
             ]);
             break;
 

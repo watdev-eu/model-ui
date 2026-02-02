@@ -58,7 +58,8 @@ $varSet = $stmt->fetch(PDO::FETCH_ASSOC);
 $globalKeys = [
     'farm_size_ha',
     'land_rent_usd_ha_yr',
-    'labour_day_cost_usd_per_pd',
+    'labour_cost_usd_per_day',   // preferred
+    'labour_day_cost_usd',       // fallback
 ];
 
 $place = implode(',', array_fill(0, count($globalKeys), '?'));
@@ -80,7 +81,7 @@ $stmt = $pdo->prepare("
   SELECT
     i.code AS indicator_code,
     i.name AS indicator_name,
-    i.calc_key,
+    i.calc_key AS indicator_calc_key,
     COALESCE(pi.direction, i.default_direction) AS direction,
     pi.weight,
     pi.is_enabled
@@ -183,11 +184,11 @@ if ($varSet && $runId > 0) {
      AND vvr.run_id = :run
     WHERE v.key IN (
       'discount_rate',
-      'time_horizon_years',
+      'economic_life_years',
       'bmp_invest_cost_usd_ha',
       'bmp_annual_om_cost_usd_ha',
       'water_cost_usd_m3',
-      'water_use_fee_usd_m3'
+      'water_use_fee_usd_ha'
     )
     ORDER BY v.key
   ");

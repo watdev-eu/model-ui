@@ -35,6 +35,21 @@ function h(string $v): string {
                    required>
         </div>
 
+        <div class="mb-3 form-check">
+            <input class="form-check-input"
+                   type="checkbox"
+                   id="studyAreaHasRchResults"
+                   name="has_rch_results"
+                   value="1"
+                   checked>
+            <label class="form-check-label" for="studyAreaHasRchResults">
+                Has RCH results
+            </label>
+            <div class="form-text">
+                If enabled, this study area is expected to have reach (RCH) result data available.
+            </div>
+        </div>
+
         <div class="mb-3">
             <label class="form-label" for="studyAreaSubbasins">
                 Subbasins GeoJSON

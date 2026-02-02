@@ -45,18 +45,78 @@ final class StudyAreaRepository
         return $row ?: null;
     }
 
-    public static function create(string $name): int
+    public static function create(string $name, bool $hasRchResults = true): int
     {
         $pdo = Database::pdo();
         $stmt = $pdo->prepare("
-            INSERT INTO study_areas (name, enabled)
-            VALUES (:name, TRUE)
+            INSERT INTO study_areas (name, enabled, has_rch_results)
+            VALUES (:name, TRUE, :has_rch_results)
             RETURNING id
         ");
-        $stmt->execute([
-            ':name' => $name,
+
+        // Explicit bindings for Postgres
+        $stmt->bindValue(':name', $name, PDO::PARAM_STR);
+        $stmt->bindValue(':has_rch_results', $hasRchResults, PDO::PARAM_BOOL);
+
+        $stmt->execute();
+
+        return (int)$stmt->fetchColumn();
+    }
+
+    public static function createWithMcaDefaults(string $name, bool $hasRchResults = true): array
+    {
+        $pdo = Database::pdo();
+
+        // Expect caller to be in a transaction (but don't require it).
+        // We won't begin/commit/rollback here.
+
+        // 1) Create study area
+        $stmt = $pdo->prepare("
+            INSERT INTO study_areas (name, enabled, has_rch_results)
+            VALUES (:name, TRUE, :has_rch_results)
+            RETURNING id
+        ");
+        $stmt->bindValue(':name', $name, PDO::PARAM_STR);
+        $stmt->bindValue(':has_rch_results', $hasRchResults, PDO::PARAM_BOOL);
+        $stmt->execute();
+        $studyAreaId = (int)$stmt->fetchColumn();
+
+        // 2) Create default preset set
+        $stmtPreset = $pdo->prepare("
+            INSERT INTO mca_preset_sets (study_area_id, user_id, name, is_default)
+            VALUES (:sa, NULL, 'Default MCA', TRUE)
+            RETURNING id
+        ");
+        $stmtPreset->execute([':sa' => $studyAreaId]);
+        $presetSetId = (int)$stmtPreset->fetchColumn();
+
+        // 3) Seed preset items
+        $stmtSeedItems = $pdo->prepare("
+            INSERT INTO mca_preset_items (preset_set_id, indicator_id, weight, direction, is_enabled)
+            SELECT :ps, i.id, :w, NULL, TRUE
+            FROM mca_indicators i
+            ORDER BY i.code
+            ON CONFLICT (preset_set_id, indicator_id) DO NOTHING
+        ");
+        $stmtSeedItems->execute([
+            ':ps' => $presetSetId,
+            ':w'  => 10,
         ]);
-        return (int) $stmt->fetchColumn();
+
+        // 4) Create default variable set linked to preset set
+        $stmtVarSet = $pdo->prepare("
+            INSERT INTO mca_variable_sets (study_area_id, user_id, name, is_default, preset_set_id)
+            VALUES (:sa, NULL, 'Default MCA variables', TRUE, :ps)
+            RETURNING id
+        ");
+        $stmtVarSet->execute([':sa' => $studyAreaId, ':ps' => $presetSetId]);
+        $varSetId = (int)$stmtVarSet->fetchColumn();
+
+        return [
+            'study_area_id' => $studyAreaId,
+            'preset_set_id' => $presetSetId,
+            'variable_set_id' => $varSetId,
+        ];
     }
 
     public static function updateGeom(int $id, string $geojson): void

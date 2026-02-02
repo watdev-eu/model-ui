@@ -60,6 +60,12 @@ export function initSubbasinDashboard({
             mcaCropGlobalsWrap: els.mcaCropGlobalsWrap,
             mcaScenarioPickerWrap: els.mcaScenarioPickerWrap,
             mcaScenarioCards: els.mcaScenarioCards,
+
+            mcaVizWrap: els.mcaVizWrap,
+            mcaRadarChart: els.mcaRadarChart,
+            mcaTotalsChart: els.mcaTotalsChart,
+            mcaIndicatorSelect: els.mcaIndicatorSelect,
+            mcaRawTsChart: els.mcaRawTsChart,
         }
     });
     setIdleState();

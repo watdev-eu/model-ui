@@ -29,12 +29,15 @@ function initStudyAreaAdd() {
             return;
         }
 
+        const hasRch = form.querySelector('#studyAreaHasRchResults')?.checked ? '1' : '0';
+
         const fd = new FormData();
         fd.append('action', 'create_from_geojson');
         fd.append('csrf', csrf);
         fd.append('name', nameInput.value.trim());
         fd.append('subbasins', subFile);
         fd.append('reaches', rivFile);
+        fd.append('has_rch_results', hasRch);
 
         try {
             setStatus('Importing study area…');
