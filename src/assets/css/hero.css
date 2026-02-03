@@ -1,0 +1,32 @@
+/* Hero logo strip */
+.watdev-logos .logo {
+    width: auto;
+    height: 22px;
+    object-fit: contain;
+}
+
+/* Main project logo: slightly larger */
+.watdev-logos .logo-main {
+    height: 30px;
+}
+
+/* Partner logos: visually boosted */
+.watdev-logos .logo-partner {
+    height: 24px;
+    opacity: 0.95;
+}
+
+/* Optional: tighten perceived alignment */
+.watdev-logos .logo-partner {
+    transform: translateY(1px);
+}
+
+/* Mobile: keep everything balanced */
+@media (max-width: 576px) {
+    .watdev-logos .logo-main {
+        height: 26px;
+    }
+    .watdev-logos .logo-partner {
+        height: 22px;
+    }
+}

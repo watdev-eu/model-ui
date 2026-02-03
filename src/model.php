@@ -28,7 +28,6 @@ function renderStatusBadge(): string {
                         <th>Period</th>
                         <th>Time step</th>
                         <th>Created</th>
-                        <th class="text-end">Action</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -60,12 +59,6 @@ function renderStatusBadge(): string {
                             </td>
                             <td>
                                 <?= htmlspecialchars(date('Y-m-d H:i', strtotime($r['created_at']))) ?>
-                            </td>
-                            <td class="text-end">
-                                <a class="btn btn-sm btn-outline-primary"
-                                   href="egypt.php?run=<?= (int)$r['id'] ?>">
-                                    Show details
-                                </a>
                             </td>
                         </tr>
                     <?php endforeach; endif; ?>

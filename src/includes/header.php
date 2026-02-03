@@ -13,6 +13,7 @@
 
     <!-- Custom styles -->
     <link href="/assets/css/sidebar.css" rel="stylesheet">
+    <link href="/assets/css/hero.css" rel="stylesheet">
     <link rel="stylesheet" href="/assets/css/tables.css">
     <link rel="stylesheet" href="/assets/css/modal.css">
 

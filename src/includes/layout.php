@@ -132,16 +132,16 @@ $avatarUrl = false;
 
                     // --- Data & admin tools ---
                     [
-                            'label' => 'Data',
-                            'href'  => '/data.php',
-                            'icon'  => 'database',
-                            'title' => 'Manage study areas, crops and runs',
-                    ],
-                    [
                             'label' => 'Import',
                             'href'  => '/import.php',
                             'icon'  => 'cloud-upload',
                             'title' => 'Import model runs from CSV',
+                    ],
+                    [
+                            'label' => 'Data',
+                            'href'  => '/data.php',
+                            'icon'  => 'database',
+                            'title' => 'Manage study areas, crops and runs',
                     ],
                     [
                             'label' => 'Migrate',
@@ -186,10 +186,11 @@ $avatarUrl = false;
             </a>
 
             <ul class="dropdown-menu dropdown-menu-dark text-small shadow" aria-labelledby="userDropdown">
-                <li><a class="dropdown-item" href="#">Instellingen</a></li>
+                <!-- <li><a class="dropdown-item" href="#">Instellingen</a></li>
                 <li><a class="dropdown-item" href="#">Profile</a></li>
                 <li><hr class="dropdown-divider"></li>
-                <li><a class="dropdown-item" href="#">Logout</a></li>
+                <li><a class="dropdown-item" href="#">Logout</a></li> -->
+                <li><a class="dropdown-item" href="#">Not implemented</a></li>
             </ul>
             <span class="d-block mt-2">
                 <i class="bi bi-git me-1"></i>
