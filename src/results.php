@@ -133,6 +133,14 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                         <div class="form-text">Runs are loaded from the database for this study area.</div>
                     </div>
 
+                    <div id="loadingAlert" class="alert alert-info d-none align-items-center gap-2" role="alert">
+                        <div class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></div>
+                        <div>
+                            <div class="fw-semibold" id="loadingTitle">Loading…</div>
+                            <div class="small" id="loadingDetail">Please wait.</div>
+                        </div>
+                    </div>
+
                     <div class="mb-3">
                         <label class="form-label" for="metricSelect">Metric</label>
                         <select id="metricSelect" class="form-select"></select>
@@ -187,9 +195,27 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
     <!-- Post-processing row (MCA) -->
     <div class="row mt-3">
         <div class="col-12">
-            <div class="card">
+            <div class="card" id="mcaCard">
                 <div class="card-body">
-                    <h2 class="h6 mb-3">Multi-Criteria Analysis (MCA)</h2>
+                    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+                        <h2 class="h6 mb-0">Multi-Criteria Analysis (MCA)</h2>
+
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="form-check form-switch m-0">
+                                <input class="form-check-input" type="checkbox" id="mcaEnableSwitch">
+                                <label class="form-check-label small" for="mcaEnableSwitch">
+                                    Enable MCA
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="mcaDisabledNote" class="text-muted small mb-3">
+                        MCA is disabled. Turn it on to configure weights/variables and compute scores.
+                    </div>
+
+                    <!-- wrap ALL MCA content that should hide when disabled -->
+                    <div id="mcaEnabledWrap" style="display:none;">
 
                     <div class="mb-2">
                         <div class="small text-muted">Preset: <span class="fw-semibold">Default for this study area</span></div>
@@ -310,6 +336,7 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                             </div>
                         </div>
                     </div>
+                </div> <!-- /#mcaEnabledWrap -->
                 </div>
             </div>
         </div>
@@ -358,6 +385,11 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                     opacityRiversVal: document.getElementById('opacityRiversVal'),
                     mapScenario: document.getElementById('mapScenarioSelect'),
 
+                    mcaCard: document.getElementById('mcaCard'),
+                    mcaEnableSwitch: document.getElementById('mcaEnableSwitch'),
+                    mcaEnabledWrap: document.getElementById('mcaEnabledWrap'),
+                    mcaDisabledNote: document.getElementById('mcaDisabledNote'),
+
                     mcaComputeBtn: document.getElementById('mcaComputeBtn'),
                     mcaIndicatorsTableWrap: document.getElementById('mcaIndicatorsTableWrap'),
                     mcaWeightSum: document.getElementById('mcaWeightSum'),
@@ -372,6 +404,10 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                     mcaTotalsChart: document.getElementById('mcaTotalsChart'),
                     mcaIndicatorSelect: document.getElementById('mcaIndicatorSelect'),
                     mcaRawTsChart: document.getElementById('mcaRawTsChart'),
+
+                    loadingAlert: document.getElementById('loadingAlert'),
+                    loadingTitle: document.getElementById('loadingTitle'),
+                    loadingDetail: document.getElementById('loadingDetail'),
                 },
                 studyAreaId: initialAreaId,
                 apiBase: '/api'

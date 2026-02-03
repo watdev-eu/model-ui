@@ -7,6 +7,16 @@ export function initSubbasinDashboard({
                                           apiBase = '/api',
                                       }) {
     // ---------- State ----------
+    let loadEpoch = 0;
+    let isLoading = false;
+    let hasRunsForStudyArea = null;
+
+    let mcaEnabled = false;
+
+    // Keep latest run->crops map so MCA can initialize after user enables it
+    let lastRunCropsById = {};
+    let lastSelectedRunIds = [];
+
     let currentStudyAreaId = studyAreaId;
     let subbasinGeoUrl = `/api/study_area_subbasins_geo.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;
     let riversGeoUrl   = `/api/study_area_reaches_geo.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;
@@ -20,6 +30,7 @@ export function initSubbasinDashboard({
     let years = [];     // list of YEARs in data
     let crops = [];     // list of LULC codes
     let current = {
+        runId: null,
         datasetUrl: null,
         indicatorId: null,
         crop: null,
@@ -44,9 +55,62 @@ export function initSubbasinDashboard({
         '#FFA15A', '#19D3F3', '#FF6692', '#B6E880'
     ];
 
+    // ---------- Lazy registries (load once) ----------
+    let indicatorRegistryLoaded = false;
+    let cropLookupLoaded = false;
+
+    async function ensureIndicatorRegistryLoaded() {
+        if (indicatorRegistryLoaded) return;
+        await loadIndicatorRegistry();
+        indicatorRegistryLoaded = true;
+    }
+
+    async function ensureCropLookupLoaded() {
+        if (cropLookupLoaded) return;
+        await loadCropLookup();
+        cropLookupLoaded = true;
+    }
+
+    async function loadCropLookup() {
+        try {
+            const res = await fetch(`${apiBase}/crops_list.php`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            cropLookup = {};
+            for (const row of json.crops || []) {
+                if (row.code) cropLookup[row.code] = row.name || row.code;
+            }
+            console.debug('[CROPS] Loaded', Object.keys(cropLookup).length, 'crop names');
+        } catch (err) {
+            console.warn('[CROPS] Failed to load crop names:', err);
+            cropLookup = {};
+        }
+    }
+
+    // ---------- Data load ----------
+    async function loadIndicatorRegistry() {
+        const res = await fetch(`${apiBase}/swat_indicators_list.php`);
+        if (!res.ok) throw new Error(`swat_indicators_list HTTP ${res.status}`);
+        const json = await res.json();
+
+        indicatorDefs = (json.indicators || []).map(d => ({
+            ...d,
+            id: d.code ?? d.id,
+        }));
+
+        subCropIndicatorIds = new Set(
+            indicatorDefs
+                .filter(d => d.grain === 'sub_crop')
+                .map(d => d.id)
+        );
+
+        console.debug('[INDICATORS] Loaded', indicatorDefs.length, 'definitions');
+    }
+
     // ---------- Boot ----------
+    let mca = null;
     wireUI();
-    const mca = initMcaController({
+    mca = initMcaController({
         apiBase,
         els: {
             // buttons
@@ -77,8 +141,15 @@ export function initSubbasinDashboard({
     function wireUI() {
         els.dataset.addEventListener('change', async () => {
             selectedRunIds = getSelectedRunIdsFromSelect();
+            lastSelectedRunIds = selectedRunIds.slice();
+
+            // Any time scenario selection changes, reset the selected subbasin + charts
+            current.selectedSub = null;
+            if (els.seriesChart) Plotly.purge(els.seriesChart);
+            if (els.cropChart)   Plotly.purge(els.cropChart);
 
             if (!selectedRunIds.length) {
+                current.selectedSub = null;
                 current.runId = null;
                 mapScenarioIds = [];
                 updateMapScenarioOptions();
@@ -86,58 +157,84 @@ export function initSubbasinDashboard({
                 if (els.mapNote) {
                     els.mapNote.textContent = 'Select at least one scenario.';
                 }
-                if (els.seriesHint) {
-                    els.seriesHint.style.display = 'block';
-                    els.seriesHint.textContent = 'Select a scenario, then click a subbasin to load time series.';
-                }
+
                 if (els.seriesChart) Plotly.purge(els.seriesChart);
                 if (els.cropChart)   Plotly.purge(els.cropChart);
 
+                updateHelpText();
                 if (vectorLayer) vectorLayer.changed();
                 return;
             }
 
-            // Ensure data is loaded for all selected runs
-            await Promise.all(selectedRunIds.map(id => ensureRunLoaded(id)));
+            showToast('Loading metrics for selected scenarios…', false, null, 'OK', 2500);
+            setBusy(true, 'Loading…');
+            updateHelpText();
 
-            // union crops across all selected runs
-            const cropSet = new Set();
-            for (const id of selectedRunIds) {
-                const rd = runsStore.get(id);
-                if (!rd) continue;
-                for (const c of rd.crops || []) cropSet.add(c);
+            try {
+                if (els.loadingDetail) els.loadingDetail.textContent = 'Loading indicator registry…';
+                await ensureIndicatorRegistryLoaded();
+
+                if (els.loadingDetail) els.loadingDetail.textContent = 'Loading crop names…';
+                await ensureCropLookupLoaded();
+
+                if (els.loadingDetail) els.loadingDetail.textContent = 'Loading scenario metrics…';
+                await Promise.all(selectedRunIds.map(id => ensureRunLoaded(id)));
+
+                if (els.loadingDetail) els.loadingDetail.textContent = 'Rendering…';
+
+                // union crops across selected runs
+                const cropSet = new Set();
+                for (const id of selectedRunIds) {
+                    const rd = runsStore.get(id);
+                    for (const c of (rd?.crops || [])) cropSet.add(c);
+                }
+
+                // MCA (if enabled) can use this
+                if (mcaEnabled && mca) mca.setAllowedCrops([...cropSet]);
+
+                // Keep mapScenarioIds in sync
+                mapScenarioIds = mapScenarioIds.filter(id => selectedRunIds.includes(id));
+                if (!mapScenarioIds.length) mapScenarioIds = [selectedRunIds[0]];
+                if (mapScenarioIds.length > 2) mapScenarioIds = mapScenarioIds.slice(0, 2);
+
+                // Base run = first map scenario
+                const baseRunId = mapScenarioIds[0];
+                current.runId = baseRunId;
+
+                // Now that KPI data exists, we can populate UI
+                activateRun(baseRunId, { preserveCrop: true });
+                updateMapScenarioOptions();
+                recomputeAndRedraw();
+
+                if (selectedRunIds.every(id => runsStore.has(id))) {
+                    showToast('Metrics loaded. Click a subbasin on the map to show graphs.', false, null, 'OK', 4000);
+                }
+
+                // MCA setAvailableRuns (if enabled) should happen after KPI loads, because we now have crop lists per run
+                if (mcaEnabled && mca) {
+                    const runCropsById = {};
+                    for (const id of selectedRunIds) {
+                        const rd = runsStore.get(id);
+                        runCropsById[id] = (rd?.crops || []).slice();
+                    }
+
+                    lastRunCropsById = runCropsById;
+
+                    await mca.setAvailableRuns({
+                        studyAreaId: currentStudyAreaId,
+                        selectedRunIds,
+                        runsMeta,
+                        runCropsById,
+                    });
+                }
+
+            } catch (err) {
+                console.error('[dataset change] failed', err);
+                showToast('Failed to load metrics. Check console for details.', true, null, 'OK', 6000);
+            } finally {
+                setBusy(false);
+                updateHelpText();
             }
-            mca.setAllowedCrops([...cropSet]);
-
-            // build runCropsById once after ensureRunLoaded for selectedRunIds
-            const runCropsById = {};
-            for (const id of selectedRunIds) {
-                const rd = runsStore.get(id);
-                runCropsById[id] = (rd?.crops || []).slice();
-            }
-
-            await mca.setAvailableRuns({
-                studyAreaId: currentStudyAreaId,
-                selectedRunIds,
-                runsMeta,
-                runCropsById,
-            });
-
-            // Keep mapScenarioIds as subset of selectedRunIds
-            mapScenarioIds = mapScenarioIds.filter(id => selectedRunIds.includes(id));
-            if (!mapScenarioIds.length) {
-                mapScenarioIds = [selectedRunIds[0]];
-            } else if (mapScenarioIds.length > 2) {
-                mapScenarioIds = mapScenarioIds.slice(0, 2);
-            }
-
-            // Base run for metrics / crop list / year slider = first map scenario
-            const baseRunId = mapScenarioIds[0];
-            current.runId = baseRunId;
-            activateRun(baseRunId, { preserveCrop: true });
-
-            updateMapScenarioOptions();
-            recomputeAndRedraw();
         });
 
         els.metric.addEventListener('change', () => {
@@ -229,26 +326,86 @@ export function initSubbasinDashboard({
                 recomputeAndRedraw();
             });
         }
+
+        if (els.mcaEnableSwitch) {
+            // initial state from localStorage (default OFF)
+            let init = false;
+            try { init = localStorage.getItem('mca_enabled') === '1'; } catch (_) {}
+            els.mcaEnableSwitch.checked = init;
+
+            // apply initial
+            setMcaEnabled(init);
+
+            els.mcaEnableSwitch.addEventListener('change', () => {
+                setMcaEnabled(!!els.mcaEnableSwitch.checked);
+            });
+        }
+    }
+
+    async function setMcaEnabled(on) {
+        mcaEnabled = !!on;
+
+        if (els.mcaCard) {
+            els.mcaCard.classList.toggle('opacity-75', !mcaEnabled);
+        }
+
+        // UI
+        if (els.mcaEnabledWrap) els.mcaEnabledWrap.style.display = mcaEnabled ? 'block' : 'none';
+        if (els.mcaDisabledNote) els.mcaDisabledNote.style.display = mcaEnabled ? 'none' : 'block';
+
+        // Optional: remember preference
+        try { localStorage.setItem('mca_enabled', mcaEnabled ? '1' : '0'); } catch (_) {}
+
+        // If turning OFF: hide viz + disable compute (no heavy purges needed, but nice)
+        if (!mcaEnabled) {
+            if (mca && els.mcaVizWrap) els.mcaVizWrap.style.display = 'none';
+            return;
+        }
+
+        // Turning ON: load preset for this study area
+        if (!mca) return;
+        if (!Number.isFinite(+currentStudyAreaId) || +currentStudyAreaId <= 0) return;
+
+        // Friendly busy text (lightweight)
+        if (els.mapNote) els.mapNote.textContent = 'Loading MCA preset…';
+
+        try {
+            await mca.loadActivePreset(currentStudyAreaId);
+
+            // If the user already selected runs and we already loaded KPI data, hydrate MCA now
+            if (lastSelectedRunIds.length) {
+                // allowed crops = union crops across selected runs (from runsStore if present)
+                const cropSet = new Set();
+                for (const id of lastSelectedRunIds) {
+                    const rd = runsStore.get(id);
+                    for (const c of (rd?.crops || [])) cropSet.add(c);
+                }
+                mca.setAllowedCrops([...cropSet]);
+
+                await mca.setAvailableRuns({
+                    studyAreaId: currentStudyAreaId,
+                    selectedRunIds: lastSelectedRunIds,
+                    runsMeta,
+                    runCropsById: lastRunCropsById || {},
+                });
+            } else {
+                // No runs selected yet; show the built-in hint in scenario picker
+                await mca.setAvailableRuns({
+                    studyAreaId: currentStudyAreaId,
+                    selectedRunIds: [],
+                    runsMeta: [],
+                    runCropsById: {},
+                });
+            }
+        } catch (e) {
+            console.error('[MCA] enable failed:', e);
+            // keep UI enabled but show error if you have an element for it; otherwise rely on console
+        } finally {
+            // restore mapNote (don’t clobber if something else wrote after)
+        }
     }
 
     // ---------- Data load ----------
-    async function loadIndicatorRegistry() {
-        const res = await fetch(`${apiBase}/swat_indicators_list.php`);
-        if (!res.ok) throw new Error(`swat_indicators_list HTTP ${res.status}`);
-        const json = await res.json();
-
-        indicatorDefs = (json.indicators || []).map(d => ({
-            ...d,
-            id: d.code ?? d.id,
-        }));
-
-        subCropIndicatorIds = new Set(
-            indicatorDefs
-                .filter(d => d.grain === 'sub_crop')
-                .map(d => d.id)
-        );
-    }
-
     // Load + aggregate all KPI data for a single run_id
     async function loadRunData(runId) {
         const res = await fetch(`${apiBase}/swat_indicators_yearly_all.php?run_id=${encodeURIComponent(runId)}`);
@@ -322,107 +479,52 @@ export function initSubbasinDashboard({
     }
 
     async function bootstrapFromApi() {
-        await loadIndicatorRegistry();
-        await loadCropLookup();
+        showInlineSpinner(els.dataset, 'Loading scenarios…');
+        setBusy(true, 'Loading study area…');
+        updateHelpText();
 
-        const [subGJ, rivGJ] = await Promise.all([
-            fetch(subbasinGeoUrl).then(r => r.json()),
-            fetch(riversGeoUrl).then(r => r.json())
-        ]);
-        buildMap(subGJ, rivGJ);
+        try {
+            const [subGJ, rivGJ] = await Promise.all([
+                fetch(subbasinGeoUrl).then(r => r.json()),
+                fetch(riversGeoUrl).then(r => r.json())
+            ]);
+            buildMap(subGJ, rivGJ);
 
-        const runIds = await loadRuns();
+            const runIds = await loadRuns();
+            hasRunsForStudyArea = runIds.length > 0;
 
-        // --- No runs: keep map, show friendly messages, but DON'T throw
-        if (!runIds.length) {
+            // If no runs: keep friendly UI; hint will show "No scenarios..."
+            if (!hasRunsForStudyArea) {
+                selectedRunIds = [];
+                mapScenarioIds = [];
+                current.runId = null;
+                current.selectedSub = null;
+                updateMapScenarioOptions();
+
+                if (els.mapNote) els.mapNote.textContent = 'No model runs found for this study area.';
+                if (els.seriesChart) Plotly.purge(els.seriesChart);
+                if (els.cropChart)   Plotly.purge(els.cropChart);
+
+                return;
+            }
+
+            // Runs exist, but start with nothing selected
             selectedRunIds = [];
             mapScenarioIds = [];
             current.runId = null;
-
+            current.selectedSub = null;
             updateMapScenarioOptions();
 
-            if (els.mapNote) {
-                els.mapNote.textContent = 'No model runs found for this study area.';
-            }
-            if (els.seriesHint) {
-                els.seriesHint.style.display = 'block';
-                els.seriesHint.textContent = 'No scenarios available for this study area.';
-            }
-            if (els.seriesChart) Plotly.purge(els.seriesChart);
-            if (els.cropChart)   Plotly.purge(els.cropChart);
-
-            await mca.setAvailableRuns({
-                studyAreaId: currentStudyAreaId,
-                selectedRunIds: [],
-                runsMeta
-            });
-
-            return; // <- important: exit without error
+            if (els.mapNote) els.mapNote.textContent = 'Select one or more scenarios to load metrics.';
+            if (els.metric)  els.metric.innerHTML = `<option value="">Select scenarios first…</option>`;
+        } finally {
+            setBusy(false);
+            updateHelpText();
         }
-
-        const firstId = runIds[0];
-
-        // Mark first as selected in the checkbox list
-        if (els.dataset) {
-            const box = els.dataset.querySelector(`input.dataset-checkbox[data-run-id="${firstId}"]`);
-            if (box) box.checked = true;
-        }
-
-        selectedRunIds = [firstId];
-        mapScenarioIds = [firstId];
-        current.runId = firstId;
-
-        updateMapScenarioOptions();
-
-        await ensureRunLoaded(firstId);
-        activateRun(firstId);
-
-        recomputeAndRedraw();
-
-        // union crops across all selected runs
-        const cropSet = new Set();
-        for (const id of selectedRunIds) {
-            const rd = runsStore.get(id);
-            if (!rd) continue;
-            for (const c of rd.crops || []) cropSet.add(c);
-        }
-        mca.setAllowedCrops([...cropSet]);
-
-        // build runCropsById once after ensureRunLoaded for selectedRunIds
-        const runCropsById = {};
-        for (const id of selectedRunIds) {
-            const rd = runsStore.get(id);
-            runCropsById[id] = (rd?.crops || []).slice();
-        }
-
-        await mca.setAvailableRuns({
-            studyAreaId: currentStudyAreaId,
-            selectedRunIds,
-            runsMeta,
-            runCropsById,
-        });
-
-        await mca.loadActivePreset(currentStudyAreaId);
     }
 
     function timeLabelText() {
         return `Year ${years[current.yearIndex] ?? '—'}`;
-    }
-
-    async function loadCropLookup() {
-        try {
-            const res = await fetch(`${apiBase}/crops_list.php`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const json = await res.json();
-            cropLookup = {};
-            for (const row of json.crops || []) {
-                if (row.code) cropLookup[row.code] = row.name || row.code;
-            }
-            console.debug('[CROPS] Loaded', Object.keys(cropLookup).length, 'crop names');
-        } catch (err) {
-            console.warn('[CROPS] Failed to load crop names:', err);
-            cropLookup = {};
-        }
     }
 
     async function loadRuns() {
@@ -564,7 +666,7 @@ export function initSubbasinDashboard({
                 if (hit) {
                     const sid = getProp(hit, 'Subbasin');
                     const v = valueForSub(sid);
-                    els.mapInfo.innerHTML =
+                    if (els.mapInfo) els.mapInfo.innerHTML =
                         `<b>Subbasin ${escHtml(sid)}</b><br>` +
                         `<b>${escHtml(currentIndicator()?.name||'')}</b>: ${fmt(v)} ${unitText()}<br>` +
                         `<span class="mono">${escHtml(timeLabelText())}</span>`;
@@ -579,6 +681,7 @@ export function initSubbasinDashboard({
                 const hit = map.forEachFeatureAtPixel(evt.pixel, (f) => f);
                 if (hit) {
                     current.selectedSub = getProp(hit, 'Subbasin');
+                    updateHelpText();
                     drawSeries();
                     vectorLayer.changed();
                 }
@@ -675,7 +778,14 @@ export function initSubbasinDashboard({
     function recomputeAndRedraw(fast=false) {
         // recompute min/max across subs
         const vals = subFeatures.map(f => valueForSub(getProp(f, 'Subbasin'))).filter(Number.isFinite);
-        cachedRange = vals.length ? [Math.min(...vals), Math.max(...vals)] : [0,0];
+        let vmin = Infinity, vmax = -Infinity;
+        for (const f of subFeatures) {
+            const v = valueForSub(getProp(f, 'Subbasin'));
+            if (!Number.isFinite(v)) continue;
+            if (v < vmin) vmin = v;
+            if (v > vmax) vmax = v;
+        }
+        cachedRange = (vmin !== Infinity) ? [vmin, vmax] : [0, 0];
 
         // legend + map note
         updateLegend();
@@ -683,10 +793,12 @@ export function initSubbasinDashboard({
         els.mapNote.textContent = `${base}${describeMapScenario()} — ${timeLabelText()}`;
 
         // restyle map
-        vectorLayer.changed();
+        if (vectorLayer) vectorLayer.changed();
 
         // refresh timeseries if a sub is selected (skip heavy redraw on slider drag if fast=true)
         if (!fast) drawSeries();
+
+        updateHelpText();
     }
 
     function updateLegend() {
@@ -762,6 +874,7 @@ export function initSubbasinDashboard({
 
         // MCA still special
         if (def.id === 'mca_score' || def.isMca) {
+            if (!mca) return NaN;
             const v = mca.getScenarioScore(runId);
             return Number.isFinite(v) ? v : NaN;
         }
@@ -799,12 +912,11 @@ export function initSubbasinDashboard({
     function drawSeries() {
         const def = currentIndicator();
         if (!def || !current.selectedSub || !selectedRunIds.length) {
-            els.seriesHint.style.display = 'block';
-            Plotly.purge(els.seriesChart);
-            Plotly.purge(els.cropChart);
+            updateHelpText();
+            if (els.seriesChart) Plotly.purge(els.seriesChart);
+            if (els.cropChart)   Plotly.purge(els.cropChart);
             return;
         }
-        els.seriesHint.style.display = 'none';
 
         const traces = [];
 
@@ -845,6 +957,7 @@ export function initSubbasinDashboard({
         }, { displayModeBar: false, responsive: true });
 
         drawCropChart(def);
+        updateHelpText();
     }
 
     // ---------- UI population ----------
@@ -970,6 +1083,8 @@ export function initSubbasinDashboard({
 
     // ---------- Helpers ----------
     function setIdleState() {
+        hasRunsForStudyArea = null; // unknown yet
+
         if (els.dataset) {
             els.dataset.innerHTML =
                 '<div class="text-muted small">Select a study area first.</div>';
@@ -1000,11 +1115,54 @@ export function initSubbasinDashboard({
         if (els.mapInfo) els.mapInfo.textContent = 'Select a study area, then hover or click a subbasin.';
 
         if (els.seriesHint) {
-            els.seriesHint.style.display = 'block';
             els.seriesHint.textContent = 'Select a study area, then click a subbasin to load time series.';
         }
         if (els.seriesChart) Plotly.purge(els.seriesChart);
         if (els.cropChart)   Plotly.purge(els.cropChart);
+
+        updateHelpText();
+    }
+
+    function updateHelpText() {
+        if (!els.seriesHint) return;
+
+        const show = (msg) => {
+            els.seriesHint.style.display = 'block';
+            els.seriesHint.textContent = msg;
+        };
+
+        // 1) no study area
+        if (!currentStudyAreaId || currentStudyAreaId <= 0) {
+            show('Select a study area to begin.');
+            return;
+        }
+
+        // 2) loading (runs/map OR metrics)
+        if (isLoading) {
+            show(selectedRunIds.length ? 'Loading metrics… please wait.' : 'Loading scenarios… please wait.');
+            return;
+        }
+
+        // 3) study area selected, but it has no runs at all
+        if (hasRunsForStudyArea === false) {
+            show('No scenarios available for this study area.');
+            return;
+        }
+
+        // 4) runs exist but no scenarios selected
+        if (!selectedRunIds.length) {
+            show('Select one or more scenarios to load metrics.');
+            return;
+        }
+
+        // 5) scenarios selected but no subbasin clicked yet
+        if (!current.selectedSub) {
+            show('Metrics loaded. Now click a subbasin on the map to show time series graphs.');
+            return;
+        }
+
+        // 6) everything ready -> hide the hint
+        els.seriesHint.style.display = 'none';
     }
 
     function getSelectedRunIdsFromSelect() {
@@ -1178,6 +1336,36 @@ export function initSubbasinDashboard({
         return ` — Difference |${b} − ${a}|`;
     }
 
+    function setBusy(on, msg = 'Loading…') {
+        isLoading = !!on;
+        // disable key controls during load
+        if (els.dataset) els.dataset.querySelectorAll('input,button').forEach(el => el.disabled = !!on);
+        if (els.metric) els.metric.disabled = !!on;
+        if (els.crop) els.crop.disabled = !!on;
+        if (els.yearSlider) els.yearSlider.disabled = !!on;
+
+        // show loading alert
+        if (els.loadingAlert) {
+            els.loadingAlert.classList.toggle('d-none', !on);
+            els.loadingAlert.classList.toggle('d-flex', !!on);
+        }
+        if (els.loadingTitle)  els.loadingTitle.textContent = on ? msg : '';
+        if (els.loadingDetail) els.loadingDetail.textContent = on ? 'Fetching indicators, crops, and scenario metrics…' : '';
+
+        // keep map note updated (optional)
+        if (els.mapNote && on) els.mapNote.textContent = msg;
+    }
+
+    function showInlineSpinner(targetEl, text = 'Loading…') {
+        if (!targetEl) return;
+        targetEl.innerHTML = `
+            <div class="text-muted small d-flex align-items-center gap-2">
+              <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+              <span>${escHtml(text)}</span>
+            </div>
+          `;
+    }
+
     // ---------- Pure utils ----------
     function guessGeoJSONProjection(gj) {
         // Heuristic: look for any coordinate whose absolute value is > 200.
@@ -1262,6 +1450,9 @@ export function initSubbasinDashboard({
     }
 
     async function switchStudyArea(newStudyAreaId) {
+        loadEpoch++;
+        const epoch = loadEpoch;
+
         if (!Number.isFinite(+newStudyAreaId) || +newStudyAreaId <= 0) return;
 
         currentStudyAreaId = +newStudyAreaId;
@@ -1273,31 +1464,39 @@ export function initSubbasinDashboard({
         mapScenarioIds = [];
         current.runId = null;
         current.selectedSub = null;
+        hasRunsForStudyArea = null;
 
-        await mca.setAvailableRuns({
-            studyAreaId: currentStudyAreaId,
-            selectedRunIds: [],
-            runsMeta: []
-        });
+        // reset MCA selection cache
+        lastRunCropsById = {};
+        lastSelectedRunIds = [];
+
+        // If MCA is enabled, clear MCA state for new area
+        if (mcaEnabled && mca) {
+            await mca.setAvailableRuns({
+                studyAreaId: currentStudyAreaId,
+                selectedRunIds: [],
+                runsMeta: [],
+                runCropsById: {},
+            });
+        }
 
         if (els.dataset) {
             els.dataset.innerHTML = '<div class="text-muted small">Loading runs…</div>';
-        }
-        if (els.seriesHint) {
-            els.seriesHint.style.display = 'block';
-            els.seriesHint.textContent = 'Loading scenarios for this study area…';
         }
         if (els.seriesChart) Plotly.purge(els.seriesChart);
         if (els.cropChart)   Plotly.purge(els.cropChart);
 
         try {
             await bootstrapFromApi();
+            if (epoch !== loadEpoch) return; // abandoned
         } catch (err) {
             console.error('[switchStudyArea] failed:', err);
             if (els.mapNote) els.mapNote.textContent = 'Failed to load runs or data for this study area.';
         }
 
-        await mca.loadActivePreset(currentStudyAreaId);
+        if (mcaEnabled && mca) {
+            await mca.loadActivePreset(currentStudyAreaId);
+        }
     }
 
     // Expose controller
