@@ -193,7 +193,7 @@ $avatarUrl = false;
             </ul>
             <span class="d-block mt-2">
                 <i class="bi bi-git me-1"></i>
-                v<?= h(app_version_short()) ?>
+                <?= h(app_version_short()) ?>
                 <?php $bd = app_build_date(); if ($bd): ?>
                     <span class="ms-2"><i class="bi bi-clock me-1"></i><?= h($bd) ?></span>
                 <?php endif; ?>
