@@ -130,7 +130,7 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                         <div class="form-text">
                             Use the checkboxes to enable or disable scenarios.
                         </div>
-                        <div class="form-text">Runs are loaded from the database for this study area.</div>
+                        <div id="preloadStatus" class="text-muted small mt-1 d-none"></div>
                     </div>
 
                     <div id="loadingAlert" class="alert alert-info d-none align-items-center gap-2" role="alert">
@@ -384,6 +384,8 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                     opacityRivers: document.getElementById('opacityRivers'),
                     opacityRiversVal: document.getElementById('opacityRiversVal'),
                     mapScenario: document.getElementById('mapScenarioSelect'),
+
+                    preloadStatus: document.getElementById('preloadStatus'),
 
                     mcaCard: document.getElementById('mcaCard'),
                     mcaEnableSwitch: document.getElementById('mcaEnableSwitch'),

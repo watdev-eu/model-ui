@@ -1214,47 +1214,92 @@ final class McaComputeService
             }
         }
 
-        // 1) Scalar normalization across runs (based on per-run RAW)
-        $normalized = ['by_run' => []]; // [runId][code] => score
-        $weighted   = ['by_run' => []]; // [runId][code] => weighted_score
+        // 1) Baseline-anchored scalar normalization (based on per-run RAW)
+        // Baseline score = 0.5, others scale by deviation from baseline
+        $normalized = ['by_run' => []]; // [runId][code] => score 0..1
+        $weighted   = ['by_run' => []]; // [runId][code] => score*weight
         $totals     = [];               // [{run_id,total_weighted_score}]
 
+        // Pick baseline id for normalization (prefer canonical baseline run if included)
+        $normBaselineId = in_array($baselineRunId, $runIds, true) ? $baselineRunId : ($runIds[0] ?? null);
+        if (!$normBaselineId) {
+            throw new RuntimeException('No runs available for normalization.');
+        }
+
+        // Optional cap: relative change of +/-100% maps to [0..1] around 0.5
+        // You can make this configurable later (e.g. global var).
+        $REL_CAP = 1.0; // 1.0 = 100%
+
+        $clamp = static function(float $x, float $lo, float $hi): float {
+            return max($lo, min($hi, $x));
+        };
+
         foreach ($enabledMcaCodes as $code) {
-            // Collect values
-            $vals = [];
+            // baseline raw value
+            $baseRaw = $results['raw']['by_run'][$normBaselineId][$code]['raw'] ?? null;
+            $baseRaw = (is_numeric($baseRaw) ? (float)$baseRaw : null);
+
+            // Build a scale for this indicator (fallback when baseline is 0 or missing)
+            // Use max abs deviation from baseline across runs, else max abs raw, else 1.
+            $scale = null;
+            $maxAbsDev = 0.0;
+            $maxAbsRaw = 0.0;
+
             foreach ($runIds as $rid) {
                 $raw = $results['raw']['by_run'][$rid][$code]['raw'] ?? null;
-                if ($raw !== null && is_numeric($raw)) $vals[] = (float)$raw;
-            }
-
-            if (!$vals) {
-                foreach ($runIds as $rid) {
-                    $normalized['by_run'][$rid][$code] = null;
-                    $weighted['by_run'][$rid][$code] = null;
+                if ($raw === null || !is_numeric($raw)) continue;
+                $rawF = (float)$raw;
+                $maxAbsRaw = max($maxAbsRaw, abs($rawF));
+                if ($baseRaw !== null) {
+                    $maxAbsDev = max($maxAbsDev, abs($rawF - $baseRaw));
                 }
-                continue;
             }
 
-            $min = min($vals);
-            $max = max($vals);
+            if ($baseRaw !== null && abs($baseRaw) > 1e-12) {
+                // Prefer relative scaling against baseline magnitude
+                $scale = abs($baseRaw);
+            } elseif ($maxAbsDev > 1e-12) {
+                // Baseline ~0: scale by observed deviation
+                $scale = $maxAbsDev;
+            } elseif ($maxAbsRaw > 1e-12) {
+                // Fallback: scale by magnitude of raw values
+                $scale = $maxAbsRaw;
+            } else {
+                $scale = 1.0;
+            }
 
             foreach ($runIds as $rid) {
                 $raw = $results['raw']['by_run'][$rid][$code]['raw'] ?? null;
-                if ($raw === null || !is_numeric($raw)) {
+                if ($raw === null || !is_numeric($raw) || $baseRaw === null) {
                     $normalized['by_run'][$rid][$code] = null;
                     $weighted['by_run'][$rid][$code] = null;
                     continue;
                 }
 
-                if (abs($max - $min) < 1e-12) {
-                    $score = 0.5;
+                $rawF = (float)$raw;
+
+                // Relative delta vs baseline when baseline != 0, else absolute delta scaled by $scale
+                if (abs($baseRaw) > 1e-12) {
+                    $delta = ($rawF - $baseRaw) / abs($baseRaw); // e.g. 0.2 = +20%
                 } else {
-                    $t = (((float)$raw) - $min) / ($max - $min);
-                    $score = (($dirByCode[$code] ?? 'pos') === 'neg') ? (1.0 - $t) : $t;
-                    $score = max(0.0, min(1.0, $score));
+                    $delta = ($rawF - $baseRaw) / $scale;        // baseline is ~0
                 }
 
+                // cap extreme deltas so score stays stable
+                $delta = $clamp($delta, -$REL_CAP, $REL_CAP);
+
+                // map [-cap..cap] to [0..1] around 0.5
+                $score = 0.5 + ($delta / $REL_CAP) * 0.5;
+
+                // invert if "lower is better"
+                if (($dirByCode[$code] ?? 'pos') === 'neg') {
+                    $score = 1.0 - $score;
+                }
+
+                $score = $clamp($score, 0.0, 1.0);
+
                 $normalized['by_run'][$rid][$code] = $score;
+
                 $w = $wByCode[$code] ?? 0.0;
                 $weighted['by_run'][$rid][$code] = $score * $w;
             }
