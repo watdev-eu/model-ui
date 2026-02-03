@@ -58,8 +58,7 @@ $varSet = $stmt->fetch(PDO::FETCH_ASSOC);
 $globalKeys = [
     'farm_size_ha',
     'land_rent_usd_ha_yr',
-    'labour_cost_usd_per_day',   // preferred
-    'labour_day_cost_usd',       // fallback
+    'labour_day_cost_usd_per_pd',
 ];
 
 $place = implode(',', array_fill(0, count($globalKeys), '?'));

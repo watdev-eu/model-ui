@@ -500,9 +500,7 @@ final class McaComputeService
         $invest = self::getNumFromVarIdx($runVarIdx, 'bmp_invest_cost_usd_ha') ?? 0.0;
         $om     = self::getNumFromVarIdx($runVarIdx, 'bmp_annual_om_cost_usd_ha') ?? 0.0;
 
-        $labDayCost =
-            self::getNumFromVarIdx($globalVarIdx, 'labour_cost_usd_per_day')
-            ?? self::getNumFromVarIdx($globalVarIdx, 'labour_day_cost_usd');
+        $labDayCost = self::getNumFromVarIdx($globalVarIdx, 'labour_day_cost_usd_per_pd');
 
         if ($labDayCost === null) {
             $labDayCost = 0.0;
