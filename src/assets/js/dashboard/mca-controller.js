@@ -483,7 +483,7 @@ export function initMcaController({ apiBase, els }) {
 
     function updateSumUI(items) {
         if (!els.mcaWeightSum) return;
-        els.mcaWeightSum.textContent = String(Math.round(enabledWeightSum(items)));
+        els.mcaWeightSum.textContent = enabledWeightSum(items).toFixed(1);
     }
 
     // ---------- Accordion rendering ----------
@@ -506,7 +506,7 @@ export function initMcaController({ apiBase, els }) {
                   <th style="width:70px">Use</th>
                   <th>Indicator</th>
                   <th style="width:170px">Direction</th>
-                  <th style="width:140px">Weight (whole #)</th>
+                  <th style="width:140px">Weight</th>
                 </tr>
               </thead>
               <tbody>
@@ -514,7 +514,8 @@ export function initMcaController({ apiBase, els }) {
                 const code = String(it.indicator_code ?? '');
                 const name = String(it.indicator_name ?? code);
                 const dir  = (it.direction === 'neg' || it.direction === 'pos') ? it.direction : 'pos';
-                const w    = Number.isFinite(Number(it.weight)) ? Math.max(0, Math.round(Number(it.weight))) : 0;
+                const wNum = Number(it.weight);
+                const w    = Number.isFinite(wNum) ? Math.max(0, wNum) : 0;
     
                 return `
                       <tr data-idx="${idx}">
@@ -533,7 +534,7 @@ export function initMcaController({ apiBase, els }) {
                         </td>
                         <td>
                           <input class="form-control form-control-sm mono mca-w"
-                                 type="number" step="1" min="0"
+                                 type="number" step="0.1" min="0"
                                  value="${w}">
                           <div class="form-text small">
                             Normalized on compute
@@ -546,7 +547,7 @@ export function initMcaController({ apiBase, els }) {
             </table>
           </div>
           <div class="small text-muted">
-            Enabled weight sum: <span class="mono">${Math.round(sumW)}</span>
+            Enabled weight sum: <span class="mono">${sumW.toFixed(1)}</span>
           </div>
         `;
 
@@ -564,7 +565,7 @@ export function initMcaController({ apiBase, els }) {
                 it.is_enabled = !!en.checked;
                 it.direction  = dir.value;
 
-                const n = Math.round(Number(w.value || 0));
+                const n = Number(String(w.value ?? '').trim());
                 it.weight = Number.isFinite(n) ? Math.max(0, n) : 0;
 
                 updateSumUI(items);
@@ -1231,7 +1232,7 @@ export function initMcaController({ apiBase, els }) {
             fd.append('run_ids_json', JSON.stringify([...includedRunIds]));
 
             const enabled = currentPresetItems.filter(it => !!it.is_enabled);
-            const sumW = enabled.reduce((s, it) => s + (Math.round(Number(it.weight) || 0)), 0);
+            const sumW = enabled.reduce((s, it) => s + (Number(it.weight) || 0), 0);
 
             if (sumW <= 0) {
                 setEditError('Enable at least one indicator and give it a weight > 0.');
@@ -1241,11 +1242,11 @@ export function initMcaController({ apiBase, els }) {
 
             fd.append('preset_items_json', JSON.stringify(
                 currentPresetItems.map(it => {
-                    const wInt = Math.max(0, Math.round(Number(it.weight) || 0));
+                    const wNum = Math.max(0, Number(it.weight) || 0);
                     return {
                         indicator_calc_key: it.indicator_calc_key,
                         indicator_code: it.indicator_code,         // optional (debug/display)
-                        weight: it.is_enabled ? wInt : 0,
+                        weight: it.is_enabled ? wNum : 0,
                         direction: it.direction,
                         is_enabled: !!it.is_enabled,
                     };

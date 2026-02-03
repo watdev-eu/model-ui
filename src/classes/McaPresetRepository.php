@@ -122,11 +122,11 @@ final class McaPresetRepository
 
             $w = $it['weight'] ?? 0;
 
-            if (!is_numeric($w) || (int)$w < 0) {
-                throw new InvalidArgumentException('Weights must be integers >= 0');
+            if (!is_numeric($w) || (float)$w < 0) {
+                throw new InvalidArgumentException('Weights must be numbers >= 0');
             }
 
-            $sum += (int)$w;
+            $sum += (float)$w;
         }
 
         if ($sum <= 0) {
@@ -166,7 +166,7 @@ final class McaPresetRepository
                 $stmtUp->execute([
                     ':ps'  => $presetSetId,
                     ':ind' => (int)$indId,
-                    ':w'   => (int)($it['weight'] ?? 0),
+                    ':w'   => (float)($it['weight'] ?? 0),
                     ':dir' => $dir,
                     ':en'  => !empty($it['is_enabled']),
                 ]);
