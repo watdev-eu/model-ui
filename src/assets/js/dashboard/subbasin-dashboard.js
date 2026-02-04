@@ -240,6 +240,13 @@ export function initSubbasinDashboard({
 
                 // Now that KPI data exists, we can populate UI
                 activateRun(baseRunId, { preserveCrop: true });
+
+                // Ensure we have an indicator selected (activateRun picks one)
+                if (current.indicatorId) {
+                    if (els.loadingDetail) els.loadingDetail.textContent = 'Loading selected metric…';
+                    await Promise.all(selectedRunIds.map(id => ensureIndicatorLoaded(id, current.indicatorId)));
+                }
+
                 updateMapScenarioOptions();
                 recomputeAndRedraw();
 
@@ -295,10 +302,25 @@ export function initSubbasinDashboard({
             }
         });
 
-        els.metric.addEventListener('change', () => {
+        els.metric.addEventListener('change', async () => {
             current.indicatorId = els.metric.value || null;
             updateCropVisibility();
-            recomputeAndRedraw();
+
+            if (!current.indicatorId || !selectedRunIds.length) {
+                recomputeAndRedraw();
+                return;
+            }
+
+            setBusy(true, 'Loading metric…');
+            try {
+                await Promise.all(selectedRunIds.map(id => ensureIndicatorLoaded(id, current.indicatorId)));
+                recomputeAndRedraw();
+            } catch (e) {
+                console.error('[metric change] failed', e);
+                showToast('Failed to load metric data.', true, null, 'OK', 5000);
+            } finally {
+                setBusy(false);
+            }
         });
 
         els.crop.addEventListener('change', () => {
@@ -346,7 +368,7 @@ export function initSubbasinDashboard({
         els.opacityRivers.addEventListener('input', applyRivOpacity);
 
         if (els.mapScenario) {
-            els.mapScenario.addEventListener('change', () => {
+            els.mapScenario.addEventListener('change', async () => {
                 const opts = [...els.mapScenario.options];
 
                 let ids = opts
@@ -357,7 +379,6 @@ export function initSubbasinDashboard({
                 // Enforce max 2
                 if (ids.length > 2) {
                     ids = ids.slice(0, 2);
-                    // reflect back in DOM
                     opts.forEach(o => {
                         const id = parseInt(o.value, 10);
                         o.selected = ids.includes(id);
@@ -379,6 +400,17 @@ export function initSubbasinDashboard({
                     const baseRunId = mapScenarioIds[0];
                     current.runId = baseRunId;
                     activateRun(baseRunId, { preserveCrop: true });
+
+                    if (current.indicatorId && selectedRunIds.length) {
+                        setBusy(true, 'Loading metric…');
+                        try {
+                            await Promise.all(
+                                selectedRunIds.map(id => ensureIndicatorLoaded(id, current.indicatorId))
+                            );
+                        } finally {
+                            setBusy(false);
+                        }
+                    }
                 }
 
                 recomputeAndRedraw();
@@ -490,79 +522,108 @@ export function initSubbasinDashboard({
     }
 
     // ---------- Data load ----------
-    // Load + aggregate all KPI data for a single run_id
-    async function loadRunData(runId, { signal } = {}) {
-        const res = await fetch(
-            `${apiBase}/swat_indicators_yearly_all.php?run_id=${encodeURIComponent(runId)}`,
-            { signal }
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+    async function loadRunMeta(runId, { signal } = {}) {
+        const [yearsRes, cropsRes] = await Promise.all([
+            fetch(`${apiBase}/run_years.php?run_id=${encodeURIComponent(runId)}`, { signal }),
+            fetch(`${apiBase}/run_crops.php?run_id=${encodeURIComponent(runId)}`, { signal }),
+        ]);
 
-        const yearSet = new Set();
-        const cropSet = new Set();
+        if (!yearsRes.ok) throw new Error(`run_years HTTP ${yearsRes.status}`);
+        if (!cropsRes.ok) throw new Error(`run_crops HTTP ${cropsRes.status}`);
 
-        const index = {}; // indicatorId -> { sub: Map("year|sub" -> value), sub_crop: Map("year|sub|crop" -> value), sub_crop_mean: Map("year|sub" -> mean) }
+        const yearsJson = await yearsRes.json();
+        const cropsJson = await cropsRes.json();
 
-        for (const code in data) {
-            const payload = data[code];
-            const isSubCrop = subCropIndicatorIds.has(code);
-
-            if (payload?.status !== 'ok') continue;
-            const rows = payload.rows || [];
-
-            if (isSubCrop) {
-                const m = new Map();
-                const sum = new Map();  // "year|sub" -> sum
-                const cnt = new Map();  // "year|sub" -> count
-
-                for (const r of rows) {
-                    const Y = +r.year, S = +r.sub;
-                    if (Number.isFinite(Y)) yearSet.add(Y);
-
-                    if (r.crop && r.crop !== '-' && r.crop !== 'NULL') {
-                        cropSet.add(r.crop);
-                        const key = `${Y}|${S}|${r.crop}`;
-                        const v = num(r.value);
-                        if (Number.isFinite(v)) {
-                            m.set(key, v);
-
-                            const k2 = `${Y}|${S}`;
-                            sum.set(k2, (sum.get(k2) || 0) + v);
-                            cnt.set(k2, (cnt.get(k2) || 0) + 1);
-                        }
-                    }
-                }
-
-                const mean = new Map();
-                for (const [k2, s] of sum.entries()) {
-                    mean.set(k2, s / (cnt.get(k2) || 1));
-                }
-
-                index[code] = { grain: 'sub_crop', m, mean };
-            } else {
-                // grain=sub
-                const m = new Map();
-                for (const r of rows) {
-                    const Y = +r.year, S = +r.sub;
-                    if (Number.isFinite(Y)) yearSet.add(Y);
-
-                    const v = num(r.value);
-                    if (Number.isFinite(v)) {
-                        m.set(`${Y}|${S}`, v);
-                    }
-                }
-                index[code] = { grain: 'sub', m };
-            }
-        }
+        const years = (yearsJson.years || []).map(Number).filter(n => Number.isFinite(n));
+        const crops = (cropsJson.crops || []).map(String);
 
         return {
             id: runId,
-            indicators: data,
-            years: [...yearSet].sort((a,b)=>a-b),
-            crops: [...cropSet].sort(),
-            index,
+            years: years.sort((a,b)=>a-b),
+            crops: crops.sort(),
+            // indicator cache
+            indicatorCache: new Map(), // key = `${indicatorId}|yearly` -> payload
+            index: {},                 // indicatorId -> {grain, m, mean?}
         };
+    }
+
+    function buildIndexForIndicator(rows, grain) {
+        if (grain === 'sub_crop') {
+            const m = new Map();
+            const sum = new Map();
+            const cnt = new Map();
+
+            for (const r of rows || []) {
+                const Y = +r.year, S = +r.sub;
+                if (!Number.isFinite(Y) || !Number.isFinite(S)) continue;
+
+                const crop = r.crop;
+                if (crop && crop !== '-' && crop !== 'NULL') {
+                    const v = num(r.value);
+                    if (!Number.isFinite(v)) continue;
+
+                    m.set(`${Y}|${S}|${crop}`, v);
+
+                    const k2 = `${Y}|${S}`;
+                    sum.set(k2, (sum.get(k2) || 0) + v);
+                    cnt.set(k2, (cnt.get(k2) || 0) + 1);
+                }
+            }
+
+            const mean = new Map();
+            for (const [k2, s] of sum.entries()) {
+                mean.set(k2, s / (cnt.get(k2) || 1));
+            }
+
+            return { grain: 'sub_crop', m, mean };
+        }
+
+        // grain=sub
+        const m = new Map();
+        for (const r of rows || []) {
+            const Y = +r.year, S = +r.sub;
+            if (!Number.isFinite(Y) || !Number.isFinite(S)) continue;
+
+            const v = num(r.value);
+            if (!Number.isFinite(v)) continue;
+
+            m.set(`${Y}|${S}`, v);
+        }
+        return { grain: 'sub', m };
+    }
+
+    async function ensureIndicatorLoaded(runId, indicatorId, { signal } = {}) {
+        const rd = runsStore.get(runId);
+        if (!rd) return;
+
+        const key = `${indicatorId}|yearly`;
+        if (rd.indicatorCache.has(key)) return;
+
+        const res = await fetch(
+            `${apiBase}/swat_indicator_yearly.php?run_id=${encodeURIComponent(runId)}&indicator=${encodeURIComponent(indicatorId)}`,
+            { signal }
+        );
+        if (!res.ok) throw new Error(`swat_indicator_yearly HTTP ${res.status}`);
+
+        const payload = await res.json();
+        rd.indicatorCache.set(key, payload);
+
+        // only index if ok
+        if (payload?.status === 'ok') {
+            const def = (indicatorDefs || []).find(d => d.id === indicatorId);
+            const grain = def?.grain || 'sub';
+            rd.index[indicatorId] = buildIndexForIndicator(payload.rows || [], grain);
+        } else {
+            // mark as "loaded but not usable"
+            rd.index[indicatorId] = null;
+        }
+    }
+
+    function rowsForIndicator(rd, indicatorId) {
+        const key = `${indicatorId}|yearly`;
+        const payload = rd?.indicatorCache?.get(key);
+        if (!payload || payload.status !== 'ok') return [];
+        return payload.rows || [];
     }
 
     async function bootstrapFromApi() {
@@ -957,12 +1018,6 @@ export function initSubbasinDashboard({
         return Number.isFinite(n) ? n : NaN;
     }
 
-    function rowsForIndicator(rd, indicatorId) {
-        const payload = rd?.indicators?.[indicatorId];
-        if (!payload || payload.status !== 'ok') return [];
-        return payload.rows || [];
-    }
-
     function valueForSubRun(runId, sub, yearOverride = null) {
         const def = currentIndicator();
         if (!def) return NaN;
@@ -1061,11 +1116,7 @@ export function initSubbasinDashboard({
 
         // Use the active run to decide what is available
         const rd = runsStore.get(current.runId);
-        const defs = (indicatorDefs || []).map(d => {
-            const payload = rd?.indicators?.[d.id];
-            const enabled = !!payload && payload.status === 'ok';
-            return { ...d, enabled };
-        });
+        const defs = (indicatorDefs || []).map(d => ({ ...d, enabled: true }));
 
         // group by sector
         const bySector = new Map();
@@ -1081,8 +1132,8 @@ export function initSubbasinDashboard({
                 const opts = list
                     .sort((a, b) => String(a.name).localeCompare(String(b.name)))
                     .map(d => `
-          <option value="${escAttr(d.id)}" ${d.enabled ? '' : 'disabled'}>
-            ${escHtml(d.name)}${d.enabled ? '' : ' — (not available)'}
+          <option value="${escAttr(d.id)}">
+            ${escHtml(d.name)}
           </option>
         `).join('');
                 return `<optgroup label="${escAttr(sector)}">${opts}</optgroup>`;
@@ -1296,7 +1347,7 @@ export function initSubbasinDashboard({
         }
 
         const p = (async () => {
-            const runData = await loadRunData(runId, { signal });
+            const runData = await loadRunMeta(runId, { signal });
             runsStore.set(runId, runData);
         })();
 
