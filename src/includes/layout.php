@@ -6,6 +6,7 @@ function h($v){ return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 
 $displayName = 'User';
 $avatarUrl = false;
+$disableAdminTools = true;
 ?>
 <!doctype html>
 <html lang="nl">
@@ -154,14 +155,27 @@ $avatarUrl = false;
             $currentPage = $_SERVER['PHP_SELF'];
 
             foreach ($navItems as $item) {
-                $isActive = (strpos($currentPage, $item['href']) !== false) ? 'active' : 'text-white';
+                $isDisabled = $disableAdminTools && in_array($item['href'], ['/data.php', '/migrate.php'], true);
+
+                $isActive = !$isDisabled && (strpos($currentPage, $item['href']) !== false) ? 'active' : 'text-white';
+
+                $disabledClass = $isDisabled ? 'disabled opacity-50' : '';
+                $ariaDisabled  = $isDisabled ? 'aria-disabled="true"' : '';
+                $tabIndex      = $isDisabled ? 'tabindex="-1"' : '';
+                $title         = $isDisabled ? 'Temporarily disabled' : $item['title'];
+                $href = $isDisabled ? '#' : $item['href'];
                 echo <<<HTML
-        <li>
-            <a href="{$item['href']}" class="nav-link {$isActive}" data-bs-toggle="tooltip" title="{$item['title']}">
-                <i class="bi bi-{$item['icon']}"></i> <span>{$item['label']}</span>
-            </a>
-        </li>
-        HTML;
+                    <li>
+                        <a href="{$href}"
+                            class="nav-link {$isActive} {$disabledClass}"
+                            {$ariaDisabled}
+                            {$tabIndex}
+                            data-bs-toggle="tooltip"
+                            title="{$title}">
+                            <i class="bi bi-{$item['icon']}"></i> <span>{$item['label']}</span>
+                        </a>
+                    </li>
+                    HTML;
             }
             ?>
         </ul>
