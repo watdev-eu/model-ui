@@ -25,6 +25,8 @@ IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'visibility_enum') THEN
 END IF;
 END$$;
 
+CREATE EXTENSION postgis;
+
 CREATE TABLE IF NOT EXISTS public.crops
 (
     code character varying(8) COLLATE pg_catalog."default" NOT NULL,
