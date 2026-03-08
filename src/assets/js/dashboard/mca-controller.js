@@ -1,3 +1,5 @@
+// assets/ja/dashboard/mca-controller.js
+
 export function initMcaController({ apiBase, els }) {
     let studyAreaId = null;
     let presetId = null;
@@ -534,13 +536,29 @@ export function initMcaController({ apiBase, els }) {
                         </td>
                         <td>
                           <div class="fw-semibold">${escapeHtml(name)}</div>
-                          <div class="text-muted small mono">${escapeHtml(code)}</div>
                         </td>
                         <td>
-                          <select class="form-select form-select-sm mca-dir">
-                            <option value="pos" ${dir === 'pos' ? 'selected' : ''}>Higher is better</option>
-                            <option value="neg" ${dir === 'neg' ? 'selected' : ''}>Lower is better</option>
-                          </select>
+                          <div class="btn-group btn-group-sm w-100 mca-dir-group" role="group" aria-label="Direction">
+                            <input type="radio"
+                                   class="btn-check mca-dir"
+                                   name="mca-dir-${idx}"
+                                   id="mca-dir-pos-${idx}"
+                                   value="pos"
+                                   ${dir === 'pos' ? 'checked' : ''}>
+                            <label class="btn btn-outline-success" for="mca-dir-pos-${idx}">
+                              Higher better
+                            </label>
+                        
+                            <input type="radio"
+                                   class="btn-check mca-dir"
+                                   name="mca-dir-${idx}"
+                                   id="mca-dir-neg-${idx}"
+                                   value="neg"
+                                   ${dir === 'neg' ? 'checked' : ''}>
+                            <label class="btn btn-outline-danger" for="mca-dir-neg-${idx}">
+                              Lower better
+                            </label>
+                          </div>
                         </td>
                         <td>
                           <input class="form-control form-control-sm mono mca-w"
@@ -565,7 +583,7 @@ export function initMcaController({ apiBase, els }) {
         els.mcaIndicatorsTableWrap.querySelectorAll('tr[data-idx]').forEach(tr => {
             const idx = parseInt(tr.dataset.idx, 10);
             const en  = tr.querySelector('.mca-en');
-            const dir = tr.querySelector('.mca-dir');
+            const dirInputs = tr.querySelectorAll('.mca-dir');
             const w   = tr.querySelector('.mca-w');
 
             const sync = () => {
@@ -573,7 +591,8 @@ export function initMcaController({ apiBase, els }) {
                 if (!it) return;
 
                 it.is_enabled = !!en.checked;
-                it.direction  = dir.value;
+                const selectedDir = [...dirInputs].find(x => x.checked)?.value || 'pos';
+                it.direction = selectedDir;
 
                 const n = Number(String(w.value ?? '').trim());
                 it.weight = Number.isFinite(n) ? Math.max(0, n) : 0;
@@ -583,7 +602,7 @@ export function initMcaController({ apiBase, els }) {
             };
 
             en.addEventListener('change', sync);
-            dir.addEventListener('change', sync);
+            dirInputs.forEach(d => d.addEventListener('change', sync));
             w.addEventListener('input', sync);
         });
 

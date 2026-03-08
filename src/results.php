@@ -225,11 +225,11 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
 
                         <div class="accordion-item">
                             <h2 class="accordion-header" id="mcaHeadIndicators">
-                                <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#mcaIndicators">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#mcaIndicators">
                                     Indicators & weights
                                 </button>
                             </h2>
-                            <div id="mcaIndicators" class="accordion-collapse collapse show" data-bs-parent="#mcaAccordion">
+                            <div id="mcaIndicators" class="accordion-collapse collapse" data-bs-parent="#mcaAccordion">
                                 <div class="accordion-body">
                                     <div id="mcaIndicatorsTableWrap"></div>
                                     <div class="d-flex justify-content-between align-items-center mt-2">
