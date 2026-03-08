@@ -2,11 +2,16 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../classes/Auth.php';
+
 function h($v){ return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 
-$displayName = 'User';
+$user = Auth::user();
+$displayName = $user['display_name'] ?? 'Guest';
 $avatarUrl = false;
-$disableAdminTools = true;
+$disableAdminTools = !Auth::isAdmin();
+$userRoles = Auth::roles();
+$roleBadge = Auth::roleBadgeMeta();
 ?>
 <!doctype html>
 <html lang="nl">
@@ -186,32 +191,58 @@ $disableAdminTools = true;
                id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
 
                 <?php if ($avatarUrl): ?>
-                    <img src="<?= h($avatarUrl) ?>" alt="Profielfoto" width="32" height="32"
+                    <img src="<?= h($avatarUrl) ?>" alt="Profile photo" width="32" height="32"
                          class="rounded-circle me-2" style="object-fit:cover;">
                 <?php else: ?>
-                    <!-- Fallback: first initial in a circular badge, same size -->
                     <span class="rounded-circle bg-secondary text-white d-inline-flex align-items-center justify-content-center me-2"
                           style="width:32px;height:32px;font-weight:600;">
                 <?= h(mb_strtoupper(mb_substr($displayName, 0, 1))) ?>
             </span>
                 <?php endif; ?>
 
-                <strong><?= h($displayName) ?></strong>
+                <div class="d-flex flex-column lh-sm">
+                    <strong><?= h($displayName) ?></strong>
+                    <span class="small opacity-75"><?= h($roleBadge['label']) ?></span>
+                </div>
             </a>
 
             <ul class="dropdown-menu dropdown-menu-dark text-small shadow" aria-labelledby="userDropdown">
-                <!-- <li><a class="dropdown-item" href="#">Instellingen</a></li>
-                <li><a class="dropdown-item" href="#">Profile</a></li>
-                <li><hr class="dropdown-divider"></li>
-                <li><a class="dropdown-item" href="#">Logout</a></li> -->
-                <li><a class="dropdown-item" href="#">Not implemented</a></li>
+                <?php if (Auth::isLoggedIn()): ?>
+                    <li class="dropdown-item-text">
+                        <div class="d-flex justify-content-between align-items-start gap-2">
+                            <div class="min-w-0">
+                                <div class="fw-semibold"><?= h($displayName) ?></div>
+                                <?php if (!empty($user['email'])): ?>
+                                    <div class="small text-white-50 text-break"><?= h($user['email']) ?></div>
+                                <?php endif; ?>
+                            </div>
+
+                            <span class="badge <?= h($roleBadge['class']) ?> flex-shrink-0">
+                                <i class="bi bi-<?= h($roleBadge['icon']) ?> me-1"></i><?= h($roleBadge['label']) ?>
+                            </span>
+                        </div>
+                    </li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li>
+                        <a class="dropdown-item" href="/logout.php">
+                            <i class="bi bi-box-arrow-right me-2"></i>Logout
+                        </a>
+                    </li>
+                <?php else: ?>
+                    <li>
+                        <a class="dropdown-item" href="/login.php">
+                            <i class="bi bi-box-arrow-in-right me-2"></i>Login
+                        </a>
+                    </li>
+                <?php endif; ?>
             </ul>
+
             <span class="d-block mt-2">
                 <i class="bi bi-git me-1"></i>
                 <?= h(app_version_short()) ?>
-                <?php $bd = app_build_date(); if ($bd): ?>
-                    <span class="ms-2"><i class="bi bi-clock me-1"></i><?= h($bd) ?></span>
-                <?php endif; ?>
+                        <?php $bd = app_build_date(); if ($bd): ?>
+                            <span class="ms-2"><i class="bi bi-clock me-1"></i><?= h($bd) ?></span>
+                        <?php endif; ?>
             </span>
         </div>
     </nav>
