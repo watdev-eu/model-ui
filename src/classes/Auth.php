@@ -1,4 +1,6 @@
 <?php
+// classes/Auth.php
+
 declare(strict_types=1);
 
 final class Auth
@@ -608,5 +610,12 @@ final class Auth
             if ($v !== '') return $v;
         }
         return 'User';
+    }
+
+    public static function userId(): ?string
+    {
+        $user = self::user();
+        $sub = isset($user['sub']) ? trim((string)$user['sub']) : '';
+        return $sub !== '' ? $sub : null;
     }
 }
