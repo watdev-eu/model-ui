@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../classes/Auth.php';
+require_once __DIR__ . '/../classes/CustomScenarioRepository.php';
 
 function h($v): string {
     return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
@@ -20,6 +22,15 @@ function shortDate(?string $value): string {
 $studyAreaId   = isset($_GET['study_area_id']) ? (int)$_GET['study_area_id'] : 0;
 $studyAreaName = trim((string)($_GET['study_area_name'] ?? ''));
 $view          = trim((string)($_GET['view'] ?? 'list'));
+$scenarioId    = isset($_GET['scenario_id']) ? (int)$_GET['scenario_id'] : 0;
+
+Auth::requireLogin();
+
+$userId = Auth::userId();
+if ($userId === null) {
+    echo "<div class='p-3 text-danger'>Unauthorized.</div>";
+    return;
+}
 
 if ($studyAreaId <= 0) {
     echo "<div class='p-3 text-danger'>No study area selected.</div>";
@@ -27,21 +38,32 @@ if ($studyAreaId <= 0) {
 }
 
 if ($view === 'create') {
-    $availableRuns = [
-        ['id' => 11, 'label' => 'Baseline'],
-        ['id' => 12, 'label' => 'High irrigation efficiency'],
-        ['id' => 13, 'label' => 'Reduced fertilizer input'],
-        ['id' => 14, 'label' => 'Drought response package'],
-    ];
+    require_once __DIR__ . '/../classes/Auth.php';
+    require_once __DIR__ . '/../classes/CustomScenarioRepository.php';
+
+    $userId = Auth::userId();
+    $currentScenario = null;
+    $currentAssignments = [];
+
+    if ($scenarioId > 0 && $userId !== null) {
+        $currentScenario = CustomScenarioRepository::findByIdForUser($scenarioId, $userId);
+        if ($currentScenario) {
+            $currentAssignments = CustomScenarioRepository::findAssignments($scenarioId, $userId);
+        }
+    }
     ?>
     <script>
-        ModalUtils.setModalTitle("New custom scenario — <?= h($studyAreaName ?: ('Study area #' . $studyAreaId)) ?>");
+        ModalUtils.setModalTitle(
+                <?= json_encode(($currentScenario ? 'Edit custom scenario — ' : 'New custom scenario — ') . ($studyAreaName ?: ('Study area #' . $studyAreaId))) ?>
+        );
     </script>
 
     <div class="p-3">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <div class="text-muted small">
-                Create a custom scenario by assigning existing scenarios to subbasins.
+                <?= $currentScenario
+                        ? 'Update the custom scenario by adjusting the scenario assignments per subbasin.'
+                        : 'Create a custom scenario by assigning existing scenarios to subbasins.' ?>
             </div>
             <button
                 type="button"
@@ -60,16 +82,17 @@ if ($view === 'create') {
                         type="text"
                         class="form-control"
                         id="customScenarioName"
-                        placeholder="Enter a name">
+                        placeholder="Enter a name"
+                        value="<?= h($currentScenario['name'] ?? '') ?>">
                 </div>
 
                 <div class="mb-3">
                     <label for="customScenarioDescription" class="form-label">Description</label>
                     <textarea
-                        class="form-control"
-                        id="customScenarioDescription"
-                        rows="3"
-                        placeholder="Describe this custom scenario"></textarea>
+                            class="form-control"
+                            id="customScenarioDescription"
+                            rows="3"
+                            placeholder="Describe this custom scenario"><?= h($currentScenario['description'] ?? '') ?></textarea>
                 </div>
             </div>
 
@@ -80,6 +103,10 @@ if ($view === 'create') {
                             <div class="fw-semibold">Subbasin assignments</div>
                             <div class="small text-muted">
                                 Select a source scenario and click a subbasin to assign it.
+                            </div>
+                            <div class="small mt-2">
+                                <span class="fw-semibold">Assignment progress:</span>
+                                <span id="customScenarioAssignmentProgress" class="text-muted">Loading…</span>
                             </div>
                         </div>
 
@@ -121,7 +148,7 @@ if ($view === 'create') {
             </button>
             <button type="button" class="btn btn-primary" id="saveCustomScenarioBtn">
                 <i class="bi bi-save me-1"></i>
-                Save scenario
+                <?= $currentScenario ? 'Update scenario' : 'Save scenario' ?>
             </button>
         </div>
     </div>
@@ -136,38 +163,22 @@ if ($view === 'create') {
         window.__CUSTOM_SCENARIO_CREATE__ = {
             studyAreaId: <?= (int)$studyAreaId ?>,
             studyAreaName: <?= json_encode($studyAreaName) ?>,
+            scenarioId: <?= (int)($currentScenario['id'] ?? 0) ?>,
+            initialName: <?= json_encode((string)($currentScenario['name'] ?? '')) ?>,
+            initialDescription: <?= json_encode((string)($currentScenario['description'] ?? '')) ?>,
+            initialAssignments: <?= json_encode($currentAssignments) ?>,
             subbasinGeoUrl: <?= json_encode("/api/study_area_subbasins_geo.php?study_area_id=" . $studyAreaId) ?>,
-            availableRuns: <?= json_encode($availableRuns) ?>
+            runsListUrl: <?= json_encode("/api/runs_list.php?study_area_id=" . $studyAreaId) ?>,
+            saveUrl: <?= json_encode("/api/custom_scenario_save.php") ?>,
+            deleteUrl: <?= json_encode("/api/custom_scenario_delete.php") ?>,
+            listModalUrl: <?= json_encode("/modals/custom_scenarios.php?study_area_id=" . $studyAreaId . "&study_area_name=" . rawurlencode($studyAreaName)) ?>
         };
     </script>
     <?php
     return;
 }
 
-// Mock data for now
-$scenarios = [
-    [
-        'id' => 101,
-        'name' => 'High irrigation efficiency',
-        'created_at' => '2026-03-01 09:14',
-        'updated_at' => '2026-03-06 14:32',
-        'description' => 'Test scenario with increased irrigation efficiency and reduced conveyance losses.',
-    ],
-    [
-        'id' => 102,
-        'name' => 'Reduced fertilizer input',
-        'created_at' => '2026-02-20 11:48',
-        'updated_at' => '2026-02-28 08:10',
-        'description' => 'Scenario used to evaluate lower fertilizer application rates across selected crops.',
-    ],
-    [
-        'id' => 103,
-        'name' => 'Drought response package',
-        'created_at' => '2026-01-17 16:05',
-        'updated_at' => '2026-03-03 10:27',
-        'description' => 'Combined water-saving and crop-management adjustments for drought years.',
-    ],
-];
+$scenarios = CustomScenarioRepository::listByStudyAreaForUser($studyAreaId, $userId);
 ?>
 
 <script>
@@ -178,9 +189,6 @@ $scenarios = [
     <div class="d-flex justify-content-between align-items-center mb-3 gap-2">
         <div>
             <div class="fw-semibold">User-created scenarios</div>
-            <div class="text-muted small">
-                Showing mock scenarios for the selected study area.
-            </div>
         </div>
 
         <button
@@ -228,14 +236,14 @@ $scenarios = [
 
                         <td class="text-center">
                             <button
-                                type="button"
-                                class="btn btn-sm btn-link text-secondary p-0"
-                                data-bs-toggle="popover"
-                                data-bs-trigger="hover focus"
-                                data-bs-placement="left"
-                                data-bs-html="true"
-                                title="Description"
-                                data-bs-content="<?= h($scenario['description']) ?>">
+                                    type="button"
+                                    class="btn btn-sm btn-link text-secondary p-0"
+                                    data-bs-toggle="popover"
+                                    data-bs-trigger="hover focus"
+                                    data-bs-placement="left"
+                                    data-bs-html="true"
+                                    title="Description"
+                                    data-bs-content="<?= h($scenario['description'] ?? '') ?>">
                                 <i class="bi bi-info-circle"></i>
                                 <span class="visually-hidden">Show description</span>
                             </button>
@@ -243,18 +251,20 @@ $scenarios = [
 
                         <td class="text-end text-nowrap">
                             <button
-                                type="button"
-                                class="btn btn-sm btn-outline-secondary"
-                                data-bs-toggle="tooltip"
-                                title="Edit scenario">
+                                    type="button"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    data-edit-scenario-id="<?= (int)$scenario['id'] ?>"
+                                    data-bs-toggle="tooltip"
+                                    title="Edit scenario">
                                 <i class="bi bi-pencil"></i>
                             </button>
 
                             <button
-                                type="button"
-                                class="btn btn-sm btn-outline-danger ms-1"
-                                data-bs-toggle="tooltip"
-                                title="Remove scenario">
+                                    type="button"
+                                    class="btn btn-sm btn-outline-danger ms-1"
+                                    data-delete-scenario-id="<?= (int)$scenario['id'] ?>"
+                                    data-bs-toggle="tooltip"
+                                    title="Remove scenario">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </td>
@@ -278,5 +288,53 @@ $scenarios = [
         ModalUtils.reloadModal(
             `/modals/custom_scenarios.php?study_area_id=<?= (int)$studyAreaId ?>&study_area_name=<?= rawurlencode($studyAreaName) ?>&view=create`
         );
+    });
+</script>
+<script>
+    document.querySelectorAll('[data-edit-scenario-id]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const scenarioId = btn.getAttribute('data-edit-scenario-id');
+            if (!scenarioId) return;
+
+            ModalUtils.reloadModal(
+                `/modals/custom_scenarios.php?study_area_id=<?= (int)$studyAreaId ?>&study_area_name=<?= rawurlencode($studyAreaName) ?>&view=create&scenario_id=${encodeURIComponent(scenarioId)}`
+            );
+        });
+    });
+
+    document.querySelectorAll('[data-delete-scenario-id]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const scenarioId = parseInt(btn.getAttribute('data-delete-scenario-id') || '0', 10);
+            if (!scenarioId) return;
+
+            const ok = window.confirm('Are you sure you want to delete this custom scenario?');
+            if (!ok) return;
+
+            try {
+                const res = await fetch('/api/custom_scenario_delete.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ id: scenarioId })
+                });
+
+                const json = await res.json().catch(() => ({}));
+
+                if (!res.ok || json.status !== 'ok') {
+                    throw new Error(json.message || `Delete failed (HTTP ${res.status})`);
+                }
+
+                showToast(json.message || 'Scenario deleted.', false, null, 'OK', 2500);
+
+                ModalUtils.reloadModal(
+                    `/modals/custom_scenarios.php?study_area_id=<?= (int)$studyAreaId ?>&study_area_name=<?= rawurlencode($studyAreaName) ?>`
+                );
+            } catch (err) {
+                console.error('[custom-scenarios] delete failed', err);
+                showToast(err.message || 'Failed to delete scenario.', true, null, 'OK', 5000);
+            }
+        });
     });
 </script>

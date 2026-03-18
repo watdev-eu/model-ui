@@ -1,3 +1,4 @@
+// assets/js/dashboard/custom-scenario-create.js
 function initCustomScenarioCreate() {
     const cfg = window.__CUSTOM_SCENARIO_CREATE__;
     if (!cfg) {
@@ -10,14 +11,119 @@ function initCustomScenarioCreate() {
     const assignmentListEl = document.getElementById('customScenarioAssignmentList');
     const hintEl = document.getElementById('customScenarioMapHint');
     const backBtn = document.getElementById('backToScenarioListBtn');
+    const saveBtn = document.getElementById('saveCustomScenarioBtn');
+    const progressEl = document.getElementById('customScenarioAssignmentProgress');
+    const nameEl = document.getElementById('customScenarioName');
+    const descriptionEl = document.getElementById('customScenarioDescription');
 
-    if (!mapEl || !runSelectEl || !assignmentListEl) return;
+    let confirmModalEl = null;
+    let confirmModal = null;
 
-    const availableRuns = Array.isArray(cfg.availableRuns) ? cfg.availableRuns : [];
-    const runMetaById = new Map(availableRuns.map(r => [Number(r.id), r]));
+    function ensureConfirmModal() {
+        if (confirmModalEl) return;
 
-    const assignments = new Map(); // subbasinId -> runId
+        confirmModalEl = document.createElement('div');
+        confirmModalEl.className = 'modal fade';
+        confirmModalEl.tabIndex = -1;
+        confirmModalEl.setAttribute('aria-hidden', 'true');
+        confirmModalEl.innerHTML = `
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Incomplete scenario assignment</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="mb-2" id="customScenarioConfirmText">
+                            Not all subbasins are assigned.
+                        </p>
+                        <div class="alert alert-warning mb-0 small">
+                            All unassigned subbasins will use the <strong>Baseline</strong> scenario.
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-action="cancel">
+                            Cancel
+                        </button>
+                        <button type="button" class="btn btn-primary" data-action="confirm">
+                            Continue and save
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(confirmModalEl);
+        confirmModal = new bootstrap.Modal(confirmModalEl, {
+            backdrop: 'static',
+            keyboard: true,
+        });
+    }
+
+    function showBootstrapConfirm({
+                                      title = 'Please confirm',
+                                      message = 'Are you sure?',
+                                      confirmText = 'Confirm',
+                                      cancelText = 'Cancel',
+                                  }) {
+        ensureConfirmModal();
+
+        return new Promise((resolve) => {
+            const titleEl = confirmModalEl.querySelector('.modal-title');
+            const textEl = confirmModalEl.querySelector('#customScenarioConfirmText');
+            const confirmBtn = confirmModalEl.querySelector('[data-action="confirm"]');
+            const cancelBtn = confirmModalEl.querySelector('[data-action="cancel"]');
+
+            titleEl.textContent = title;
+            textEl.textContent = message;
+            confirmBtn.textContent = confirmText;
+            cancelBtn.textContent = cancelText;
+
+            let settled = false;
+
+            const cleanup = () => {
+                confirmBtn.removeEventListener('click', onConfirm);
+                cancelBtn.removeEventListener('click', onCancel);
+                confirmModalEl.removeEventListener('hidden.bs.modal', onHidden);
+            };
+
+            const finish = (value) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                resolve(value);
+            };
+
+            const onConfirm = () => {
+                confirmModal.hide();
+                finish(true);
+            };
+
+            const onCancel = () => {
+                confirmModal.hide();
+                finish(false);
+            };
+
+            const onHidden = () => {
+                finish(false);
+            };
+
+            confirmBtn.addEventListener('click', onConfirm);
+            cancelBtn.addEventListener('click', onCancel);
+            confirmModalEl.addEventListener('hidden.bs.modal', onHidden, { once: true });
+
+            confirmModal.show();
+        });
+    }
+
+    if (!mapEl || !runSelectEl || !assignmentListEl || !saveBtn) return;
+
+    const assignments = new Map(
+        Object.entries(cfg.initialAssignments || {}).map(([sub, runId]) => [String(sub), Number(runId)])
+    );
+
     const colorByRunId = new Map();
+    const runMetaById = new Map();
     const palette = [
         [99, 110, 250, 0.65],
         [239, 85, 59, 0.65],
@@ -29,21 +135,63 @@ function initCustomScenarioCreate() {
         [182, 232, 128, 0.65],
     ];
 
-    availableRuns.forEach((run, idx) => {
-        colorByRunId.set(Number(run.id), palette[idx % palette.length]);
-    });
+    let vectorLayer = null;
+    let map = null;
+    let totalSubbasins = 0;
 
     backBtn?.addEventListener('click', () => {
-        const params = new URLSearchParams({
-            study_area_id: String(cfg.studyAreaId || 0),
-            study_area_name: cfg.studyAreaName || '',
-        });
-        ModalUtils.reloadModal(`/modals/custom_scenarios.php?${params.toString()}`);
+        ModalUtils.reloadModal(cfg.listModalUrl);
     });
+
+    function setHint(text) {
+        if (hintEl) hintEl.textContent = text;
+    }
+
+    function updateProgress() {
+        if (!progressEl) return;
+        const assigned = assignments.size;
+        const unassigned = Math.max(0, totalSubbasins - assigned);
+
+        if (totalSubbasins <= 0) {
+            progressEl.textContent = 'Loading…';
+            return;
+        }
+
+        if (unassigned > 0) {
+            progressEl.innerHTML = `
+                Assigned <span class="mono">${assigned}</span> / <span class="mono">${totalSubbasins}</span><br>
+                <span class="mono">${unassigned}</span> subbasins unassigned  → Baseline will be used
+            `;
+        } else {
+            progressEl.innerHTML = `
+                Assigned <span class="mono">${assigned}</span> / <span class="mono">${totalSubbasins}</span>
+            `;
+        }
+    }
+
+    function selectedRunId() {
+        const v = Number(runSelectEl.value);
+        return Number.isFinite(v) && v > 0 ? v : null;
+    }
+
+    function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, ch => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+        }[ch]));
+    }
+
+    function escapeAttr(value) {
+        return escapeHtml(value).replace(/"/g, '&quot;');
+    }
 
     function renderAssignments() {
         if (!assignments.size) {
             assignmentListEl.innerHTML = `<div class="text-muted">No subbasins assigned yet.</div>`;
+            updateProgress();
             return;
         }
 
@@ -76,19 +224,52 @@ function initCustomScenarioCreate() {
             btn.addEventListener('click', () => {
                 const subId = btn.getAttribute('data-remove-sub');
                 assignments.delete(String(subId));
-                vectorLayer.changed();
+                vectorLayer?.changed();
                 renderAssignments();
+                updateProgress();
             });
         });
+
+        updateProgress();
     }
 
-    function selectedRunId() {
-        const v = Number(runSelectEl.value);
-        return Number.isFinite(v) && v > 0 ? v : null;
-    }
+    async function loadAvailableRuns() {
+        const res = await fetch(cfg.runsListUrl, {
+            headers: { 'Accept': 'application/json' }
+        });
 
-    function setHint(text) {
-        if (hintEl) hintEl.textContent = text;
+        if (!res.ok) {
+            throw new Error(`Failed to load runs: HTTP ${res.status}`);
+        }
+
+        const json = await res.json();
+        const runs = Array.isArray(json.runs) ? json.runs : [];
+
+        runMetaById.clear();
+        runSelectEl.innerHTML = '<option value="">Choose a scenario…</option>';
+
+        const usableRuns = runs.filter(r => {
+            const label = String(r.run_label || '').trim();
+            return label.toLowerCase() !== 'baseline';
+        });
+
+        usableRuns.forEach((run, idx) => {
+            const id = Number(run.id);
+            const label = String(run.run_label || `Run ${id}`);
+
+            runMetaById.set(id, {
+                id,
+                label,
+                is_default: !!run.is_default,
+            });
+
+            colorByRunId.set(id, palette[idx % palette.length]);
+
+            const opt = document.createElement('option');
+            opt.value = String(id);
+            opt.textContent = label;
+            runSelectEl.appendChild(opt);
+        });
     }
 
     if (typeof proj4 !== 'undefined' && ol?.proj?.proj4) {
@@ -101,9 +282,9 @@ function initCustomScenarioCreate() {
     function guessGeoJSONProjection(gj) {
         try {
             const coordsScan = (geom) => {
-                const type = geom?.type;
                 const c = geom?.coordinates;
-                if (!type || !c) return null;
+                if (!c) return null;
+
                 const scanArray = (arr) => {
                     for (const el of arr) {
                         if (Array.isArray(el)) {
@@ -115,6 +296,7 @@ function initCustomScenarioCreate() {
                     }
                     return null;
                 };
+
                 return scanArray(c);
             };
 
@@ -168,102 +350,148 @@ function initCustomScenarioCreate() {
         });
     }
 
-    let vectorLayer = null;
-    let map = null;
+    async function loadMap() {
+        const res = await fetch(cfg.subbasinGeoUrl, {
+            headers: { 'Accept': 'application/json' }
+        });
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+        }
 
-    fetch(cfg.subbasinGeoUrl)
-        .then(r => {
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            return r.json();
-        })
-        .then(gj => {
-            const fmt = new ol.format.GeoJSON();
-            const features = fmt.readFeatures(gj, {
-                dataProjection: guessGeoJSONProjection(gj),
-                featureProjection: 'EPSG:3857',
-            });
+        const gj = await res.json();
 
-            const source = new ol.source.Vector({ features });
-            vectorLayer = new ol.layer.Vector({
-                source,
-                style: styleFn,
-            });
-
-            map = new ol.Map({
-                target: mapEl,
-                layers: [
-                    new ol.layer.Tile({ source: new ol.source.OSM() }),
-                    vectorLayer,
-                ],
-                view: new ol.View({
-                    center: [0, 0],
-                    zoom: 5,
-                }),
-            });
-
-            const extent = source.getExtent();
-            if (extent && extent.every(Number.isFinite)) {
-                map.getView().fit(extent, {
-                    padding: [20, 20, 20, 20],
-                    duration: 250,
-                    maxZoom: 10,
-                });
-            }
-
-            map.on('singleclick', (evt) => {
-                const feature = map.forEachFeatureAtPixel(evt.pixel, f => f);
-                if (!feature) return;
-
-                const subId = String(getProp(feature, 'Subbasin'));
-                const runId = selectedRunId();
-
-                if (!runId) {
-                    setHint(`Subbasin ${subId} clicked. Select a scenario first.`);
-                    return;
-                }
-
-                assignments.set(subId, runId);
-                vectorLayer.changed();
-                renderAssignments();
-
-                const label = runMetaById.get(runId)?.label || `Run ${runId}`;
-                setHint(`Assigned "${label}" to subbasin ${subId}.`);
-            });
-
-            setHint('Select a scenario and click a subbasin to assign it.');
-        })
-        .catch(err => {
-            console.error('[custom-scenario-create] failed to load map', err);
-            mapEl.innerHTML = `<div class="alert alert-danger m-2 mb-0">Failed to load study area map.</div>`;
+        const fmt = new ol.format.GeoJSON();
+        const features = fmt.readFeatures(gj, {
+            dataProjection: guessGeoJSONProjection(gj),
+            featureProjection: 'EPSG:3857',
         });
 
-    renderAssignments();
+        totalSubbasins = features.length;
+        updateProgress();
 
-    document.getElementById('saveCustomScenarioBtn')?.addEventListener('click', () => {
+        const source = new ol.source.Vector({ features });
+        vectorLayer = new ol.layer.Vector({
+            source,
+            style: styleFn,
+        });
+
+        map = new ol.Map({
+            target: mapEl,
+            layers: [
+                new ol.layer.Tile({ source: new ol.source.OSM() }),
+                vectorLayer,
+            ],
+            view: new ol.View({
+                center: [0, 0],
+                zoom: 5,
+            }),
+        });
+
+        const extent = source.getExtent();
+        if (extent && extent.every(Number.isFinite)) {
+            map.getView().fit(extent, {
+                padding: [20, 20, 20, 20],
+                duration: 250,
+                maxZoom: 10,
+            });
+        }
+
+        map.on('singleclick', (evt) => {
+            const feature = map.forEachFeatureAtPixel(evt.pixel, f => f);
+            if (!feature) return;
+
+            const subId = String(getProp(feature, 'Subbasin'));
+            const runId = selectedRunId();
+
+            if (!runId) {
+                setHint(`Subbasin ${subId} clicked. Select a scenario first.`);
+                return;
+            }
+
+            assignments.set(subId, runId);
+            vectorLayer.changed();
+            renderAssignments();
+
+            const label = runMetaById.get(runId)?.label || `Run ${runId}`;
+            setHint(`Assigned "${label}" to subbasin ${subId}.`);
+        });
+
+        setHint('Select a scenario and click a subbasin to assign it.');
+    }
+
+    async function saveScenario(confirmedUseBaselineForMissing = false) {
         const payload = {
-            name: document.getElementById('customScenarioName')?.value?.trim() || '',
-            description: document.getElementById('customScenarioDescription')?.value?.trim() || '',
-            studyAreaId: cfg.studyAreaId,
+            id: Number(cfg.scenarioId || 0),
+            name: nameEl?.value?.trim() || '',
+            description: descriptionEl?.value?.trim() || '',
+            studyAreaId: Number(cfg.studyAreaId || 0),
             assignments: Object.fromEntries(assignments),
+            confirmedUseBaselineForMissing,
         };
 
-        console.log('[custom-scenario-create] mock save payload', payload);
-        showToast('Mock scenario captured. Save endpoint comes next.', false, null, 'OK', 3000);
+        const res = await fetch(cfg.saveUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+
+        const json = await res.json().catch(() => ({}));
+
+        if (json?.status === 'confirm_required') {
+            const assigned = assignments.size;
+            const unassigned = Math.max(0, totalSubbasins - assigned);
+
+            const ok = await showBootstrapConfirm({
+                title: 'Incomplete scenario assignment',
+                message:
+                    json.message ||
+                    `Only ${assigned} of ${totalSubbasins} subbasins are assigned. ` +
+                    `${unassigned} unassigned subbasins will use the Baseline scenario. Do you want to continue?`,
+                confirmText: 'Continue and save',
+                cancelText: 'Go back',
+            });
+
+            if (!ok) return;
+
+            await saveScenario(true);
+            return;
+        }
+
+        if (!res.ok || json?.status !== 'ok') {
+            throw new Error(json?.message || `Save failed (HTTP ${res.status})`);
+        }
+
+        showToast(json.message || 'Scenario saved successfully.', false, null, 'OK', 3000);
+        ModalUtils.reloadModal(cfg.listModalUrl);
+    }
+
+    saveBtn.addEventListener('click', async () => {
+        try {
+            saveBtn.disabled = true;
+            await saveScenario(false);
+        } catch (err) {
+            console.error('[custom-scenario-create] save failed', err);
+            showToast(err?.message || 'Failed to save scenario.', true, null, 'OK', 5000);
+        } finally {
+            saveBtn.disabled = false;
+        }
     });
-}
 
-function escapeHtml(value) {
-    return String(value).replace(/[&<>"']/g, ch => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;',
-    }[ch]));
-}
-
-function escapeAttr(value) {
-    return escapeHtml(value).replace(/"/g, '&quot;');
+    Promise.all([
+        loadAvailableRuns(),
+        loadMap(),
+    ])
+        .then(() => {
+            renderAssignments();
+        })
+        .catch(err => {
+            console.error('[custom-scenario-create] init failed', err);
+            mapEl.innerHTML = `<div class="alert alert-danger m-2 mb-0">Failed to load custom scenario editor.</div>`;
+            setHint('Failed to initialize editor.');
+        });
 }
 
 document.addEventListener('DOMContentLoaded', initCustomScenarioCreate);
