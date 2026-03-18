@@ -7,11 +7,13 @@ $pageButtons = [];
 
 require_once __DIR__ . '/config/app.php';
 require_once __DIR__ . '/includes/layout.php';
+require_once __DIR__ . '/classes/Auth.php';
 require_once __DIR__ . '/classes/StudyAreaRepository.php';
 
 $allAreas  = StudyAreaRepository::all();
 $areas     = array_values(array_filter($allAreas, fn($a) => !empty($a['enabled'])));
 $firstId   = $areas ? (int)$areas[0]['id'] : 0;
+$canManageCustomScenarios = Auth::isLoggedIn();
 ?>
 
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
@@ -128,18 +130,20 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                             <div class="text-muted small">Select a study area first.</div>
                         </div>
 
-                        <div class="d-grid mt-2">
-                            <button
-                                    type="button"
-                                    id="manageCustomScenariosBtn"
-                                    class="btn btn-sm btn-outline-secondary"
-                                    disabled
-                                    aria-disabled="true"
-                                    title="Select a study area first">
-                                <i class="bi bi-sliders me-1"></i>
-                                Manage custom scenarios
-                            </button>
-                        </div>
+                        <?php if ($canManageCustomScenarios): ?>
+                            <div class="d-grid mt-2">
+                                <button
+                                        type="button"
+                                        id="manageCustomScenariosBtn"
+                                        class="btn btn-sm btn-outline-secondary"
+                                        disabled
+                                        aria-disabled="true"
+                                        title="Select a study area first">
+                                    <i class="bi bi-sliders me-1"></i>
+                                    Manage custom scenarios
+                                </button>
+                            </div>
+                        <?php endif; ?>
 
                         <div class="form-text">
                             Use the checkboxes to enable or disable scenarios.
@@ -431,9 +435,13 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                 apiBase: '/api'
             });
 
-            const customScenarioModal = initCustomScenarioModal({
-                triggerEl: document.getElementById('manageCustomScenariosBtn'),
-            });
+            const manageCustomScenariosBtn = document.getElementById('manageCustomScenariosBtn');
+
+            const customScenarioModal = manageCustomScenariosBtn
+                ? initCustomScenarioModal({
+                    triggerEl: manageCustomScenariosBtn,
+                })
+                : null;
 
             if (buttonsWrap) {
                 buttonsWrap.addEventListener('click', (ev) => {
@@ -454,7 +462,7 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
 
                     ctrl.switchStudyArea(id);
 
-                    customScenarioModal.setStudyArea({
+                    customScenarioModal?.setStudyArea({
                         id,
                         name,
                     });
