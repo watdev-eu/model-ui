@@ -1,16 +1,20 @@
 <?php
+//api/swat_indicator_yearly.php
+
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/app.php';
-require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../classes/Auth.php';
+require_once __DIR__ . '/../classes/CustomScenarioRepository.php';
+require_once __DIR__ . '/../classes/DashboardDatasetKey.php';
 require_once __DIR__ . '/../classes/SwatResultsRepository.php';
 
 header('Content-Type: application/json');
 
-$runId = isset($_GET['run_id']) ? (int)$_GET['run_id'] : 0;
+$rawRunId = trim((string)($_GET['run_id'] ?? ''));
 $indicator = trim((string)($_GET['indicator'] ?? ''));
 
-if ($runId <= 0 || $indicator === '') {
+if ($rawRunId === '' || $indicator === '') {
     http_response_code(400);
     echo json_encode(['error' => 'run_id and indicator are required']);
     exit;
@@ -23,7 +27,66 @@ if (isset($_GET['from']) && $_GET['from'] !== '') $opts['from'] = (string)$_GET[
 if (isset($_GET['to']) && $_GET['to'] !== '')     $opts['to']   = (string)$_GET['to'];
 
 try {
-    echo json_encode(SwatResultsRepository::getYearly($runId, $indicator, $opts));
+    $parsed = DashboardDatasetKey::parse($rawRunId);
+
+    if ($parsed['type'] === 'run') {
+        echo json_encode(SwatResultsRepository::getYearly((int)$parsed['id'], $indicator, $opts));
+        exit;
+    }
+
+    Auth::requireLogin();
+    $userId = Auth::userId();
+    if ($userId === null) {
+        throw new RuntimeException('Unauthorized');
+    }
+
+    $effectiveRunMap = CustomScenarioRepository::getEffectiveRunMapForUser((int)$parsed['id'], $userId);
+    $effectiveRunIds = array_values(array_unique(array_values($effectiveRunMap)));
+
+    $mergedRows = [];
+    $meta = null;
+    $status = 'ok';
+
+    foreach ($effectiveRunIds as $runId) {
+        $result = SwatResultsRepository::getYearly((int)$runId, $indicator, $opts);
+
+        if ($meta === null) {
+            $meta = $result['meta'] ?? [];
+            $status = $result['status'] ?? 'ok';
+        }
+
+        if (($result['status'] ?? 'ok') !== 'ok') {
+            continue;
+        }
+
+        foreach (($result['rows'] ?? []) as $row) {
+            $sub = isset($row['sub']) ? (int)$row['sub'] : 0;
+            if ($sub <= 0) continue;
+
+            $effectiveRunForSub = (int)($effectiveRunMap[$sub] ?? 0);
+            if ($effectiveRunForSub !== (int)$runId) continue;
+
+            $mergedRows[] = $row;
+        }
+    }
+
+    usort($mergedRows, static function (array $a, array $b): int {
+        $ya = (int)($a['year'] ?? 0);
+        $yb = (int)($b['year'] ?? 0);
+        if ($ya !== $yb) return $ya <=> $yb;
+
+        $sa = (int)($a['sub'] ?? 0);
+        $sb = (int)($b['sub'] ?? 0);
+        if ($sa !== $sb) return $sa <=> $sb;
+
+        return strcmp((string)($a['crop'] ?? ''), (string)($b['crop'] ?? ''));
+    });
+
+    echo json_encode([
+        'status' => $status,
+        'meta'   => $meta ?? [],
+        'rows'   => $mergedRows,
+    ]);
 } catch (Throwable $e) {
     http_response_code(500);
     echo json_encode(['error' => $e->getMessage()]);

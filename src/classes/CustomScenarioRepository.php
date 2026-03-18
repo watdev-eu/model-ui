@@ -335,4 +335,86 @@ final class CustomScenarioRepository
     {
         return self::findByIdForUser($scenarioId, $userId) !== null;
     }
+
+    public static function listForStudyAreaPublicAndUser(int $studyAreaId, ?string $userId): array
+    {
+        $pdo = Database::pdo();
+
+        if ($userId === null || $userId === '') {
+            return [];
+        }
+
+        $stmt = $pdo->prepare(
+            'select
+            id,
+            study_area_id,
+            created_by,
+            name,
+            description,
+            created_at,
+            updated_at
+         from custom_scenarios
+         where study_area_id = :study_area_id
+           and created_by = :created_by
+         order by updated_at desc, name asc'
+        );
+        $stmt->execute([
+            ':study_area_id' => $studyAreaId,
+            ':created_by'    => $userId,
+        ]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public static function getEffectiveRunMapForUser(int $scenarioId, string $userId): array
+    {
+        $scenario = self::findByIdForUser($scenarioId, $userId);
+        if (!$scenario) {
+            throw new RuntimeException('Scenario not found.');
+        }
+
+        $studyAreaId = (int)$scenario['study_area_id'];
+        $baselineRunId = self::getBaselineRunId($studyAreaId);
+
+        if (!$baselineRunId) {
+            throw new RuntimeException('No baseline run configured for this study area.');
+        }
+
+        $pdo = Database::pdo();
+
+        $sql = <<<SQL
+        select
+            sb.sub,
+            coalesce(ca.source_run_id, :baseline_run_id) as effective_run_id
+        from study_area_subbasins sb
+        left join custom_scenario_subbasin_runs ca
+          on ca.study_area_id = sb.study_area_id
+         and ca.sub = sb.sub
+         and ca.custom_scenario_id = :scenario_id
+        where sb.study_area_id = :study_area_id
+        order by sb.sub asc
+    SQL;
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([
+            ':baseline_run_id' => $baselineRunId,
+            ':scenario_id'     => $scenarioId,
+            ':study_area_id'   => $studyAreaId,
+        ]);
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $out = [];
+        foreach ($rows as $row) {
+            $out[(int)$row['sub']] = (int)$row['effective_run_id'];
+        }
+
+        return $out;
+    }
+
+    public static function collectEffectiveRunIdsForUser(int $scenarioId, string $userId): array
+    {
+        $map = self::getEffectiveRunMapForUser($scenarioId, $userId);
+        return array_values(array_unique(array_map('intval', array_values($map))));
+    }
 }

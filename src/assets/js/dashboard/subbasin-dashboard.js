@@ -15,6 +15,8 @@ export function initSubbasinDashboard({
     let busyTimer = null;
     let busyShown = false;
 
+    const hasManageCustomScenariosBtn = !!els.manageCustomScenariosBtn;
+
     // Track abort controllers for in-flight PRELOAD requests only
     const preloadAbortByRunId = new Map(); // runId -> AbortController
 
@@ -51,8 +53,8 @@ export function initSubbasinDashboard({
     //   years, crops,
     // }
     const runsStore = new Map();
-    let selectedRunIds = [];   // run_ids currently selected in the checkbox list
-    let mapScenarioIds = [];   // run_ids currently visualised on the map (0–2)
+    let selectedRunIds = [];   // dataset keys, e.g. "12" or "custom:5"
+    let mapScenarioIds = [];   // dataset keys, 0–2
     let runsMeta = [];         // metadata from runs_list.php (id, run_label, run_date)
 
     let cropLookup = {};
@@ -211,9 +213,9 @@ export function initSubbasinDashboard({
                 await Promise.all(selectedRunIds.map(id => ensureRunLoaded(id)));
                 // after user-selected runs loaded:
                 const remainingDefaultIds = (runsMeta || [])
-                    .filter(r => !!r.is_default)
-                    .map(r => Number(r.id))
-                    .filter(id => Number.isFinite(id) && id > 0)
+                    .filter(r => !!r.is_default && !isCustomDatasetId(r.id))
+                    .map(r => String(r.id))
+                    .filter(id => id !== '')
                     .filter(id => !runsStore.has(id));
 
                 setTimeout(() => {
@@ -373,8 +375,8 @@ export function initSubbasinDashboard({
 
                 let ids = opts
                     .filter(o => o.selected)
-                    .map(o => parseInt(o.value, 10))
-                    .filter(v => Number.isFinite(v) && v > 0);
+                    .map(o => String(o.value))
+                    .filter(v => v !== '');
 
                 // Enforce max 2
                 if (ids.length > 2) {
@@ -541,9 +543,8 @@ export function initSubbasinDashboard({
             id: runId,
             years: years.sort((a,b)=>a-b),
             crops: crops.sort(),
-            // indicator cache
-            indicatorCache: new Map(), // key = `${indicatorId}|yearly` -> payload
-            index: {},                 // indicatorId -> {grain, m, mean?}
+            indicatorCache: new Map(),
+            index: {},
         };
     }
 
@@ -643,9 +644,9 @@ export function initSubbasinDashboard({
 
             // Kick off background preloading of DEFAULT runs
             const defaultRunIds = (runsMeta || [])
-                .filter(r => !!r.is_default)
-                .map(r => Number(r.id))
-                .filter(id => Number.isFinite(id) && id > 0);
+                .filter(r => !!r.is_default && !isCustomDatasetId(r.id))
+                .map(r => String(r.id))
+                .filter(id => id !== '');
 
             startPreloadDefaultRuns(defaultRunIds, { concurrency: 2 });
 
@@ -692,6 +693,11 @@ export function initSubbasinDashboard({
 
         runsMeta = runs;  // store for later lookup (labels, etc.)
 
+        runsMeta = runs.map(r => ({
+            ...r,
+            id: String(r.id),
+        }));
+
         if (!runs.length) {
             els.dataset.innerHTML = '<div class="text-muted small">No runs found for this study area.</div>';
             return [];
@@ -707,12 +713,12 @@ export function initSubbasinDashboard({
             html += '<div class="small fw-semibold text-muted mb-1">Default datasets</div>';
             html += defaultRuns.map(r => {
                 const label = escHtml(r.run_label);
-                const id    = `run-${r.id}`;
+                const domId = datasetDomId(r.id);
                 return `
                 <div class="form-check mb-1">
                     <input class="form-check-input dataset-checkbox" type="checkbox"
-                           id="${id}" data-run-id="${r.id}">
-                    <label class="form-check-label" for="${id}">${label}</label>
+                           id="${domId}" data-run-id="${escAttr(r.id)}">
+                    <label class="form-check-label" for="${domId}">${label}</label>
                 </div>`;
             }).join('');
             html += '</div>';
@@ -720,17 +726,17 @@ export function initSubbasinDashboard({
 
         if (userRuns.length) {
             html += '<div class="mb-2">';
-            html += '<div class="small fw-semibold text-muted mb-1">User-created model runs</div>';
+            html += '<div class="small fw-semibold text-muted mb-1">User-created scenarios</div>';
             html += userRuns.map(r => {
                 const labelParts = [r.run_label];
                 if (r.run_date) labelParts.push(`(${r.run_date})`);
                 const label = escHtml(labelParts.join(' '));
-                const id    = `run-${r.id}`;
+                const domId = datasetDomId(r.id);
                 return `
                 <div class="form-check mb-1">
                     <input class="form-check-input dataset-checkbox" type="checkbox"
-                           id="${id}" data-run-id="${r.id}">
-                    <label class="form-check-label" for="${id}">${label}</label>
+                           id="${domId}" data-run-id="${escAttr(r.id)}">
+                    <label class="form-check-label" for="${domId}">${label}</label>
                 </div>`;
             }).join('');
             html += '</div>';
@@ -1074,7 +1080,7 @@ export function initSubbasinDashboard({
             const rd = runsStore.get(runId);
             if (!rd) continue;
 
-            const meta = runsMeta.find(r => +r.id === +runId);
+            const meta = runsMeta.find(r => String(r.id) === String(runId));
             const runLabel = meta ? meta.run_label : `Run ${runId}`;
 
             const xs = rd.years.slice();
@@ -1237,9 +1243,7 @@ export function initSubbasinDashboard({
         }
 
         if (els.manageCustomScenariosBtn) {
-            els.manageCustomScenariosBtn.disabled = true;
-            els.manageCustomScenariosBtn.setAttribute('aria-disabled', 'true');
-            els.manageCustomScenariosBtn.title = 'Select a study area first';
+            disableCustomScenarioButton();
         }
 
         if (els.metric) {
@@ -1322,8 +1326,8 @@ export function initSubbasinDashboard({
         const boxes = els.dataset.querySelectorAll('input.dataset-checkbox[data-run-id]');
         return [...boxes]
             .filter(b => b.checked)
-            .map(b => parseInt(b.dataset.runId, 10))
-            .filter(v => Number.isFinite(v) && v > 0);
+            .map(b => String(b.dataset.runId || '').trim())
+            .filter(v => v !== '');
     }
 
     async function ensureRunLoaded(runId, { isPreload = false } = {}) {
@@ -1365,6 +1369,22 @@ export function initSubbasinDashboard({
             runLoadPromises.delete(runId);
             if (isPreload) preloadAbortByRunId.delete(runId);
         }
+    }
+
+    function isCustomDatasetId(id) {
+        return typeof id === 'string' && id.startsWith('custom:');
+    }
+
+    function parseDatasetSourceId(id) {
+        if (isCustomDatasetId(id)) {
+            return parseInt(id.split(':')[1], 10);
+        }
+        const n = parseInt(String(id), 10);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    function datasetDomId(id) {
+        return `run-${String(id).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
     }
 
     function cancelPreloads() {
@@ -1434,12 +1454,12 @@ export function initSubbasinDashboard({
 
         const options = selectedRunIds
             .map(id => {
-                const meta = runsMeta.find(r => r.id === id);
+                const meta = runsMeta.find(r => String(r.id) === String(id));
                 if (!meta) return null;
                 const labelParts = [meta.run_label];
                 if (meta.run_date) labelParts.push(`(${meta.run_date})`);
                 return {
-                    id,
+                    id: String(id),
                     label: labelParts.join(' ')
                 };
             })
@@ -1453,7 +1473,7 @@ export function initSubbasinDashboard({
 
         const html = options.map(o => {
             const selected = mapScenarioIds.includes(o.id) ? 'selected' : '';
-            return `<option value="${o.id}" ${selected}>${escHtml(o.label)}</option>`;
+            return `<option value="${escAttr(o.id)}" ${selected}>${escHtml(o.label)}</option>`;
         }).join('');
 
         els.mapScenario.innerHTML = html;
@@ -1498,7 +1518,7 @@ export function initSubbasinDashboard({
             const rd = runsStore.get(runId);
             if (!rd) continue;
 
-            const meta = runsMeta.find(r => +r.id === +runId);
+            const meta = runsMeta.find(r => String(r.id) === String(runId));
             const runLabel = meta ? meta.run_label : `Run ${runId}`;
 
             const rows = rowsForIndicator(rd, def.id)
@@ -1570,7 +1590,7 @@ export function initSubbasinDashboard({
     }
 
     function scenarioLabel(runId) {
-        const meta = runsMeta.find(r => +r.id === +runId);
+        const meta = runsMeta.find(r => String(r.id) === String(runId));
         return meta ? meta.run_label : `Run ${runId}`;
     }
 
@@ -1647,6 +1667,20 @@ export function initSubbasinDashboard({
         }
         if (els.loadingTitle)  els.loadingTitle.textContent = '';
         if (els.loadingDetail) els.loadingDetail.textContent = '';
+    }
+
+    function disableCustomScenarioButton(title = 'Select a study area first') {
+        if (!els.manageCustomScenariosBtn) return;
+        els.manageCustomScenariosBtn.disabled = true;
+        els.manageCustomScenariosBtn.setAttribute('aria-disabled', 'true');
+        els.manageCustomScenariosBtn.title = title;
+    }
+
+    function enableCustomScenarioButton(title = 'Manage custom scenarios') {
+        if (!els.manageCustomScenariosBtn) return;
+        els.manageCustomScenariosBtn.disabled = false;
+        els.manageCustomScenariosBtn.setAttribute('aria-disabled', 'false');
+        els.manageCustomScenariosBtn.title = title;
     }
 
     function showInlineSpinner(targetEl, text = 'Loading…') {
@@ -1754,9 +1788,7 @@ export function initSubbasinDashboard({
         if (!Number.isFinite(+newStudyAreaId) || +newStudyAreaId <= 0) return;
 
         if (els.manageCustomScenariosBtn) {
-            els.manageCustomScenariosBtn.disabled = false;
-            els.manageCustomScenariosBtn.setAttribute('aria-disabled', 'false');
-            els.manageCustomScenariosBtn.title = 'Manage custom scenarios';
+            enableCustomScenarioButton();
         }
 
         currentStudyAreaId = +newStudyAreaId;
