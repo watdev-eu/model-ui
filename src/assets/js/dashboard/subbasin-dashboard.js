@@ -1236,6 +1236,12 @@ export function initSubbasinDashboard({
                 '<div class="text-muted small">Select a study area first.</div>';
         }
 
+        if (els.manageCustomScenariosBtn) {
+            els.manageCustomScenariosBtn.disabled = true;
+            els.manageCustomScenariosBtn.setAttribute('aria-disabled', 'true');
+            els.manageCustomScenariosBtn.title = 'Select a study area first';
+        }
+
         if (els.metric) {
             els.metric.innerHTML = '';
         }
@@ -1746,6 +1752,12 @@ export function initSubbasinDashboard({
         const epoch = loadEpoch;
 
         if (!Number.isFinite(+newStudyAreaId) || +newStudyAreaId <= 0) return;
+
+        if (els.manageCustomScenariosBtn) {
+            els.manageCustomScenariosBtn.disabled = false;
+            els.manageCustomScenariosBtn.setAttribute('aria-disabled', 'false');
+            els.manageCustomScenariosBtn.title = 'Manage custom scenarios';
+        }
 
         currentStudyAreaId = +newStudyAreaId;
         subbasinGeoUrl = `/api/study_area_subbasins_geo.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;

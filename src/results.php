@@ -127,6 +127,20 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                         <div id="datasetSelect" class="border rounded p-2" style="max-height:220px; overflow-y:auto;">
                             <div class="text-muted small">Select a study area first.</div>
                         </div>
+
+                        <div class="d-grid mt-2">
+                            <button
+                                    type="button"
+                                    id="manageCustomScenariosBtn"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    disabled
+                                    aria-disabled="true"
+                                    title="Select a study area first">
+                                <i class="bi bi-sliders me-1"></i>
+                                Manage custom scenarios
+                            </button>
+                        </div>
+
                         <div class="form-text">
                             Use the checkboxes to enable or disable scenarios.
                         </div>
@@ -349,6 +363,7 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
     <!-- module that wires switching -->
     <script type="module">
         import { initSubbasinDashboard } from '/assets/js/dashboard/subbasin-dashboard.js';
+        import { initCustomScenarioModal } from '/assets/js/dashboard/custom-scenario-modal.js';
 
         const initialAreaId = 0; // start idle, no data loaded
 
@@ -360,6 +375,7 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
             const ctrl = initSubbasinDashboard({
                 els: {
                     dataset: document.getElementById('datasetSelect'),
+                    manageCustomScenariosBtn: document.getElementById('manageCustomScenariosBtn'),
                     metric: document.getElementById('metricSelect'),
                     indicatorHelp: document.getElementById('indicatorHelp'),
                     cropGroup: document.getElementById('cropGroup'),
@@ -415,6 +431,10 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                 apiBase: '/api'
             });
 
+            const customScenarioModal = initCustomScenarioModal({
+                triggerEl: document.getElementById('manageCustomScenariosBtn'),
+            });
+
             if (buttonsWrap) {
                 buttonsWrap.addEventListener('click', (ev) => {
                     const btn = ev.target.closest('button[data-area-id]');
@@ -433,6 +453,11 @@ $firstId   = $areas ? (int)$areas[0]['id'] : 0;
                     controlsTitle.textContent = `Controls — ${name}`;
 
                     ctrl.switchStudyArea(id);
+
+                    customScenarioModal.setStudyArea({
+                        id,
+                        name,
+                    });
                 });
             }
         });

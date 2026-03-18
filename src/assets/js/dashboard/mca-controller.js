@@ -1,4 +1,4 @@
-// assets/ja/dashboard/mca-controller.js
+// assets/js/dashboard/mca-controller.js
 
 export function initMcaController({ apiBase, els }) {
     let studyAreaId = null;

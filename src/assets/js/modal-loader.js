@@ -1,3 +1,4 @@
+// assets/js/modal-loader.js
 document.addEventListener('DOMContentLoaded', function () {
     function cleanBootstrapState() {
         document.querySelector('.modal-backdrop')?.remove();
