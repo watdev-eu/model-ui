@@ -15,8 +15,6 @@ export function initSubbasinDashboard({
     let busyTimer = null;
     let busyShown = false;
 
-    const hasManageCustomScenariosBtn = !!els.manageCustomScenariosBtn;
-
     // Track abort controllers for in-flight PRELOAD requests only
     const preloadAbortByRunId = new Map(); // runId -> AbortController
 
@@ -382,7 +380,7 @@ export function initSubbasinDashboard({
                 if (ids.length > 2) {
                     ids = ids.slice(0, 2);
                     opts.forEach(o => {
-                        const id = parseInt(o.value, 10);
+                        const id = String(o.value);
                         o.selected = ids.includes(id);
                     });
                 }
@@ -391,7 +389,7 @@ export function initSubbasinDashboard({
                 if (!ids.length && selectedRunIds.length) {
                     ids = [selectedRunIds[0]];
                     opts.forEach(o => {
-                        const id = parseInt(o.value, 10);
+                        const id = String(o.value);
                         o.selected = ids.includes(id);
                     });
                 }
@@ -524,10 +522,33 @@ export function initSubbasinDashboard({
     }
 
     // ---------- Data load ----------
+    async function loadEffectiveRunBySub(runId, { signal } = {}) {
+        if (!isCustomDatasetId(runId)) {
+            return new Map(); // normal runs don't need explicit per-sub mapping
+        }
+
+        const scenarioId = parseDatasetSourceId(runId);
+        const res = await fetch(
+            `${apiBase}/custom_scenario_effective_runs.php?scenario_id=${encodeURIComponent(scenarioId)}`,
+            { signal }
+        );
+
+        if (!res.ok) {
+            throw new Error(`custom_scenario_effective_runs HTTP ${res.status}`);
+        }
+
+        const json = await res.json();
+        const raw = json?.effective_run_by_sub || {};
+        return new Map(
+            Object.entries(raw).map(([sub, sourceRunId]) => [String(sub), Number(sourceRunId)])
+        );
+    }
+
     async function loadRunMeta(runId, { signal } = {}) {
-        const [yearsRes, cropsRes] = await Promise.all([
+        const [yearsRes, cropsRes, effectiveRunBySub] = await Promise.all([
             fetch(`${apiBase}/run_years.php?run_id=${encodeURIComponent(runId)}`, { signal }),
             fetch(`${apiBase}/run_crops.php?run_id=${encodeURIComponent(runId)}`, { signal }),
+            loadEffectiveRunBySub(runId, { signal }),
         ]);
 
         if (!yearsRes.ok) throw new Error(`run_years HTTP ${yearsRes.status}`);
@@ -545,6 +566,8 @@ export function initSubbasinDashboard({
             crops: crops.sort(),
             indicatorCache: new Map(),
             index: {},
+            isCustom: isCustomDatasetId(runId),
+            effectiveRunBySub,
         };
     }
 
@@ -703,8 +726,9 @@ export function initSubbasinDashboard({
             return [];
         }
 
-        const defaultRuns = runs.filter(r => r.is_default);
-        const userRuns    = runs.filter(r => !r.is_default);
+        const defaultRuns = runs.filter(r => !!r.is_default && r.dataset_type === 'run');
+        const userModelRuns = runs.filter(r => !r.is_default && r.dataset_type === 'run');
+        const customScenarioRuns = runs.filter(r => r.dataset_type === 'custom');
 
         let html = '';
 
@@ -724,10 +748,10 @@ export function initSubbasinDashboard({
             html += '</div>';
         }
 
-        if (userRuns.length) {
+        if (userModelRuns.length) {
             html += '<div class="mb-2">';
-            html += '<div class="small fw-semibold text-muted mb-1">User-created scenarios</div>';
-            html += userRuns.map(r => {
+            html += '<div class="small fw-semibold text-muted mb-1">User-uploaded model runs</div>';
+            html += userModelRuns.map(r => {
                 const labelParts = [r.run_label];
                 if (r.run_date) labelParts.push(`(${r.run_date})`);
                 const label = escHtml(labelParts.join(' '));
@@ -737,6 +761,24 @@ export function initSubbasinDashboard({
                     <input class="form-check-input dataset-checkbox" type="checkbox"
                            id="${domId}" data-run-id="${escAttr(r.id)}">
                     <label class="form-check-label" for="${domId}">${label}</label>
+                </div>`;
+            }).join('');
+            html += '</div>';
+        }
+
+        if (customScenarioRuns.length) {
+            html += '<div class="mb-2">';
+            html += '<div class="small fw-semibold text-muted mb-1">Custom scenarios</div>';
+            html += customScenarioRuns.map(r => {
+                const label = escHtml(r.run_label);
+                const domId = datasetDomId(r.id);
+                return `
+                <div class="form-check mb-1">
+                    <input class="form-check-input dataset-checkbox" type="checkbox"
+                           id="${domId}" data-run-id="${escAttr(r.id)}">
+                    <label class="form-check-label d-flex align-items-center gap-2" for="${domId}">
+                        <span>${label}</span>
+                    </label>
                 </div>`;
             }).join('');
             html += '</div>';
@@ -824,17 +866,41 @@ export function initSubbasinDashboard({
             });
 
             map.on('pointermove', (evt) => {
-                const hit = map.forEachFeatureAtPixel(evt.pixel, (f) => f); // take first feature on any vector layer
+                const hit = map.forEachFeatureAtPixel(evt.pixel, (f) => f);
                 if (hit) {
-                    const sid = getProp(hit, 'Subbasin');
+                    const sid = String(getProp(hit, 'Subbasin'));
                     const v = valueForSub(sid);
-                    if (els.mapInfo) els.mapInfo.innerHTML =
-                        `<b>Subbasin ${escHtml(sid)}</b><br>` +
-                        `<b>${escHtml(currentIndicator()?.name||'')}</b>: ${fmt(v)} ${unitText()}<br>` +
-                        `<span class="mono">${escHtml(timeLabelText())}</span>`;
+
+                    let scenarioInfoHtml = '';
+
+                    if (mapScenarioIds.length === 1) {
+                        const datasetId = mapScenarioIds[0];
+                        const label = effectiveScenarioLabelForDatasetSub(datasetId, sid);
+
+                        scenarioInfoHtml =
+                            `<b>Scenario</b>: ${escHtml(label)}<br>`;
+                    } else if (mapScenarioIds.length === 2) {
+                        const labelA = effectiveScenarioLabelForDatasetSub(mapScenarioIds[0], sid);
+                        const labelB = effectiveScenarioLabelForDatasetSub(mapScenarioIds[1], sid);
+
+                        scenarioInfoHtml =
+                            `<b>Scenario A</b>: ${escHtml(labelA)}<br>` +
+                            `<b>Scenario B</b>: ${escHtml(labelB)}<br>`;
+                    }
+
+                    if (els.mapInfo) {
+                        els.mapInfo.innerHTML =
+                            `<b>Subbasin ${escHtml(sid)}</b><br>` +
+                            `<b>${escHtml(currentIndicator()?.name || '')}</b>: ${fmt(v)} ${unitText()}<br>` +
+                            scenarioInfoHtml +
+                            `<span class="mono">${escHtml(timeLabelText())}</span>`;
+                    }
+
                     map.getTargetElement().style.cursor = 'pointer';
                 } else {
-                    els.mapInfo.textContent = 'Hover or click a subbasin';
+                    if (els.mapInfo) {
+                        els.mapInfo.textContent = 'Hover or click a subbasin';
+                    }
                     map.getTargetElement().style.cursor = '';
                 }
             });
@@ -1242,9 +1308,7 @@ export function initSubbasinDashboard({
                 '<div class="text-muted small">Select a study area first.</div>';
         }
 
-        if (els.manageCustomScenariosBtn) {
-            disableCustomScenarioButton();
-        }
+        disableCustomScenarioButton();
 
         if (els.metric) {
             els.metric.innerHTML = '';
@@ -1406,7 +1470,9 @@ export function initSubbasinDashboard({
         const myEpoch = preloadEpoch;
 
         // Only preload what isn't already loaded
-        const ids = (runIds || []).map(Number).filter(id => Number.isFinite(id) && id > 0);
+        const ids = (runIds || [])
+            .map(id => String(id))
+            .filter(id => id !== '' && !isCustomDatasetId(id));
         preloadQueue = ids.filter(id => !runsStore.has(id));
 
         preloadTotal = preloadQueue.length;
@@ -1587,6 +1653,29 @@ export function initSubbasinDashboard({
         // If we know the name: show just the name.
         // If not: fall back to the raw code.
         return n || code;
+    }
+
+    function sourceRunLabelById(sourceRunId) {
+        const meta = runsMeta.find(r =>
+            r.dataset_type === 'run' && parseInt(String(r.source_id || r.id), 10) === Number(sourceRunId)
+        );
+        return meta ? meta.run_label : `Run ${sourceRunId}`;
+    }
+
+    function effectiveScenarioLabelForDatasetSub(datasetId, sub) {
+        const rd = runsStore.get(datasetId);
+        if (!rd) return scenarioLabel(datasetId);
+
+        if (!rd.isCustom) {
+            return scenarioLabel(datasetId);
+        }
+
+        const sourceRunId = rd.effectiveRunBySub?.get(String(sub));
+        if (!Number.isFinite(sourceRunId)) {
+            return scenarioLabel(datasetId);
+        }
+
+        return sourceRunLabelById(sourceRunId);
     }
 
     function scenarioLabel(runId) {
@@ -1787,9 +1876,7 @@ export function initSubbasinDashboard({
 
         if (!Number.isFinite(+newStudyAreaId) || +newStudyAreaId <= 0) return;
 
-        if (els.manageCustomScenariosBtn) {
-            enableCustomScenarioButton();
-        }
+        enableCustomScenarioButton();
 
         currentStudyAreaId = +newStudyAreaId;
         subbasinGeoUrl = `/api/study_area_subbasins_geo.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;
