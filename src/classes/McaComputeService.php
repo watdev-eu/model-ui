@@ -8,6 +8,8 @@ require_once __DIR__ . '/SwatRunRepository.php';
 require_once __DIR__ . '/McaDependencyRegistry.php';
 require_once __DIR__ . '/McaSwatInputsRepository.php';
 require_once __DIR__ . '/McaWaterRightsRepository.php';
+require_once __DIR__ . '/DashboardDatasetKey.php';
+require_once __DIR__ . '/CustomScenarioRepository.php';
 
 final class McaComputeService
 {
@@ -130,6 +132,204 @@ final class McaComputeService
 
         sort($ids);
         return $ids;
+    }
+
+    /**
+     * @param int $studyAreaId
+     * @param string[] $datasetIds
+     * @param ?string $userId
+     * @return array<int,array{
+     *   dataset_id:string,
+     *   dataset_type:string,
+     *   source_run_ids:int[],
+     *   effective_run_map:?array<int,int>
+     * }>
+     */
+    public static function resolveDatasetContexts(int $studyAreaId, array $datasetIds, ?string $userId): array
+    {
+        $out = [];
+        $seen = [];
+
+        foreach ($datasetIds as $rawId) {
+            $datasetId = trim((string)$rawId);
+            if ($datasetId === '' || isset($seen[$datasetId])) {
+                continue;
+            }
+            $seen[$datasetId] = true;
+
+            $parsed = DashboardDatasetKey::parse($datasetId);
+
+            if ($parsed['type'] === 'run') {
+                $runId = (int)$parsed['id'];
+                $run = SwatRunRepository::find($runId);
+                if (!$run) {
+                    throw new InvalidArgumentException("Run not found: {$runId}");
+                }
+                $sa = (int)($run['study_area_id'] ?? 0);
+                if ($sa !== $studyAreaId) {
+                    throw new InvalidArgumentException("Run {$runId} does not belong to study area {$studyAreaId}");
+                }
+
+                $out[] = [
+                    'dataset_id' => $datasetId,
+                    'dataset_type' => 'run',
+                    'source_run_ids' => [$runId],
+                    'effective_run_map' => null,
+                ];
+                continue;
+            }
+
+            if ($userId === null || $userId === '') {
+                throw new InvalidArgumentException("Custom scenario requires login: {$datasetId}");
+            }
+
+            $scenarioId = (int)$parsed['id'];
+            $scenario = CustomScenarioRepository::findByIdForUser($scenarioId, $userId);
+            if (!$scenario) {
+                throw new InvalidArgumentException("Custom scenario not found: {$datasetId}");
+            }
+
+            $sa = (int)($scenario['study_area_id'] ?? 0);
+            if ($sa !== $studyAreaId) {
+                throw new InvalidArgumentException("Custom scenario {$datasetId} does not belong to study area {$studyAreaId}");
+            }
+
+            $effectiveRunMap = CustomScenarioRepository::getEffectiveRunMapForUser($scenarioId, $userId);
+            $sourceRunIds = array_values(array_unique(array_map('intval', array_values($effectiveRunMap))));
+            sort($sourceRunIds);
+
+            if (!$sourceRunIds) {
+                throw new InvalidArgumentException("Custom scenario {$datasetId} has no effective source runs");
+            }
+
+            $out[] = [
+                'dataset_id' => $datasetId,
+                'dataset_type' => 'custom',
+                'source_run_ids' => $sourceRunIds,
+                'effective_run_map' => $effectiveRunMap,
+            ];
+        }
+
+        if (!$out) {
+            throw new InvalidArgumentException('No dataset ids provided');
+        }
+
+        return $out;
+    }
+
+    /**
+     * Very first MCA-compatible dataset resolver:
+     * - run dataset: returns the run's SWAT series directly
+     * - custom dataset: currently uses the first effective source run as representative
+     *
+     * This keeps MCA operational while we introduce custom datasets.
+     * Later we can replace this with true per-subbasin merging.
+     */
+    private static function buildDatasetSwatSeries(
+        array $datasetCtx,
+        array $swatSeriesByRun
+    ): array {
+        $datasetType = (string)($datasetCtx['dataset_type'] ?? 'run');
+
+        if ($datasetType === 'custom') {
+            return self::buildMergedCustomDatasetSwatSeries($datasetCtx, $swatSeriesByRun);
+        }
+
+        $sourceRunIds = $datasetCtx['source_run_ids'] ?? [];
+        if (!$sourceRunIds) {
+            return [];
+        }
+
+        $runId = (int)$sourceRunIds[0];
+        return $swatSeriesByRun[$runId] ?? [];
+    }
+
+    private static function buildOverallFromMergedBySub(array $bySub, array $subCropAreaHa): array
+    {
+        $overall = [];
+
+        foreach ($bySub as $sub => $crops) {
+            foreach ($crops as $crop => $series) {
+                $area = $subCropAreaHa[$sub][$crop] ?? null;
+                if ($area === null || $area <= 0) continue;
+
+                foreach ($series as $year => $val) {
+                    if ($val === null || !is_numeric($val)) continue;
+
+                    $year = (int)$year;
+                    $overall[$crop][$year] = $overall[$crop][$year] ?? ['num' => 0.0, 'den' => 0.0];
+                    $overall[$crop][$year]['num'] += (float)$val * (float)$area;
+                    $overall[$crop][$year]['den'] += (float)$area;
+                }
+            }
+        }
+
+        $final = [];
+        foreach ($overall as $crop => $series) {
+            foreach ($series as $year => $nd) {
+                $den = (float)($nd['den'] ?? 0.0);
+                $final[$crop][(int)$year] = $den > 0 ? ((float)$nd['num'] / $den) : null;
+            }
+            ksort($final[$crop]);
+        }
+        ksort($final);
+
+        return $final;
+    }
+
+    private static function buildMergedCustomDatasetSwatSeries(
+        array $datasetCtx,
+        array $swatSeriesByRun
+    ): array {
+        $effectiveRunMap = is_array($datasetCtx['effective_run_map'] ?? null)
+            ? $datasetCtx['effective_run_map']
+            : [];
+
+        if (!$effectiveRunMap) {
+            return [];
+        }
+
+        $indicatorCodes = [];
+        foreach (($datasetCtx['source_run_ids'] ?? []) as $rid) {
+            foreach (array_keys($swatSeriesByRun[(int)$rid] ?? []) as $code) {
+                $indicatorCodes[$code] = true;
+            }
+        }
+
+        $merged = [];
+
+        foreach (array_keys($indicatorCodes) as $code) {
+            $mergedBySub = [];
+            $mergedSubCropAreaHa = [];
+
+            foreach ($effectiveRunMap as $sub => $sourceRunId) {
+                $sub = (int)$sub;
+                $sourceRunId = (int)$sourceRunId;
+                if ($sub <= 0 || $sourceRunId <= 0) continue;
+
+                $runBlock = $swatSeriesByRun[$sourceRunId][$code] ?? null;
+                if (!is_array($runBlock)) continue;
+
+                if (isset($runBlock['by_sub'][$sub]) && is_array($runBlock['by_sub'][$sub])) {
+                    $mergedBySub[$sub] = $runBlock['by_sub'][$sub];
+                }
+
+                if (isset($runBlock['sub_crop_area_ha'][$sub]) && is_array($runBlock['sub_crop_area_ha'][$sub])) {
+                    $mergedSubCropAreaHa[$sub] = $runBlock['sub_crop_area_ha'][$sub];
+                }
+            }
+
+            ksort($mergedBySub);
+            ksort($mergedSubCropAreaHa);
+
+            $merged[$code] = [
+                'overall' => self::buildOverallFromMergedBySub($mergedBySub, $mergedSubCropAreaHa),
+                'by_sub' => $mergedBySub,
+                'sub_crop_area_ha' => $mergedSubCropAreaHa,
+            ];
+        }
+
+        return $merged;
     }
 
     /**
@@ -345,7 +545,7 @@ final class McaComputeService
      *
      * Optionally applies crop weights (defaults to equal weights).
      *
-     * @param array $byCrop  from results['bcr']['by_run'][rid]['by_crop']
+     * @param array $byCrop  from results['bcr']['by_dataset'][rid]['by_crop']
      * @param array<string,float> $cropWeights
      * @return array{series: array<int,?float>, raw: ?float, debug: array}
      */
@@ -457,11 +657,9 @@ final class McaComputeService
      */
     private static function computeBcrForRunCrop(array $args): array
     {
-        $runId          = (int)$args['run_id'];
+        $runId          = (string)$args['run_id'];
         $baselineRunId  = (int)$args['baseline_run_id'];
         $crop           = (string)$args['crop_code'];
-
-        $swatSeries     = $args['swat_series_by_run']; // [runId][swatCode][crop][year] => val
 
         $cropVarsIdx    = $args['crop_vars_idx'];      // [crop][key] => row
         $baselineFactorsIdx = $args['baseline_factors_idx']; // [crop][key] => num|null
@@ -472,9 +670,11 @@ final class McaComputeService
 
         $warnings = [];
 
-        // Required: yield series
-        $yScn = $swatSeries[$runId]['crop_yield_t_ha']['overall'][$crop] ?? [];
-        $yRef = $swatSeries[$baselineRunId]['crop_yield_t_ha']['overall'][$crop] ?? [];
+        $swatSeriesByDataset = $args['swat_series_by_dataset'];
+        $swatSeriesByRun     = $args['swat_series_by_run'];
+
+        $yScn = $swatSeriesByDataset[$runId]['crop_yield_t_ha']['overall'][$crop] ?? [];
+        $yRef = $swatSeriesByRun[$baselineRunId]['crop_yield_t_ha']['overall'][$crop] ?? [];
 
         if (!$yScn || !$yRef) {
             return [
@@ -500,11 +700,17 @@ final class McaComputeService
         $invest = self::getNumFromVarIdx($runVarIdx, 'bmp_invest_cost_usd_ha') ?? 0.0;
         $om     = self::getNumFromVarIdx($runVarIdx, 'bmp_annual_om_cost_usd_ha') ?? 0.0;
 
-        $labDayCost = self::getNumFromVarIdx($globalVarIdx, 'labour_day_cost_usd_per_pd');
+        $labDayCost = self::getNumFromVarIdx($globalVarIdx, 'labour_day_cost_usd_per_pd')
+            ?? self::getNumFromVarIdx($globalVarIdx, 'labour_cost_usd_per_day')
+            ?? self::getNumFromVarIdx($globalVarIdx, 'labour_day_cost_usd')
+            ?? 0.0;
 
-        if ($labDayCost === null) {
-            $labDayCost = 0.0;
-            $warnings[] = "Missing labour day cost (expected global var labour_cost_usd_per_day or labour_day_cost_usd). Using 0.";
+        if (
+            self::getNumFromVarIdx($globalVarIdx, 'labour_day_cost_usd_per_pd') === null &&
+            self::getNumFromVarIdx($globalVarIdx, 'labour_cost_usd_per_day') === null &&
+            self::getNumFromVarIdx($globalVarIdx, 'labour_day_cost_usd') === null
+        ) {
+            $warnings[] = "Missing labour day cost (expected global var labour_day_cost_usd_per_pd, labour_cost_usd_per_day or labour_day_cost_usd). Using 0.";
         }
 
         // Baseline costs per ha for crop
@@ -614,7 +820,25 @@ final class McaComputeService
         $baselineRunId = $ctx['baseline_run_id'];
         $studyAreaId   = $ctx['study_area_id'];
 
-        $runIds = self::validateRunIds($studyAreaId, $payload['run_ids'] ?? []);
+        $datasetContexts = self::resolveDatasetContexts(
+            $studyAreaId,
+            $payload['dataset_ids'] ?? [],
+            $payload['user_id'] ?? null
+        );
+
+        $datasetIds = array_map(
+            static fn(array $d): string => (string)$d['dataset_id'],
+            $datasetContexts
+        );
+
+        $allSourceRunIds = [];
+        foreach ($datasetContexts as $ctxItem) {
+            foreach (($ctxItem['source_run_ids'] ?? []) as $rid) {
+                $allSourceRunIds[(int)$rid] = true;
+            }
+        }
+        $runIds = array_keys($allSourceRunIds);
+        sort($runIds);
 
         // enabled MCA
         $presetItems = $payload['preset_items'] ?? [];
@@ -660,6 +884,11 @@ final class McaComputeService
                 : [];
         }
 
+        $swatSeriesByDataset = [];
+        foreach ($datasetContexts as $ds) {
+            $swatSeriesByDataset[$ds['dataset_id']] = self::buildDatasetSwatSeries($ds, $swatSeriesByRun);
+        }
+
         // Index crop variables (prices)
         $cropVarsIdx = self::indexCropVars($payload['crop_variables'] ?? []);
 
@@ -671,16 +900,18 @@ final class McaComputeService
         $runVarsById = [];
         $runVarIdxById = [];
         $runFactorsById = [];
+
         foreach ($runInputs as $ri) {
             if (!is_array($ri)) continue;
-            $rid = (int)($ri['run_id'] ?? 0);
-            if ($rid <= 0) continue;
+
+            $datasetId = trim((string)($ri['dataset_id'] ?? ''));
+            if ($datasetId === '') continue;
 
             $vars = is_array($ri['variables_run'] ?? null) ? $ri['variables_run'] : [];
-            $runVarsById[$rid] = $vars;
-            $runVarIdxById[$rid] = self::indexVarsByKey($vars);
+            $runVarsById[$datasetId] = $vars;
+            $runVarIdxById[$datasetId] = self::indexVarsByKey($vars);
 
-            $runFactorsById[$rid] = self::indexFactors(
+            $runFactorsById[$datasetId] = self::indexFactors(
                 is_array($ri['crop_factors'] ?? null) ? $ri['crop_factors'] : []
             );
         }
@@ -692,21 +923,23 @@ final class McaComputeService
         $results = [];
         $warnings = [];
 
-        $results['raw'] = ['by_run' => []];
+        $results['raw'] = ['by_dataset' => []];
 
         if (in_array('bcr', $enabledMcaCodes, true)) {
             $results['bcr'] = [
-                'by_run' => [],
+                'by_dataset' => [],
             ];
 
-            foreach ($runIds as $rid) {
-                $runVarIdx = $runVarIdxById[$rid] ?? [];
-                $runFactorsIdx = $runFactorsById[$rid] ?? [];
+            foreach ($datasetContexts as $ds) {
+                $datasetId = (string)$ds['dataset_id'];
+
+                $runVarIdx = $runVarIdxById[$datasetId] ?? [];
+                $runFactorsIdx = $runFactorsById[$datasetId] ?? [];
 
                 // Determine which crops to compute:
                 // Prefer crops present in scenario yield series (or filtered crop)
                 $cropSet = [];
-                $y = $swatSeriesByRun[$rid]['crop_yield_t_ha']['overall'] ?? [];
+                $y = $swatSeriesByDataset[$datasetId]['crop_yield_t_ha']['overall'] ?? [];
                 foreach (array_keys($y) as $crop) $cropSet[(string)$crop] = true;
 
                 // If cropFilter provided, restrict
@@ -717,9 +950,10 @@ final class McaComputeService
                 $byCrop = [];
                 foreach (array_keys($cropSet) as $crop) {
                     $out = self::computeBcrForRunCrop([
-                        'run_id' => $rid,
+                        'run_id' => $datasetId,
                         'baseline_run_id' => $baselineRunId,
                         'crop_code' => $crop,
+                        'swat_series_by_dataset' => $swatSeriesByDataset,
                         'swat_series_by_run' => $swatSeriesByRun,
                         'crop_vars_idx' => $cropVarsIdx,
                         'baseline_factors_idx' => $baselineFactorsIdx,
@@ -729,40 +963,37 @@ final class McaComputeService
                     ]);
 
                     $byCrop[$crop] = $out;
-                    foreach ($out['warnings'] as $w) $warnings[] = "run {$rid}, crop {$crop}: {$w}";
+                    foreach ($out['warnings'] as $w) $warnings[] = "dataset {$datasetId}, crop {$crop}: {$w}";
                 }
 
                 // crop weights for this run (so overall BCR matches other indicators)
-                $subCropAreaHa = $swatSeriesByRun[$rid]['crop_yield_t_ha']['sub_crop_area_ha'] ?? [];
+                $subCropAreaHa = $swatSeriesByDataset[$datasetId]['crop_yield_t_ha']['sub_crop_area_ha'] ?? [];
                 $wInfo = self::cropWeightsFromSubCropArea($subCropAreaHa, $cropFilter);
                 $cropWeights = $wInfo['weights'];
 
                 if (!$cropWeights) {
                     // fallback to equal weights based on available crops
-                    $yieldPerCrop = $swatSeriesByRun[$rid]['crop_yield_t_ha']['overall'] ?? [];
+                    $yieldPerCrop = $swatSeriesByDataset[$datasetId]['crop_yield_t_ha']['overall'] ?? [];
                     if ($cropFilter !== null) {
                         $yieldPerCrop = isset($yieldPerCrop[$cropFilter]) ? [$cropFilter => $yieldPerCrop[$cropFilter]] : [];
                     }
                     $wInfo2 = self::cropWeightsFromAvailableData($yieldPerCrop);
                     $cropWeights = $wInfo2['weights'];
-                    if ($wInfo2['warning']) $warnings[] = "run {$rid}: {$wInfo2['warning']}";
+                    if ($wInfo2['warning']) $warnings[] = "dataset {$datasetId}: {$wInfo2['warning']}";
                 } elseif ($wInfo['warning']) {
-                    $warnings[] = "run {$rid}: {$wInfo['warning']}";
+                    $warnings[] = "dataset {$datasetId}: {$wInfo['warning']}";
                 }
 
                 ksort($byCrop);
                 // Build overall BCR raw + time series (exposed in results.raw as well)
                 $bcrAgg = self::buildBcrOverallFromByCrop($byCrop, $cropWeights);
-                $results['bcr']['by_run'][$rid]['by_crop'] = $byCrop;
-
-                $results['bcr']['by_run'][$rid]['overall'] = [
+                $results['bcr']['by_dataset'][$datasetId]['by_crop'] = $byCrop;
+                $results['bcr']['by_dataset'][$datasetId]['overall'] = [
                     'raw' => $bcrAgg['raw'],
                     'series' => $bcrAgg['series'],
                     'debug' => $bcrAgg['debug'],
                 ];
-
-                // Also expose it in the standard raw slot so UI can plot without special casing
-                $results['raw']['by_run'][$rid]['bcr'] = [
+                $results['raw']['by_dataset'][$datasetId]['bcr'] = [
                     'raw' => $bcrAgg['raw'],
                     'series' => $bcrAgg['series'],
                     'debug' => $bcrAgg['debug'],
@@ -771,18 +1002,20 @@ final class McaComputeService
         }
 
         // ---- Results: Other MCA indicators (single number per run) ----
-        foreach ($runIds as $rid) {
-            $runVarIdx    = $runVarIdxById[$rid] ?? [];
-            $runFactorsIdx = $runFactorsById[$rid] ?? [];
+        foreach ($datasetContexts as $ds) {
+            $datasetId = (string)$ds['dataset_id'];
+
+            $runVarIdx = $runVarIdxById[$datasetId] ?? [];
+            $runFactorsIdx = $runFactorsById[$datasetId] ?? [];
 
             // Available crops for this run
-            $yieldPerCrop = $swatSeriesByRun[$rid]['crop_yield_t_ha']['overall'] ?? [];
+            $yieldPerCrop = $swatSeriesByDataset[$datasetId]['crop_yield_t_ha']['overall'] ?? [];
             if ($cropFilter !== null) {
                 $yieldPerCrop = isset($yieldPerCrop[$cropFilter]) ? [$cropFilter => $yieldPerCrop[$cropFilter]] : [];
             }
 
             // Build weights (equal for now, until we implement crop areas)
-            $subCropAreaHa = $swatSeriesByRun[$rid]['crop_yield_t_ha']['sub_crop_area_ha'] ?? [];
+            $subCropAreaHa = $swatSeriesByDataset[$datasetId]['crop_yield_t_ha']['sub_crop_area_ha'] ?? [];
             $wInfo = self::cropWeightsFromSubCropArea($subCropAreaHa, $cropFilter);
 
             $cropWeights = $wInfo['weights'];
@@ -790,9 +1023,9 @@ final class McaComputeService
                 // fallback
                 $wInfo2 = self::cropWeightsFromAvailableData($yieldPerCrop);
                 $cropWeights = $wInfo2['weights'];
-                if ($wInfo2['warning']) $warnings[] = "run {$rid}: {$wInfo2['warning']}";
+                if ($wInfo2['warning']) $warnings[] = "dataset {$datasetId}: {$wInfo2['warning']}";
             } else {
-                if ($wInfo['warning']) $warnings[] = "run {$rid}: {$wInfo['warning']}";
+                if ($wInfo['warning']) $warnings[] = "dataset {$datasetId}: {$wInfo['warning']}";
             }
 
             // Common run-level vars (use pre-indexed runVarIdx)
@@ -818,7 +1051,8 @@ final class McaComputeService
                 ?? 0.0;
 
             // Labour day cost per person-day (global)
-            $labDayCost  = self::getNumFromVarIdx($globalIdx, 'labour_cost_usd_per_day')
+            $labDayCost  = self::getNumFromVarIdx($globalIdx, 'labour_day_cost_usd_per_pd')
+                ?? self::getNumFromVarIdx($globalIdx, 'labour_cost_usd_per_day')
                 ?? self::getNumFromVarIdx($globalIdx, 'labour_day_cost_usd')
                 ?? 0.0;
 
@@ -870,7 +1104,7 @@ final class McaComputeService
                 }
 
                 $overall = self::mean(array_values($series));
-                $results['raw']['by_run'][$rid]['price_cost_ratio'] = [
+                $results['raw']['by_dataset'][$datasetId]['price_cost_ratio'] = [
                     'raw' => $overall,
                     'series' => $series,
                 ];
@@ -897,7 +1131,7 @@ final class McaComputeService
                     $series[$year] = $have ? ($baseTotal - $bmpTotal) : null;
                 }
                 $overall = self::mean(array_values($series));
-                $results['raw']['by_run'][$rid]['cost_saving_usd'] = [
+                $results['raw']['by_dataset'][$datasetId]['cost_saving_usd'] = [
                     'raw' => $overall,
                     'series' => $series,
                 ];
@@ -910,7 +1144,7 @@ final class McaComputeService
                 // Investment: only in investment years (0, life, 2*life, ...)
                 // NOTE: Your indicator unit in mca_indicators is USD/ha, but the formula includes * farm size.
                 // We implement BOTH and report per_ha and household_total in debug. Raw uses per_ha to match your unit.
-                $irrPerCrop = $swatSeriesByRun[$rid]['irr_mm']['overall'] ?? [];
+                $irrPerCrop = $swatSeriesByDataset[$datasetId]['irr_mm']['overall'] ?? [];
 
                 $seriesPerHa = [];
                 $seriesHousehold = [];
@@ -954,7 +1188,7 @@ final class McaComputeService
 
                 $overallPerHa = self::mean(array_values($seriesPerHa));
 
-                $results['raw']['by_run'][$rid]['net_farm_income_usd_ha'] = [
+                $results['raw']['by_dataset'][$datasetId]['net_farm_income_usd_ha'] = [
                     'raw' => $overallPerHa,
                     'series' => $seriesPerHa,
                     'debug' => [
@@ -969,7 +1203,7 @@ final class McaComputeService
                 // Use: (after - before) / before * 100
                 // before: baseline net farm income (computed like above but REF costs and REF yield)
                 // after: scenario net farm income (computed like above but BMP costs/yields)
-                $irrPerCrop = $swatSeriesByRun[$rid]['irr_mm']['overall'] ?? [];
+                $irrPerCrop = $swatSeriesByDataset[$datasetId]['irr_mm']['overall'] ?? [];
                 $yieldRefPerCrop = $swatSeriesByRun[$baselineRunId]['crop_yield_t_ha']['overall'] ?? [];
 
                 $series = [];
@@ -1011,7 +1245,7 @@ final class McaComputeService
                 }
 
                 $overall = self::mean(array_values($series));
-                $results['raw']['by_run'][$rid]['income_increase_pct'] = [
+                $results['raw']['by_dataset'][$datasetId]['income_increase_pct'] = [
                     'raw' => $overall,
                     'series' => $series,
                 ];
@@ -1031,14 +1265,14 @@ final class McaComputeService
                     $pdSeries[$year] = $have ? $tot : null;
                 }
                 $overall = self::mean(array_values($pdSeries));
-                $results['raw']['by_run'][$rid]['labour_use'] = [
+                $results['raw']['by_dataset'][$datasetId]['labour_use'] = [
                     'raw' => $overall,
                     'series' => $pdSeries,
                 ];
             }
 
             // ---- Water indicators ----
-            $irrPerCrop = $swatSeriesByRun[$rid]['irr_mm']['overall'] ?? [];
+            $irrPerCrop = $swatSeriesByDataset[$datasetId]['irr_mm']['overall'] ?? [];
 
             if (in_array('water_use_intensity', $enabledMcaCodes, true)) {
                 // m3/ha = irr_mm * 10
@@ -1047,7 +1281,7 @@ final class McaComputeService
                     $v = self::weightedYearValue($irrPerCrop, $cropWeights, (int)$year);
                     $series[$year] = ($v === null) ? null : ($v * 10.0);
                 }
-                $results['raw']['by_run'][$rid]['water_use_intensity'] = [
+                $results['raw']['by_dataset'][$datasetId]['water_use_intensity'] = [
                     'raw' => self::mean(array_values($series)),
                     'series' => $series,
                 ];
@@ -1064,7 +1298,7 @@ final class McaComputeService
                     $m3ha = $irrAgg * 10.0;
                     $series[$year] = (abs($m3ha) > 0.0) ? (($yAgg * 1000.0) / $m3ha) : null;
                 }
-                $results['raw']['by_run'][$rid]['water_tech_eff'] = [
+                $results['raw']['by_dataset'][$datasetId]['water_tech_eff'] = [
                     'raw' => self::mean(array_values($series)),
                     'series' => $series,
                 ];
@@ -1087,7 +1321,7 @@ final class McaComputeService
                     $m3ha = $irrAgg * 10.0;
                     $series[$year] = (abs($m3ha) > 0.0) ? ($revAgg / $m3ha) : null;
                 }
-                $results['raw']['by_run'][$rid]['water_econ_eff'] = [
+                $results['raw']['by_dataset'][$datasetId]['water_econ_eff'] = [
                     'raw' => self::mean(array_values($series)),
                     'series' => $series,
                 ];
@@ -1095,12 +1329,12 @@ final class McaComputeService
 
             // ---- Carbon sequestration ----
             if (in_array('carbon_sequestration', $enabledMcaCodes, true)) {
-                $cPerCrop = $swatSeriesByRun[$rid]['crop_c_seq_t_ha']['overall'] ?? [];
+                $cPerCrop = $swatSeriesByDataset[$datasetId]['crop_c_seq_t_ha']['overall'] ?? [];
                 $series = [];
                 foreach ($years as $year) {
                     $series[$year] = self::weightedYearValue($cPerCrop, $cropWeights, (int)$year);
                 }
-                $results['raw']['by_run'][$rid]['carbon_sequestration'] = [
+                $results['raw']['by_dataset'][$datasetId]['carbon_sequestration'] = [
                     'raw' => self::mean(array_values($series)),
                     'series' => $series,
                 ];
@@ -1108,23 +1342,23 @@ final class McaComputeService
 
             // ---- Fertiliser efficiencies ----
             if (in_array('fertiliser_use_eff_n', $enabledMcaCodes, true)) {
-                $nue = $swatSeriesByRun[$rid]['nue_n_pct']['overall'] ?? [];
+                $nue = $swatSeriesByDataset[$datasetId]['nue_n_pct']['overall'] ?? [];
                 $series = [];
                 foreach ($years as $year) {
                     $series[$year] = self::weightedYearValue($nue, $cropWeights, (int)$year);
                 }
-                $results['raw']['by_run'][$rid]['fertiliser_use_eff_n'] = [
+                $results['raw']['by_dataset'][$datasetId]['fertiliser_use_eff_n'] = [
                     'raw' => self::mean(array_values($series)),
                     'series' => $series,
                 ];
             }
             if (in_array('fertiliser_use_eff_p', $enabledMcaCodes, true)) {
-                $pue = $swatSeriesByRun[$rid]['nue_p_pct']['overall'] ?? [];
+                $pue = $swatSeriesByDataset[$datasetId]['nue_p_pct']['overall'] ?? [];
                 $series = [];
                 foreach ($years as $year) {
                     $series[$year] = self::weightedYearValue($pue, $cropWeights, (int)$year);
                 }
-                $results['raw']['by_run'][$rid]['fertiliser_use_eff_p'] = [
+                $results['raw']['by_dataset'][$datasetId]['fertiliser_use_eff_p'] = [
                     'raw' => self::mean(array_values($series)),
                     'series' => $series,
                 ];
@@ -1134,21 +1368,26 @@ final class McaComputeService
                 $farmSizeHa = self::getNumFromVarIdx($globalIdx, 'farm_size_ha');
 
                 if ($farmSizeHa === null || $farmSizeHa <= 0) {
-                    $warnings[] = "run {$rid}: Missing or invalid global var farm_size_ha; cannot compute water_rights_access.";
-                    $results['raw']['by_run'][$rid]['water_rights_access'] = [
+                    $warnings[] = "dataset {$datasetId}: Missing or invalid global var farm_size_ha; cannot compute water_rights_access.";
+                    $results['raw']['by_dataset'][$datasetId]['water_rights_access'] = [
+                        'raw' => null,
+                        'series' => [],
+                    ];
+                } elseif (($ds['dataset_type'] ?? 'run') === 'custom') {
+                    $warnings[] = "dataset {$datasetId}: water_rights_access is not yet implemented for merged custom scenarios.";
+                    $results['raw']['by_dataset'][$datasetId]['water_rights_access'] = [
                         'raw' => null,
                         'series' => [],
                     ];
                 } else {
-                    $w = McaWaterRightsRepository::getIrrigatedAreaHaMonthlyAndYearlyAvg($rid, []);
+                    $sourceRunId = (int)($ds['source_run_ids'][0] ?? 0);
+                    $w = McaWaterRightsRepository::getIrrigatedAreaHaMonthlyAndYearlyAvg($sourceRunId, []);
 
-                    // yearly: "number of irrigated farms" = irrigated_area_ha_avg_month / farm_size_ha
                     $seriesYearly = [];
                     foreach (($w['yearly_avg_monthly_irrigated_area_ha'] ?? []) as $year => $irrHaAvg) {
                         $seriesYearly[(int)$year] = ((float)$irrHaAvg) / (float)$farmSizeHa;
                     }
 
-                    // also provide spatial yearly (per subbasin)
                     $seriesYearlyBySub = [];
                     foreach (($w['yearly_avg_monthly_irrigated_area_ha_by_sub'] ?? []) as $sub => $yearMap) {
                         foreach (($yearMap ?? []) as $year => $irrHaAvg) {
@@ -1156,21 +1395,15 @@ final class McaComputeService
                         }
                     }
 
-                    $results['raw']['by_run'][$rid]['water_rights_access'] = [
+                    $results['raw']['by_dataset'][$datasetId]['water_rights_access'] = [
                         'raw' => self::mean(array_values($seriesYearly)),
                         'series' => $seriesYearly,
                         'debug' => [
                             'farm_size_ha' => $farmSizeHa,
-
-                            // overall irrigated area (ha)
                             'yearly_avg_monthly_irrigated_area_ha' => $w['yearly_avg_monthly_irrigated_area_ha'] ?? [],
                             'monthly_total_irrigated_area_ha' => $w['monthly_total_irrigated_area_ha'] ?? [],
-
-                            // spatial irrigated area (ha)
                             'yearly_avg_monthly_irrigated_area_ha_by_sub' => $w['yearly_avg_monthly_irrigated_area_ha_by_sub'] ?? [],
                             'monthly_irrigated_area_ha_by_sub' => $w['monthly_irrigated_area_ha_by_sub'] ?? [],
-
-                            // spatial “irrigated farms count”
                             'yearly_irrigated_farms_by_sub' => $seriesYearlyBySub,
                         ],
                     ];
@@ -1216,12 +1449,21 @@ final class McaComputeService
 
         // 1) Baseline-anchored scalar normalization (based on per-run RAW)
         // Baseline score = 0.5, others scale by deviation from baseline
-        $normalized = ['by_run' => []]; // [runId][code] => score 0..1
-        $weighted   = ['by_run' => []]; // [runId][code] => score*weight
+        $normalized = ['by_dataset' => []]; // [runId][code] => score 0..1
+        $weighted   = ['by_dataset' => []]; // [runId][code] => score*weight
         $totals     = [];               // [{run_id,total_weighted_score}]
 
         // Pick baseline id for normalization (prefer canonical baseline run if included)
-        $normBaselineId = in_array($baselineRunId, $runIds, true) ? $baselineRunId : ($runIds[0] ?? null);
+        $normBaselineId = null;
+        foreach ($datasetContexts as $ds) {
+            if ($ds['dataset_type'] === 'run' && ((int)($ds['source_run_ids'][0] ?? 0) === $baselineRunId)) {
+                $normBaselineId = (string)$ds['dataset_id'];
+                break;
+            }
+        }
+        if ($normBaselineId === null) {
+            $normBaselineId = $datasetIds[0] ?? null;
+        }
         if (!$normBaselineId) {
             throw new RuntimeException('No runs available for normalization.');
         }
@@ -1236,7 +1478,7 @@ final class McaComputeService
 
         foreach ($enabledMcaCodes as $code) {
             // baseline raw value
-            $baseRaw = $results['raw']['by_run'][$normBaselineId][$code]['raw'] ?? null;
+            $baseRaw = $results['raw']['by_dataset'][$normBaselineId][$code]['raw'] ?? null;
             $baseRaw = (is_numeric($baseRaw) ? (float)$baseRaw : null);
 
             // Build a scale for this indicator (fallback when baseline is 0 or missing)
@@ -1245,8 +1487,9 @@ final class McaComputeService
             $maxAbsDev = 0.0;
             $maxAbsRaw = 0.0;
 
-            foreach ($runIds as $rid) {
-                $raw = $results['raw']['by_run'][$rid][$code]['raw'] ?? null;
+            foreach ($datasetContexts as $ds) {
+                $datasetId = (string)$ds['dataset_id'];
+                $raw = $results['raw']['by_dataset'][$datasetId][$code]['raw'] ?? null;
                 if ($raw === null || !is_numeric($raw)) continue;
                 $rawF = (float)$raw;
                 $maxAbsRaw = max($maxAbsRaw, abs($rawF));
@@ -1268,11 +1511,12 @@ final class McaComputeService
                 $scale = 1.0;
             }
 
-            foreach ($runIds as $rid) {
-                $raw = $results['raw']['by_run'][$rid][$code]['raw'] ?? null;
+            foreach ($datasetContexts as $ds) {
+                $datasetId = (string)$ds['dataset_id'];
+                $raw = $results['raw']['by_dataset'][$datasetId][$code]['raw'] ?? null;
                 if ($raw === null || !is_numeric($raw) || $baseRaw === null) {
-                    $normalized['by_run'][$rid][$code] = null;
-                    $weighted['by_run'][$rid][$code] = null;
+                    $normalized['by_dataset'][$datasetId][$code] = null;
+                    $weighted['by_dataset'][$datasetId][$code] = null;
                     continue;
                 }
 
@@ -1298,39 +1542,41 @@ final class McaComputeService
 
                 $score = $clamp($score, 0.0, 1.0);
 
-                $normalized['by_run'][$rid][$code] = $score;
+                $normalized['by_dataset'][$datasetId][$code] = $score;
 
                 $w = $wByCode[$code] ?? 0.0;
-                $weighted['by_run'][$rid][$code] = $score * $w;
+                $weighted['by_dataset'][$datasetId][$code] = $score * $w;
             }
         }
 
         // Totals (scalar)
-        foreach ($runIds as $rid) {
+        foreach ($datasetContexts as $ds) {
+            $datasetId = (string)$ds['dataset_id'];
             $sum = 0.0;
             $have = false;
             foreach ($enabledMcaCodes as $code) {
-                $ws = $weighted['by_run'][$rid][$code] ?? null;
+                $ws = $weighted['by_dataset'][$datasetId][$code] ?? null;
                 if ($ws === null) continue;
                 $have = true;
                 $sum += (float)$ws;
             }
             $totals[] = [
-                'run_id' => $rid,
+                'dataset_id' => $datasetId,
                 'total_weighted_score' => $have ? $sum : null,
             ];
         }
 
         // 2) Time-series normalization across runs per YEAR (based on per-run SERIES)
-        $normalizedTs = ['by_run' => []]; // [rid][code][year] => score
-        $weightedTs   = ['by_run' => []]; // [rid][code][year] => score*weight
-        $totalsTs     = ['by_run' => []]; // [rid][year] => total
+        $normalizedTs = ['by_dataset' => []]; // [rid][code][year] => score
+        $weightedTs   = ['by_dataset' => []]; // [rid][code][year] => score*weight
+        $totalsTs     = ['by_dataset' => []]; // [rid][year] => total
 
         foreach ($enabledMcaCodes as $code) {
             // union of years across runs for this code
             $years = [];
-            foreach ($runIds as $rid) {
-                $series = $results['raw']['by_run'][$rid][$code]['series'] ?? [];
+            foreach ($datasetContexts as $ds) {
+                $datasetId = (string)$ds['dataset_id'];
+                $series = $results['raw']['by_dataset'][$datasetId][$code]['series'] ?? [];
                 if (!is_array($series)) continue;
                 foreach (array_keys($series) as $y) $years[(int)$y] = true;
             }
@@ -1340,14 +1586,16 @@ final class McaComputeService
             foreach ($years as $y) {
                 // min/max across runs for this (code,year)
                 $vals = [];
-                foreach ($runIds as $rid) {
-                    $v = $results['raw']['by_run'][$rid][$code]['series'][$y] ?? null;
+                foreach ($datasetContexts as $ds) {
+                    $datasetId = (string)$ds['dataset_id'];
+                    $v = $results['raw']['by_dataset'][$datasetId][$code]['series'][$y] ?? null;
                     if ($v !== null && is_numeric($v)) $vals[] = (float)$v;
                 }
                 if (!$vals) {
-                    foreach ($runIds as $rid) {
-                        $normalizedTs['by_run'][$rid][$code][$y] = null;
-                        $weightedTs['by_run'][$rid][$code][$y] = null;
+                    foreach ($datasetContexts as $ds) {
+                        $datasetId = (string)$ds['dataset_id'];
+                        $normalizedTs['by_dataset'][$datasetId][$code][$y] = null;
+                        $weightedTs['by_dataset'][$datasetId][$code][$y] = null;
                     }
                     continue;
                 }
@@ -1355,8 +1603,9 @@ final class McaComputeService
                 $min = min($vals);
                 $max = max($vals);
 
-                foreach ($runIds as $rid) {
-                    $v = $results['raw']['by_run'][$rid][$code]['series'][$y] ?? null;
+                foreach ($datasetContexts as $ds) {
+                    $datasetId = (string)$ds['dataset_id'];
+                    $v = $results['raw']['by_dataset'][$datasetId][$code]['series'][$y] ?? null;
 
                     if ($v === null || !is_numeric($v)) {
                         $score = null;
@@ -1368,18 +1617,19 @@ final class McaComputeService
                         $score = max(0.0, min(1.0, $score));
                     }
 
-                    $normalizedTs['by_run'][$rid][$code][$y] = $score;
+                    $normalizedTs['by_dataset'][$datasetId][$code][$y] = $score;
                     $w = $wByCode[$code] ?? 0.0;
-                    $weightedTs['by_run'][$rid][$code][$y] = ($score === null) ? null : ($score * $w);
+                    $weightedTs['by_dataset'][$datasetId][$code][$y] = ($score === null) ? null : ($score * $w);
                 }
             }
         }
 
         // Totals (time series)
-        foreach ($runIds as $rid) {
+        foreach ($datasetContexts as $ds) {
+            $datasetId = (string)$ds['dataset_id'];
             $years = [];
             foreach ($enabledMcaCodes as $code) {
-                foreach (array_keys($weightedTs['by_run'][$rid][$code] ?? []) as $y) {
+                foreach (array_keys($weightedTs['by_dataset'][$datasetId][$code] ?? []) as $y) {
                     $years[(int)$y] = true;
                 }
             }
@@ -1389,12 +1639,12 @@ final class McaComputeService
             foreach ($years as $y) {
                 $sum = 0.0; $have = false;
                 foreach ($enabledMcaCodes as $code) {
-                    $ws = $weightedTs['by_run'][$rid][$code][$y] ?? null;
+                    $ws = $weightedTs['by_dataset'][$datasetId][$code][$y] ?? null;
                     if ($ws === null) continue;
                     $sum += (float)$ws;
                     $have = true;
                 }
-                $totalsTs['by_run'][$rid][$y] = $have ? $sum : null;
+                $totalsTs['by_dataset'][$datasetId][$y] = $have ? $sum : null;
             }
         }
 
@@ -1413,6 +1663,8 @@ final class McaComputeService
             'preset_set_id'    => $presetSetId,
             'study_area_id'    => $studyAreaId,
             'baseline_run_id'  => $baselineRunId,
+
+            'dataset_ids'      => $datasetIds,
             'run_ids'          => $runIds,
 
             'enabled_mca'      => $enabledMcaCodes,

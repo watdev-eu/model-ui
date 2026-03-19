@@ -101,7 +101,6 @@ final class McaSwatInputsRepository
             }
 
             $bySub = [];     // [sub][crop][year] => val
-            $yearsSeen = []; // for ordering
 
             foreach ($rows as $r) {
                 $year = isset($r['year']) ? (int)$r['year'] : 0;
@@ -119,7 +118,6 @@ final class McaSwatInputsRepository
                 $num = ($val === null || $val === '') ? null : (is_numeric($val) ? (float)$val : null);
 
                 $bySub[$sub][$cropCode][$year] = $num;
-                $yearsSeen[$year] = true;
             }
 
             // overall per crop/year (area-weighted across subs)

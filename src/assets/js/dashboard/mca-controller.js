@@ -21,12 +21,21 @@ export function initMcaController({ apiBase, els }) {
     let mcaSelectedIndicator = null;
 
     let baselineRunId = null;
+    let baselineDatasetId = null;
     let cropRefFactorByCropKey = new Map(); // "CROP::key" -> number|null
 
     // Scenario state
-    let availableRuns = [];           // [{id,label,run_date}]
-    let includedRunIds = new Set();   // approach 1: defaults to selected runs
-    const runInputs = new Map(); // runId -> { ok, loading, error, variables_run, crop_factors }
+    let availableRuns = [];           // [{id,label,run_date,dataset_type,source_id,is_baseline}]
+    let includedRunIds = new Set();   // dataset ids: "12", "custom:5"
+    const runInputs = new Map();      // datasetId -> { ok, loading, error, ... }
+
+    function datasetIdString(id) {
+        return String(id ?? '').trim();
+    }
+
+    function isCustomDatasetId(id) {
+        return datasetIdString(id).startsWith('custom:');
+    }
 
     // ---------- Local-only getters for inputs (no DB writes) ----------
     function normalizeVarValue(row) {
@@ -39,8 +48,9 @@ export function initMcaController({ apiBase, els }) {
     }
 
     function runLabel(runId) {
-        const r = (availableRuns || []).find(x => Number(x.id) === Number(runId));
-        return r ? r.label : `Run ${runId}`;
+        const rid = datasetIdString(runId);
+        const r = (availableRuns || []).find(x => datasetIdString(x.id) === rid);
+        return r ? r.label : `Scenario ${rid}`;
     }
 
     function ensureVizVisible(show) {
@@ -79,25 +89,24 @@ export function initMcaController({ apiBase, els }) {
 
         const enabled = getEnabledIndicatorCodesFromResults(json);
         const metaMap = getIndicatorMetaMap(json);
-        const runIds = (json?.run_ids || []).map(Number);
-
+        const datasetIds = (json?.dataset_ids || []).map(String);
         const normRoot = json?.results?.normalized || {};
-        const normByRun = normRoot.by_run || normRoot;
-        if (!enabled.length || !runIds.length) {
+        const normByDataset = normRoot.by_dataset || normRoot;
+        if (!enabled.length || !datasetIds.length) {
             Plotly.purge(els.mcaRadarChart);
             return;
         }
 
         if (!enabled.length) console.warn('[MCA radar] enabled_mca empty', json);
-        if (!runIds.length) console.warn('[MCA radar] run_ids empty', json);
-        if (!normByRun || !Object.keys(normByRun).length) {
-            console.warn('[MCA radar] normalized.by_run missing/empty', json?.results);
+        if (!datasetIds.length) console.warn('[MCA radar] run_ids empty', json);
+        if (!normByDataset || !Object.keys(normByDataset).length) {
+            console.warn('[MCA radar] normalized.by_dataset missing/empty', json?.results);
         }
 
         const axisLabels = enabled.map(code => indicatorLabel(metaMap, code));
 
-        const traces = runIds.map((rid) => {
-            const row = normByRun?.[rid] || normByRun?.[String(rid)] || {};
+        const traces = datasetIds.map((rid) => {
+            const row = normByDataset?.[rid] || {};
             const rVals = enabled.map(code => {
                 const v = row?.[code];
                 return Number.isFinite(Number(v)) ? Number(v) : null;
@@ -133,7 +142,7 @@ export function initMcaController({ apiBase, els }) {
             return;
         }
 
-        const x = rows.map(r => runLabel(r.run_id));
+        const x = rows.map(r => runLabel(r.dataset_id));
         const y = rows.map(r => (Number.isFinite(Number(r.total_weighted_score)) ? Number(r.total_weighted_score) : null));
 
         Plotly.newPlot(els.mcaTotalsChart, [{
@@ -188,18 +197,18 @@ export function initMcaController({ apiBase, els }) {
         const meta = metaMap.get(String(code));
         const yTitle = meta?.unit ? `${meta.name} (${meta.unit})` : (meta?.name || code);
 
-        const runIds = (json?.run_ids || []).map(Number);
+        const datasetIds = (json?.dataset_ids || []).map(String);
         const rawRoot = json?.results?.raw || {};
-        const rawByRun = rawRoot.by_run || rawRoot;
+        const rawByDataset = rawRoot.by_dataset || rawRoot;
 
-        if (!rawByRun || !Object.keys(rawByRun).length) {
-            console.warn('[MCA raw TS] raw.by_run missing/empty', json?.results);
+        if (!rawByDataset || !Object.keys(rawByDataset).length) {
+            console.warn('[MCA raw TS] raw.by_dataset missing/empty', json?.results);
         }
 
         // union years across runs for this indicator
         const yearSet = new Set();
-        for (const rid of runIds) {
-            const rBlock = rawByRun?.[rid] || rawByRun?.[String(rid)];
+        for (const rid of datasetIds) {
+            const rBlock = rawByDataset?.[rid] || rawByDataset?.[String(rid)];
             const series = rBlock?.[code]?.series || rBlock?.[code];
             if (series && typeof series === 'object') {
                 Object.keys(series).forEach(y => yearSet.add(Number(y)));
@@ -213,8 +222,8 @@ export function initMcaController({ apiBase, els }) {
             return;
         }
 
-        const traces = runIds.map((rid) => {
-            const rBlock = rawByRun?.[rid] || rawByRun?.[String(rid)] || {};
+        const traces = datasetIds.map((rid) => {
+            const rBlock = rawByDataset?.[rid] || rawByDataset?.[String(rid)] || {};
             const series = rBlock?.[code]?.series || rBlock?.[code] || {};
 
             const y = years.map(yr => {
@@ -267,7 +276,7 @@ export function initMcaController({ apiBase, els }) {
 
     function allIncludedRunsReady() {
         for (const rid of includedRunIds) {
-            const st = runInputs.get(Number(rid));
+            const st = runInputs.get(datasetIdString(rid));
             if (!st?.ok) return false;
         }
         return true;
@@ -290,7 +299,7 @@ export function initMcaController({ apiBase, els }) {
      * NOTE: This is local memory only; ensureRunInputsLoaded() fills it from API.
      */
     function getRunState(runId) {
-        const st = runInputs.get(Number(runId));
+        const st = runInputs.get(datasetIdString(runId));
         return st && st.ok ? st : null;
     }
 
@@ -359,7 +368,7 @@ export function initMcaController({ apiBase, els }) {
     }
 
     function upsertRunVarValue(runId, key, numOrNull) {
-        const st = runInputs.get(runId);
+        const st = runInputs.get(datasetIdString(runId));
         if (!st || !Array.isArray(st.variables_run)) return;
 
         let row = st.variables_run.find(r => String(r.key) === String(key));
@@ -376,16 +385,22 @@ export function initMcaController({ apiBase, els }) {
     }
 
     function getRunCropList(runId) {
-        return (mcaRunCropsById && mcaRunCropsById[runId]) ? mcaRunCropsById[runId].map(String) : [];
-    }
+        const rid = datasetIdString(runId);
 
-    function getBaselineCropSet() {
-        const set = new Set();
-        for (const k of cropRefFactorByCropKey.keys()) {
-            const [crop] = String(k).split('::');
-            if (crop) set.add(crop);
-        }
-        return set;
+        const fromMeta = (mcaRunCropsById && mcaRunCropsById[rid])
+            ? mcaRunCropsById[rid].map(String)
+            : [];
+
+        const st = runInputs.get(rid);
+        const fromInputs = Array.isArray(st?.crop_factors)
+            ? Array.from(new Set(
+                st.crop_factors
+                    .map(r => String(r?.crop_code ?? '').trim())
+                    .filter(Boolean)
+            ))
+            : [];
+
+        return Array.from(new Set([...fromMeta, ...fromInputs])).sort();
     }
 
     function getRunVarRow(runId, key) {
@@ -439,7 +454,7 @@ export function initMcaController({ apiBase, els }) {
     function getLocalInputsForRun(runId) {
         const st = getRunState(runId);
         return {
-            runId: Number(runId),
+            runId: datasetIdString(runId),
 
             // raw arrays (local)
             variables_global: currentVars || [],
@@ -641,8 +656,8 @@ export function initMcaController({ apiBase, els }) {
         // --- Baseline crops: ONLY from KPI data (mcaRunCropsById) ---
         // Don't use cropRefFactorByCropKey because it contains all 96 crops
         const baselineCropsFromKPI = new Set();
-        if (baselineRunId && mcaRunCropsById[baselineRunId]) {
-            for (const c of mcaRunCropsById[baselineRunId]) {
+        if (baselineDatasetId && mcaRunCropsById[baselineDatasetId]) {
+            for (const c of mcaRunCropsById[baselineDatasetId]) {
                 baselineCropsFromKPI.add(String(c));
             }
         }
@@ -816,8 +831,10 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         mcaRunCropsById = rc || {};
 
         if (!baselineRunId || !Number.isFinite(baselineRunId) || baselineRunId <= 0) {
-            const baseline = (runsMeta || []).find(r => r.is_default);
-            const foundId = baseline ? Number(baseline.id) : null;
+            const baseline = (runsMeta || []).find(r =>
+                r.dataset_type === 'run' && !!r.is_baseline
+            );
+            const foundId = baseline ? parseInt(String(baseline.source_id ?? baseline.id), 10) : null;
             if (foundId && Number.isFinite(foundId) && foundId > 0) {
                 baselineRunId = foundId;
                 console.log('[MCA setAvailableRuns] Setting baseline from runsMeta:', baselineRunId);
@@ -826,35 +843,45 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
             console.log('[MCA setAvailableRuns] Keeping baseline from loadActivePreset:', baselineRunId);
         }
 
+        const baselineDataset = (runsMeta || []).find(r =>
+            r.dataset_type === 'run' && !!r.is_baseline
+        );
+        baselineDatasetId = baselineDataset ? datasetIdString(baselineDataset.id) : null;
+
         // Compute allowed crops from the passed runCropsById
         const cropSet = new Set();
         for (const rid of (selectedRunIds || [])) {
-            for (const c of (mcaRunCropsById?.[rid] || [])) cropSet.add(String(c));
+            const key = datasetIdString(rid);
+            for (const c of (mcaRunCropsById?.[key] || [])) cropSet.add(String(c));
         }
         allowedCropSet = cropSet.size ? cropSet : null;
 
-        // build availableRuns from selectedRunIds
-        const selectedSet = new Set((selectedRunIds || []).map(n => Number(n)));
+        const selectedSet = new Set((selectedRunIds || []).map(datasetIdString));
+
         availableRuns = (runsMeta || [])
-            .filter(r => selectedSet.has(Number(r.id)))
+            .filter(r => selectedSet.has(datasetIdString(r.id)))
             .map(r => ({
-                id: Number(r.id),
-                label: r.run_label || `Run ${r.id}`,
+                id: datasetIdString(r.id),
+                label: r.run_label || `Scenario ${r.id}`,
                 run_date: r.run_date || null,
+                dataset_type: r.dataset_type || 'run',
+                source_id: r.source_id ?? null,
+                is_baseline: !!r.is_baseline,
             }));
 
-        // Approach 1: include all selected by default (but keep previous include states if possible)
-        const prev = new Set(includedRunIds);
+        // include all selected by default, but preserve previous choices when possible
+        const prev = new Set([...includedRunIds].map(datasetIdString));
         includedRunIds = new Set();
         for (const r of availableRuns) {
-            if (prev.size === 0) includedRunIds.add(r.id);
-            else if (prev.has(r.id)) includedRunIds.add(r.id);
-            else includedRunIds.add(r.id); // approach 1: default included
+            const rid = datasetIdString(r.id);
+            if (prev.size === 0) includedRunIds.add(rid);
+            else if (prev.has(rid)) includedRunIds.add(rid);
+            else includedRunIds.add(rid);
         }
 
-        // purge inputs for runs that are no longer available
+        // purge inputs for scenarios that are no longer available
         for (const rid of runInputs.keys()) {
-            if (!selectedSet.has(Number(rid))) runInputs.delete(rid);
+            if (!selectedSet.has(datasetIdString(rid))) runInputs.delete(rid);
         }
 
         renderScenarioPicker();
@@ -862,7 +889,6 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         renderCropGlobalsAccordion();
         updateComputeEnabled();
 
-        // preload inputs for included runs
         await Promise.all([...includedRunIds].map(rid => ensureRunInputsLoaded(rid)));
         renderScenarioCards();
         updateComputeEnabled();
@@ -881,13 +907,17 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
       <div class="small text-muted mb-1">Included scenarios (default: all selected scenarios)</div>
       <div class="d-flex flex-column gap-1">
         ${availableRuns.map(r => {
-            const checked = includedRunIds.has(r.id) ? 'checked' : '';
+            const rid = datasetIdString(r.id);
+            const checked = includedRunIds.has(rid) ? 'checked' : '';
             const date = r.run_date ? ` <span class="text-muted">(${escapeHtml(r.run_date)})</span>` : '';
+            const typeBadge = r.dataset_type === 'custom'
+                ? ` <span class="badge text-bg-info">Custom scenario</span>`
+                : '';
             return `
             <div class="form-check">
-              <input class="form-check-input mca-include-run" type="checkbox" data-run-id="${r.id}" ${checked}>
+              <input class="form-check-input mca-include-run" type="checkbox" data-run-id="${escapeHtml(rid)}" ${checked}>
               <label class="form-check-label">
-                ${escapeHtml(r.label)}${date}
+                ${escapeHtml(r.label)}${date}${typeBadge}
               </label>
             </div>
           `;
@@ -897,8 +927,8 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
 
         els.mcaScenarioPickerWrap.querySelectorAll('.mca-include-run').forEach(inp => {
             inp.addEventListener('change', async () => {
-                const rid = Number(inp.dataset.runId);
-                if (!Number.isFinite(rid)) return;
+                const rid = datasetIdString(inp.dataset.runId);
+                if (!rid) return;
 
                 if (inp.checked) includedRunIds.add(rid);
                 else includedRunIds.delete(rid);
@@ -922,7 +952,7 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
             return;
         }
 
-        const included = availableRuns.filter(r => includedRunIds.has(r.id));
+        const included = availableRuns.filter(r => includedRunIds.has(datasetIdString(r.id)));
         if (!included.length) {
             els.mcaScenarioCards.innerHTML = `
               <div class="alert alert-warning py-2 small mb-0">
@@ -948,7 +978,7 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
                     </thead>
                     <tbody>
                       ${runCrops.map(code => {
-                        const anyRow = (st.crop_factors || []).find(x => String(x.crop_code) === String(code));
+                const anyRow = ((st?.crop_factors) || []).find(x => String(x.crop_code) === String(code));
                         const name = anyRow?.crop_name || code;
         
                         return `
@@ -983,7 +1013,8 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
 
         // 1) Render HTML
         els.mcaScenarioCards.innerHTML = included.map(r => {
-            const st = runInputs.get(r.id) || { loading: false };
+            const rid = datasetIdString(r.id);
+            const st = runInputs.get(rid) || { loading: false };
 
             const badge = st.loading
                 ? `<span class="badge text-bg-secondary">Loading inputs…</span>`
@@ -1010,24 +1041,33 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
                   `;
             }).join('');
 
-            const runCrops = getRunCropList(r.id);
+            const runCrops = getRunCropList(rid);
 
             const cropTables = runCrops.length ? `
               ${renderFactorSection('Labour inputs', 'person-days/ha', BASELINE_LABOUR_KEYS, r.id, runCrops, st)}
               ${renderFactorSection('Material inputs', 'USD/ha', BASELINE_MATERIAL_KEYS, r.id, runCrops, st)}
-            ` : `<div class="mt-2 small text-muted">No crop list available for this scenario (run ${r.id}).</div>`;
+            ` : `<div class="mt-2 small text-muted">No crop list available for this scenario (${r.id}).</div>`;
 
             return `
               <div class="card">
                 <div class="card-body py-2">
                   <div class="d-flex justify-content-between align-items-start gap-2">
-                    <div>
-                      <div class="fw-semibold">${escapeHtml(r.label)}</div>
-                      <div class="text-muted small mono">run_id: ${r.id}</div>
+                                        <div>
+                      <div class="fw-semibold d-flex align-items-center gap-2">
+                        <span>${escapeHtml(r.label)}</span>
+                        ${r.dataset_type === 'custom'
+                        ? `<span class="badge text-bg-info">Custom scenario</span>`
+                        : `<span class="badge text-bg-secondary">Model run</span>`}
+                              </div>
+                              <div class="text-muted small mono">
+                                ${r.dataset_type === 'custom'
+                        ? `dataset: ${escapeHtml(String(r.id))}`
+                        : `run_id: ${escapeHtml(String(r.source_id ?? r.id))}`}
+                      </div>
                     </div>
                     <div class="d-flex align-items-center gap-2">
                       ${badge}
-                      <button class="btn btn-sm btn-outline-secondary mca-reload-run" data-run-id="${r.id}">
+                      <button class="btn btn-sm btn-outline-secondary mca-reload-run" data-run-id="${escapeHtml(rid)}">
                         Reload
                       </button>
                     </div>
@@ -1049,8 +1089,8 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         // 2) Wire events AFTER rendering
         els.mcaScenarioCards.querySelectorAll('.mca-reload-run').forEach(btn => {
             btn.addEventListener('click', async () => {
-                const rid = Number(btn.dataset.runId);
-                if (!Number.isFinite(rid)) return;
+                const rid = datasetIdString(btn.dataset.runId);
+                if (!rid) return;
                 runInputs.delete(rid);
                 renderScenarioCards();
                 await ensureRunInputsLoaded(rid);
@@ -1060,7 +1100,7 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
 
         els.mcaScenarioCards.querySelectorAll('.mca-run-var').forEach(inp => {
             inp.addEventListener('input', () => {
-                const runId = Number(inp.dataset.runId);
+                const runId = datasetIdString(inp.dataset.runId);
                 const key = String(inp.dataset.key || '');
                 const txt = String(inp.value ?? '').trim();
                 const num = (txt === '') ? null : Number(txt);
@@ -1070,13 +1110,13 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
 
         els.mcaScenarioCards.querySelectorAll('.mca-crop-factor').forEach(inp => {
             inp.addEventListener('input', () => {
-                const runId = Number(inp.dataset.runId);
+                const runId = datasetIdString(inp.dataset.runId);
                 const crop  = String(inp.dataset.crop || '');
                 const key   = String(inp.dataset.key || '');
                 const txt   = String(inp.value ?? '').trim();
                 const num   = (txt === '') ? null : Number(txt);
 
-                const st = runInputs.get(runId);
+                const st = runInputs.get(datasetIdString(runId));
                 if (!st || !Array.isArray(st.crop_factors)) return;
 
                 let row = st.crop_factors.find(r => String(r.crop_code) === crop && String(r.key) === key);
@@ -1093,37 +1133,39 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
     }
 
     async function ensureRunInputsLoaded(runId) {
-        if (!studyAreaId || !Number.isFinite(Number(runId))) return;
+        const rid = datasetIdString(runId);
+        if (!studyAreaId || !rid) return;
 
-        const existing = runInputs.get(runId);
+        const existing = runInputs.get(rid);
         if (existing?.loading) return;
         if (existing?.ok) return;
 
-        runInputs.set(runId, { loading: true, ok: false, error: null });
+        runInputs.set(rid, { loading: true, ok: false, error: null });
         renderScenarioCards();
         updateComputeEnabled();
 
         try {
-            const url = `${apiBase}/mca_run_inputs.php?study_area_id=${encodeURIComponent(studyAreaId)}&run_id=${encodeURIComponent(runId)}`;
+            const url = `${apiBase}/mca_run_inputs.php?study_area_id=${encodeURIComponent(studyAreaId)}&run_id=${encodeURIComponent(rid)}`;
             const res = await fetch(url);
             const json = await res.json();
             if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
 
-            runInputs.set(runId, {
+            runInputs.set(rid, {
                 loading: false,
                 ok: true,
                 error: null,
+                dataset_id: rid,
+                dataset_type: json.dataset_type || (isCustomDatasetId(rid) ? 'custom' : 'run'),
 
                 variables_run: json.variables_run || [],
                 crop_factors: json.crop_factors || [],
 
-                // indexes for fast lookups (still local memory)
                 _varsByKey: buildKeyIndex(json.variables_run || [], 'key'),
                 _factorByCropKey: buildCropKeyIndex2(json.crop_factors || []),
             });
             renderScenarioCards();
         } catch (e) {
-            runInputs.set(runId, { loading: false, ok: false, error: e.message || String(e) });
+            runInputs.set(rid, { loading: false, ok: false, error: e.message || String(e) });
         }
         updateComputeEnabled();
     }
@@ -1136,9 +1178,9 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         if (!presetId) reason = 'No preset loaded (presetId missing).';
         else if (includedRunIds.size <= 0) reason = 'No scenarios included.';
         else if (!allIncludedRunsReady()) {
-            const bad = [...includedRunIds].map(rid => ({ rid: Number(rid), st: runInputs.get(Number(rid)) }))
+            const bad = [...includedRunIds].map(rid => ({ rid: datasetIdString(rid), st: runInputs.get(datasetIdString(rid)) }))
                 .filter(x => !x.st?.ok)
-                .map(x => `run ${x.rid}: ${x.st?.loading ? 'loading' : (x.st?.error ? x.st.error : 'not loaded')}`);
+                .map(x => `scenario ${x.rid}: ${x.st?.loading ? 'loading' : (x.st?.error ? x.st.error : 'not loaded')}`);
             reason = `Scenario inputs not ready: ${bad.join(' | ')}`;
         }
 
@@ -1148,9 +1190,10 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
 
     function debugComputeGate(where = '') {
         const states = [...includedRunIds].map(rid => {
-            const st = runInputs.get(Number(rid));
+            const id = datasetIdString(rid);
+            const st = runInputs.get(id);
             return {
-                run_id: Number(rid),
+                dataset_id: id,
                 ok: !!st?.ok,
                 loading: !!st?.loading,
                 error: st?.error || null,
@@ -1347,7 +1390,7 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
             if (cropCode) fd.append('crop_code', cropCode);
 
             // IMPORTANT: send included run ids
-            fd.append('run_ids_json', JSON.stringify([...includedRunIds]));
+            fd.append('dataset_ids_json', JSON.stringify([...includedRunIds].map(datasetIdString)));
 
             const enabled = currentPresetItems.filter(it => !!it.is_enabled);
             const sumW = enabled.reduce((s, it) => s + (Number(it.weight) || 0), 0);
@@ -1404,9 +1447,10 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
             ));
             // Build per-run inputs payload (honor local edits)
             const runInputsPayload = [...includedRunIds].map(runId => {
-                const st = runInputs.get(Number(runId));
+                const datasetId = datasetIdString(runId);
+                const st = runInputs.get(datasetId);
                 return {
-                    run_id: Number(runId),
+                    dataset_id: datasetId,
                     variables_run: st?.variables_run || [],
                     crop_factors: st?.crop_factors || [],
                 };
@@ -1421,11 +1465,11 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
             console.log('[MCA compute] summary', {
                 ok: json?.ok,
                 hasResults: !!json?.results,
-                run_ids: json?.run_ids,
+                dataset_ids: json?.dataset_ids,
                 enabled_mca: json?.enabled_mca?.length,
                 totals_len: Array.isArray(json?.totals) ? json.totals.length : null,
-                norm_keys: json?.results?.normalized?.by_run ? Object.keys(json.results.normalized.by_run) : null,
-                raw_keys: json?.results?.raw?.by_run ? Object.keys(json.results.raw.by_run) : null,
+                norm_keys: json?.results?.normalized?.by_dataset ? Object.keys(json.results.normalized.by_dataset) : null,
+                raw_keys: json?.results?.raw?.by_dataset ? Object.keys(json.results.raw.by_dataset) : null,
             });
             if (!json.ok) throw new Error(json.error || 'MCA compute failed');
 
@@ -1440,7 +1484,8 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
 
     function getScenarioScore(runId) {
         if (!resultsCache) return null;
-        const t = (resultsCache.totals || []).find(r => r.run_id == runId);
+        const rid = datasetIdString(runId);
+        const t = (resultsCache.totals || []).find(r => String(r.dataset_id) === rid);
         return t ? t.total_weighted_score : null;
     }
 

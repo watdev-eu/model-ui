@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../config/database.php';
-
 require_once __DIR__ . '/../classes/McaComputeService.php';
+require_once __DIR__ . '/../classes/Auth.php';
+require_once __DIR__ . '/../classes/DashboardDatasetKey.php';
+require_once __DIR__ . '/../classes/CustomScenarioRepository.php';
 
 header('Content-Type: application/json');
 
@@ -27,10 +29,10 @@ if ($presetSetId <= 0) bad(400, 'preset_set_id is required');
 
 $cropCode = isset($_POST['crop_code']) && $_POST['crop_code'] !== '' ? (string)$_POST['crop_code'] : null;
 
-$runIds = [];
-$runIdsJson = (string)($_POST['run_ids_json'] ?? '[]');
-$decoded = json_decode($runIdsJson, true);
-if (is_array($decoded)) $runIds = $decoded;
+$datasetIds = [];
+$datasetIdsJson = (string)($_POST['dataset_ids_json'] ?? $_POST['run_ids_json'] ?? '[]');
+$decoded = json_decode($datasetIdsJson, true);
+if (is_array($decoded)) $datasetIds = array_values(array_map('strval', $decoded));
 
 $presetItems = [];
 $pj = (string)($_POST['preset_items_json'] ?? '[]');
@@ -57,12 +59,30 @@ $rij = (string)($_POST['run_inputs_json'] ?? '[]');
 $decoded = json_decode($rij, true);
 if (is_array($decoded)) $runInputs = $decoded;
 
+$hasCustomDatasets = false;
+foreach ($datasetIds as $datasetId) {
+    if (str_starts_with((string)$datasetId, 'custom:')) {
+        $hasCustomDatasets = true;
+        break;
+    }
+}
+
+$userId = null;
+if ($hasCustomDatasets) {
+    Auth::requireLogin();
+    $userId = Auth::userId();
+    if ($userId === null) {
+        bad(401, 'Unauthorized');
+    }
+}
+
 try {
     $payload = [
         'preset_set_id'     => $presetSetId,
         'crop_code'         => $cropCode,
 
-        'run_ids'           => $runIds,
+        'dataset_ids'       => $datasetIds,
+        'user_id'           => $userId,
 
         'preset_items'      => $presetItems,
         'variables'         => $variables,
