@@ -1,4 +1,4 @@
-// assets/js/custom-scenario-modal.js
+// assets/js/dashboard/custom-scenario-modal.js
 
 export function initCustomScenarioModal({ triggerEl }) {
     let selectedStudyArea = {
