@@ -464,7 +464,20 @@ function initCustomScenarioCreate() {
             throw new Error(json?.message || `Save failed (HTTP ${res.status})`);
         }
 
+        const savedScenarioId = Number(json.id || cfg.scenarioId || 0);
+        const action = Number(cfg.scenarioId || 0) > 0 ? 'updated' : 'created';
+
         showToast(json.message || 'Scenario saved successfully.', false, null, 'OK', 3000);
+
+        document.dispatchEvent(new CustomEvent('watdev:custom-scenarios-changed', {
+            detail: {
+                studyAreaId: Number(cfg.studyAreaId || 0),
+                action,
+                scenarioId: savedScenarioId,
+                datasetId: savedScenarioId ? `custom:${savedScenarioId}` : null,
+            }
+        }));
+
         ModalUtils.reloadModal(cfg.listModalUrl);
     }
 
@@ -494,5 +507,4 @@ function initCustomScenarioCreate() {
         });
 }
 
-document.addEventListener('DOMContentLoaded', initCustomScenarioCreate);
 initCustomScenarioCreate();

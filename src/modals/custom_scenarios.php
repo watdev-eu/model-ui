@@ -114,11 +114,6 @@ if ($view === 'create') {
                             <label for="assignmentRunSelect" class="form-label form-label-sm mb-1">Assign scenario</label>
                             <select id="assignmentRunSelect" class="form-select form-select-sm">
                                 <option value="">Choose a scenario…</option>
-                                <?php foreach ($availableRuns as $run): ?>
-                                    <option value="<?= (int)$run['id'] ?>">
-                                        <?= h($run['label']) ?>
-                                    </option>
-                                <?php endforeach; ?>
                             </select>
                         </div>
                     </div>
@@ -327,6 +322,15 @@ $scenarios = CustomScenarioRepository::listByStudyAreaForUser($studyAreaId, $use
                 }
 
                 showToast(json.message || 'Scenario deleted.', false, null, 'OK', 2500);
+
+                document.dispatchEvent(new CustomEvent('watdev:custom-scenarios-changed', {
+                    detail: {
+                        studyAreaId: <?= (int)$studyAreaId ?>,
+                        action: 'deleted',
+                        scenarioId: scenarioId,
+                        datasetId: `custom:${scenarioId}`,
+                    }
+                }));
 
                 ModalUtils.reloadModal(
                     `/modals/custom_scenarios.php?study_area_id=<?= (int)$studyAreaId ?>&study_area_name=<?= rawurlencode($studyAreaName) ?>`

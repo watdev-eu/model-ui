@@ -1456,6 +1456,48 @@ export function initSubbasinDashboard({
         }
     }
 
+    async function refreshDatasetsAndScenarios({ autoSelectDatasetId = null } = {}) {
+        if (!Number.isFinite(+currentStudyAreaId) || +currentStudyAreaId <= 0) return;
+
+        try {
+            showInlineSpinner(els.dataset, 'Refreshing scenarios…');
+
+            const previousSelected = new Set(selectedRunIds.map(String));
+
+            const runIds = await loadRuns();
+            hasRunsForStudyArea = runIds.length > 0;
+
+            // Re-apply previous selections if they still exist
+            applyDatasetSelectionToUi([...previousSelected]);
+
+            // If caller wants to auto-select a specific new dataset, do it too
+            if (autoSelectDatasetId != null) {
+                const wanted = String(autoSelectDatasetId).trim();
+                const boxes = els.dataset?.querySelectorAll('input.dataset-checkbox[data-run-id]') || [];
+                boxes.forEach(box => {
+                    const rid = String(box.dataset.runId || '').trim();
+                    if (rid === wanted) {
+                        box.checked = true;
+                    }
+                });
+            }
+
+            // Re-run selection flow so datasets, charts, MCA, map scenario options all update
+            await handleDatasetSelectionChanged();
+
+            if (mca && els.mcaWorkspaceSelect) {
+                try {
+                    await mca.refreshWorkspaceList(currentStudyAreaId);
+                } catch (err) {
+                    console.error('[MCA] Failed to refresh workspace list', err);
+                }
+            }
+        } catch (err) {
+            console.error('[refreshDatasetsAndScenarios] failed', err);
+            showToast('Failed to refresh scenarios list.', true, null, 'OK', 5000);
+        }
+    }
+
     function updateHelpText() {
         if (!els.seriesHint) return;
 
@@ -2055,5 +2097,6 @@ export function initSubbasinDashboard({
     // Expose controller
     return {
         switchStudyArea,
+        refreshDatasetsAndScenarios,
     };
 }

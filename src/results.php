@@ -493,6 +493,26 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                 })
                 : null;
 
+            document.addEventListener('watdev:custom-scenarios-changed', async (ev) => {
+                const detail = ev.detail || {};
+                const studyAreaId = Number(detail.studyAreaId || 0);
+
+                if (!studyAreaId) return;
+
+                const activeBtn = buttonsWrap?.querySelector('button[data-area-id].btn-primary');
+                const activeStudyAreaId = Number(activeBtn?.dataset.areaId || 0);
+
+                if (activeStudyAreaId !== studyAreaId) return;
+
+                try {
+                    await ctrl.refreshDatasetsAndScenarios({
+                        autoSelectDatasetId: detail.action === 'created' ? detail.datasetId : null,
+                    });
+                } catch (err) {
+                    console.error('[custom scenario refresh] failed', err);
+                }
+            });
+
             if (buttonsWrap) {
                 buttonsWrap.addEventListener('click', (ev) => {
                     const btn = ev.target.closest('button[data-area-id]');
