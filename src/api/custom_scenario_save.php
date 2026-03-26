@@ -1,5 +1,5 @@
 <?php
-// api/custom_scenarios_save.php
+// api/custom_scenario_save.php
 
 declare(strict_types=1);
 
