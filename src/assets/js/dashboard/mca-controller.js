@@ -1356,6 +1356,101 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         fd.append('dataset_ids_json', JSON.stringify([...includedRunIds].map(datasetIdString)));
         fd.append('is_default', els.mcaWorkspaceDefaultInput?.checked ? '1' : '0');
 
+        fd.append('preset_items_json', JSON.stringify(
+            currentPresetItems.map((it, idx) => ({
+                indicator_calc_key: it.indicator_calc_key,
+                indicator_code: it.indicator_code ?? null,
+                indicator_name: it.indicator_name ?? null,
+                weight: Number(it.weight) || 0,
+                direction: (it.direction === 'neg' ? 'neg' : 'pos'),
+                is_enabled: !!it.is_enabled,
+                sort_order: idx,
+            }))
+        ));
+
+        fd.append('variables_json', JSON.stringify(
+            currentVars.map((v, idx) => ({
+                key: v.key,
+                name: v.name ?? null,
+                unit: v.unit ?? null,
+                description: v.description ?? null,
+                data_type: v.data_type,
+                value_num: v.value_num ?? null,
+                value_text: v.value_text ?? null,
+                value_bool: v.value_bool ?? null,
+                sort_order: idx,
+            }))
+        ));
+
+        fd.append('crop_variables_json', JSON.stringify(
+            currentCropVars.map((r, idx) => ({
+                crop_code: r.crop_code,
+                crop_name: r.crop_name ?? null,
+                key: r.key,
+                name: r.name ?? null,
+                unit: r.unit ?? null,
+                description: r.description ?? null,
+                data_type: r.data_type,
+                value_num: r.value_num ?? null,
+                value_text: r.value_text ?? null,
+                value_bool: r.value_bool ?? null,
+                sort_order: idx,
+            }))
+        ));
+
+        fd.append('crop_ref_factors_json', JSON.stringify(
+            Array.from(cropRefFactorByCropKey.entries()).map(([k, v], idx) => {
+                const [crop_code, key] = k.split('::');
+                return {
+                    crop_code,
+                    crop_name: null,
+                    key,
+                    name: null,
+                    unit: null,
+                    description: null,
+                    data_type: 'number',
+                    value_num: (v == null ? null : Number(v)),
+                    value_text: null,
+                    value_bool: null,
+                    sort_order: idx,
+                };
+            })
+        ));
+
+        const runInputsPayload = [...includedRunIds].map(runId => {
+            const datasetId = datasetIdString(runId);
+            const st = runInputs.get(datasetId);
+            return {
+                dataset_id: datasetId,
+                variables_run: (st?.variables_run || []).map((r, idx) => ({
+                    key: r.key,
+                    name: r.name ?? null,
+                    unit: r.unit ?? null,
+                    description: r.description ?? null,
+                    data_type: r.data_type,
+                    value_num: r.value_num ?? null,
+                    value_text: r.value_text ?? null,
+                    value_bool: r.value_bool ?? null,
+                    sort_order: idx,
+                })),
+                crop_factors: (st?.crop_factors || []).map((r, idx) => ({
+                    crop_code: r.crop_code,
+                    crop_name: r.crop_name ?? null,
+                    key: r.key,
+                    name: r.name ?? null,
+                    unit: r.unit ?? null,
+                    description: r.description ?? null,
+                    data_type: r.data_type,
+                    value_num: r.value_num ?? null,
+                    value_text: r.value_text ?? null,
+                    value_bool: r.value_bool ?? null,
+                    sort_order: idx,
+                })),
+            };
+        });
+
+        fd.append('run_inputs_json', JSON.stringify(runInputsPayload));
+
         const res = await fetch(`${apiBase}/mca_workspaces_admin.php`, {
             method: 'POST',
             body: fd,
@@ -1553,6 +1648,43 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
 
         defaultVars = sortVars((json.variables || []).map(x => ({ ...x })));
         currentVars = sortVars((json.variables || []).map(x => ({ ...x })));
+
+        // If workspace response contains saved per-dataset MCA inputs, seed them now.
+// This prevents later fallback loading from wiping workspace state.
+        const runVarsByDataset = new Map();
+        for (const row of (json.workspace_run_variables || [])) {
+            const did = datasetIdString(row?.dataset_id);
+            if (!did) continue;
+            if (!runVarsByDataset.has(did)) runVarsByDataset.set(did, []);
+            runVarsByDataset.get(did).push({ ...row });
+        }
+
+        const runCropFactorsByDataset = new Map();
+        for (const row of (json.workspace_run_crop_factors || [])) {
+            const did = datasetIdString(row?.dataset_id);
+            if (!did) continue;
+            if (!runCropFactorsByDataset.has(did)) runCropFactorsByDataset.set(did, []);
+            runCropFactorsByDataset.get(did).push({ ...row });
+        }
+
+        for (const did of preferredWorkspaceDatasetIds) {
+            const vars = runVarsByDataset.get(did) || [];
+            const factors = runCropFactorsByDataset.get(did) || [];
+
+            if (!vars.length && !factors.length) continue;
+
+            runInputs.set(did, {
+                loading: false,
+                ok: true,
+                error: null,
+                dataset_id: did,
+                dataset_type: isCustomDatasetId(did) ? 'custom' : 'run',
+                variables_run: vars,
+                crop_factors: factors,
+                _varsByKey: buildKeyIndex(vars, 'key'),
+                _factorByCropKey: buildCropKeyIndex2(factors),
+            });
+        }
 
         const br = json.baseline_run_id;
         baselineRunId = (br == null) ? null : Number(br);

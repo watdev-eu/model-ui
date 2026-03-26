@@ -145,66 +145,17 @@ if (!$varSet || !isset($varSet['id'])) {
     exit;
 }
 
-// variables + values
-$globalKeys = [
-    'farm_size_ha',
-    'land_rent_usd_ha_yr',
-    'labour_day_cost_usd_per_pd',
-];
-
-$place = implode(',', array_fill(0, count($globalKeys), '?'));
-
-$stmt = $pdo->prepare("
-    SELECT
-        v.key,
-        v.name,
-        v.unit,
-        v.description,
-        v.data_type,
-        vv.value_num,
-        vv.value_text,
-        vv.value_bool
-    FROM mca_variables v
-    LEFT JOIN mca_variable_values vv
-      ON vv.variable_id = v.id
-     AND vv.variable_set_id = ?
-    WHERE v.key IN ($place)
-    ORDER BY v.key
-");
-
-$params = array_merge([(int)$varSet['id']], $globalKeys);
-$stmt->execute($params);
-$variables = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-$stmt = $pdo->prepare("
-    SELECT
-        i.code AS indicator_code,
-        i.name AS indicator_name,
-        i.calc_key AS indicator_calc_key,
-        COALESCE(pi.direction, i.default_direction) AS direction,
-        pi.weight,
-        pi.is_enabled
-    FROM mca_preset_items pi
-    JOIN mca_indicators i ON i.id = pi.indicator_id
-    WHERE pi.preset_set_id = :ps
-    ORDER BY i.code
-");
-$stmt->execute([':ps' => (int)$preset['id']]);
-$items = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-$stmt = $pdo->prepare("
-    SELECT
-        id,
-        scenario_key,
-        label,
-        run_id,
-        sort_order
-    FROM mca_scenarios
-    WHERE preset_set_id = :ps
-    ORDER BY sort_order ASC, id ASC
-");
-$stmt->execute([':ps' => (int)$preset['id']]);
-$scenarios = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$items = [];
+$scenarios = [];
+$variables = [];
+$cropVariables = [];
+$variablesRun = [];
+$cropPrice = [];
+$cropBmpFactors = [];
+$cropRefFactors = [];
+$workspaceRunVariables = [];
+$workspaceRunCropFactors = [];
+$selectedDatasetIds = [];
 
 $factorKeys = [
     'bmp_labour_land_preparation_pd_ha',
@@ -225,31 +176,6 @@ $factorKeys = [
     'bmp_material_other_usd_ha',
 ];
 
-$cropVariables = [];
-$stmt = $pdo->prepare("
-    SELECT
-        c.code AS crop_code,
-        c.name AS crop_name,
-        v.key,
-        v.name,
-        v.unit,
-        v.description,
-        v.data_type,
-        vvc.value_num,
-        vvc.value_text,
-        vvc.value_bool
-    FROM crops c
-    CROSS JOIN mca_variables v
-    LEFT JOIN mca_variable_values_crop vvc
-      ON vvc.crop_code = c.code
-     AND vvc.variable_id = v.id
-     AND vvc.variable_set_id = :vs
-    WHERE v.key IN ('crop_price_usd_per_t')
-    ORDER BY c.code, v.key
-");
-$stmt->execute([':vs' => (int)$varSet['id']]);
-$cropVariables = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
 $stmt = $pdo->prepare("
     SELECT id
     FROM swat_runs
@@ -260,28 +186,41 @@ $stmt = $pdo->prepare("
 $stmt->execute([':sa' => $studyAreaId]);
 $baselineRunId = (int)($stmt->fetchColumn() ?: 0);
 
-$selectedDatasetIds = [];
 if ($workspace) {
     $selectedDatasetIds = McaWorkspaceRepository::getSelectedDatasetIds((int)$workspace['id']);
-}
+    $items = McaWorkspaceRepository::getPresetItems((int)$workspace['id']);
+    $variables = McaWorkspaceRepository::getVariables((int)$workspace['id']);
+    $cropVariables = McaWorkspaceRepository::getCropVariables((int)$workspace['id']);
+    $cropRefFactors = McaWorkspaceRepository::getCropRefFactors((int)$workspace['id']);
+    $workspaceRunVariables = McaWorkspaceRepository::getRunVariables((int)$workspace['id']);
+    $workspaceRunCropFactors = McaWorkspaceRepository::getRunCropFactors((int)$workspace['id']);
 
-$runId = (int)($_GET['run_id'] ?? 0);
+    // scenarios can still come from preset set metadata for now
+    $stmt = $pdo->prepare("
+        SELECT
+            id,
+            scenario_key,
+            label,
+            run_id,
+            sort_order
+        FROM mca_scenarios
+        WHERE preset_set_id = :ps
+        ORDER BY sort_order ASC, id ASC
+    ");
+    $stmt->execute([':ps' => (int)$preset['id']]);
+    $scenarios = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-if ($runId <= 0 && $selectedDatasetIds) {
-    foreach ($selectedDatasetIds as $datasetId) {
-        if (ctype_digit((string)$datasetId)) {
-            $runId = (int)$datasetId;
-            break;
-        }
-    }
-}
+} else {
+    // -------- system/default fallback (existing behavior) --------
 
-if ($runId <= 0 && !empty($scenarios)) {
-    $runId = (int)$scenarios[0]['run_id'];
-}
+    $globalKeys = [
+        'farm_size_ha',
+        'land_rent_usd_ha_yr',
+        'labour_day_cost_usd_per_pd',
+    ];
 
-$variablesRun = [];
-if ($runId > 0) {
+    $place = implode(',', array_fill(0, count($globalKeys), '?'));
+
     $stmt = $pdo->prepare("
         SELECT
             v.key,
@@ -289,45 +228,52 @@ if ($runId > 0) {
             v.unit,
             v.description,
             v.data_type,
-            vvr.value_num,
-            vvr.value_text,
-            vvr.value_bool
+            vv.value_num,
+            vv.value_text,
+            vv.value_bool
         FROM mca_variables v
-        LEFT JOIN mca_variable_values_run vvr
-          ON vvr.variable_id = v.id
-         AND vvr.variable_set_id = :vs
-         AND vvr.run_id = :run
-        WHERE v.key IN (
-          'discount_rate',
-          'economic_life_years',
-          'bmp_invest_cost_usd_ha',
-          'bmp_annual_om_cost_usd_ha',
-          'water_cost_usd_m3',
-          'water_use_fee_usd_ha'
-        )
+        LEFT JOIN mca_variable_values vv
+          ON vv.variable_id = v.id
+         AND vv.variable_set_id = ?
+        WHERE v.key IN ($place)
         ORDER BY v.key
     ");
-    $stmt->execute([
-        ':vs' => (int)$varSet['id'],
-        ':run' => $runId,
-    ]);
-    $variablesRun = $stmt->fetchAll(PDO::FETCH_ASSOC);
-}
 
-$cropPrice = [];
-$cropBmpFactors = [];
-$cropRefFactors = [];
+    $params = array_merge([(int)$varSet['id']], $globalKeys);
+    $stmt->execute($params);
+    $variables = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$vsId = (int)$varSet['id'];
+    $stmt = $pdo->prepare("
+        SELECT
+            i.code AS indicator_code,
+            i.name AS indicator_name,
+            i.calc_key AS indicator_calc_key,
+            COALESCE(pi.direction, i.default_direction) AS direction,
+            pi.weight,
+            pi.is_enabled
+        FROM mca_preset_items pi
+        JOIN mca_indicators i ON i.id = pi.indicator_id
+        WHERE pi.preset_set_id = :ps
+        ORDER BY i.code
+    ");
+    $stmt->execute([':ps' => (int)$preset['id']]);
+    $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$fetchFactorsForRun = function (int $runId) use ($pdo, $vsId, $factorKeys): array {
-    if ($runId <= 0) {
-        return [];
-    }
+    $stmt = $pdo->prepare("
+        SELECT
+            id,
+            scenario_key,
+            label,
+            run_id,
+            sort_order
+        FROM mca_scenarios
+        WHERE preset_set_id = :ps
+        ORDER BY sort_order ASC, id ASC
+    ");
+    $stmt->execute([':ps' => (int)$preset['id']]);
+    $scenarios = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $inKeys = implode(',', array_fill(0, count($factorKeys), '?'));
-
-    $sql = "
+    $stmt = $pdo->prepare("
         SELECT
             c.code AS crop_code,
             c.name AS crop_name,
@@ -336,35 +282,108 @@ $fetchFactorsForRun = function (int $runId) use ($pdo, $vsId, $factorKeys): arra
             v.unit,
             v.description,
             v.data_type,
-            vvcr.value_num,
-            vvcr.value_text,
-            vvcr.value_bool
+            vvc.value_num,
+            vvc.value_text,
+            vvc.value_bool
         FROM crops c
-        JOIN mca_variables v ON v.key IN ($inKeys)
-        LEFT JOIN mca_variable_values_crop_run vvcr
-          ON vvcr.crop_code = c.code
-         AND vvcr.variable_id = v.id
-         AND vvcr.variable_set_id = ?
-         AND vvcr.run_id = ?
+        CROSS JOIN mca_variables v
+        LEFT JOIN mca_variable_values_crop vvc
+          ON vvc.crop_code = c.code
+         AND vvc.variable_id = v.id
+         AND vvc.variable_set_id = :vs
+        WHERE v.key IN ('crop_price_usd_per_t')
         ORDER BY c.code, v.key
-    ";
+    ");
+    $stmt->execute([':vs' => (int)$varSet['id']]);
+    $cropVariables = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute(array_merge($factorKeys, [$vsId, $runId]));
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
-};
+    $runId = (int)($_GET['run_id'] ?? 0);
 
-if ($runId > 0) {
-    $cropBmpFactors = $fetchFactorsForRun($runId);
-}
+    if ($runId <= 0 && !empty($scenarios)) {
+        $runId = (int)$scenarios[0]['run_id'];
+    }
 
-if ($baselineRunId > 0) {
-    $cropRefFactors = $fetchFactorsForRun($baselineRunId);
+    if ($runId > 0) {
+        $stmt = $pdo->prepare("
+            SELECT
+                v.key,
+                v.name,
+                v.unit,
+                v.description,
+                v.data_type,
+                vvr.value_num,
+                vvr.value_text,
+                vvr.value_bool
+            FROM mca_variables v
+            LEFT JOIN mca_variable_values_run vvr
+              ON vvr.variable_id = v.id
+             AND vvr.variable_set_id = :vs
+             AND vvr.run_id = :run
+            WHERE v.key IN (
+              'discount_rate',
+              'economic_life_years',
+              'bmp_invest_cost_usd_ha',
+              'bmp_annual_om_cost_usd_ha',
+              'water_cost_usd_m3',
+              'water_use_fee_usd_ha'
+            )
+            ORDER BY v.key
+        ");
+        $stmt->execute([
+            ':vs' => (int)$varSet['id'],
+            ':run' => $runId,
+        ]);
+        $variablesRun = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    $vsId = (int)$varSet['id'];
+
+    $fetchFactorsForRun = function (int $runId) use ($pdo, $vsId, $factorKeys): array {
+        if ($runId <= 0) {
+            return [];
+        }
+
+        $inKeys = implode(',', array_fill(0, count($factorKeys), '?'));
+
+        $sql = "
+            SELECT
+                c.code AS crop_code,
+                c.name AS crop_name,
+                v.key,
+                v.name,
+                v.unit,
+                v.description,
+                v.data_type,
+                vvcr.value_num,
+                vvcr.value_text,
+                vvcr.value_bool
+            FROM crops c
+            JOIN mca_variables v ON v.key IN ($inKeys)
+            LEFT JOIN mca_variable_values_crop_run vvcr
+              ON vvcr.crop_code = c.code
+             AND vvcr.variable_id = v.id
+             AND vvcr.variable_set_id = ?
+             AND vvcr.run_id = ?
+            ORDER BY c.code, v.key
+        ";
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(array_merge($factorKeys, [$vsId, $runId]));
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    };
+
+    if ($runId > 0) {
+        $cropBmpFactors = $fetchFactorsForRun($runId);
+    }
+
+    if ($baselineRunId > 0) {
+        $cropRefFactors = $fetchFactorsForRun($baselineRunId);
+    }
 }
 
 if (!$items) {
     http_response_code(422);
-    echo json_encode(['ok' => false, 'error' => 'Preset has no items configured']);
+    echo json_encode(['ok' => false, 'error' => 'Preset/workspace has no items configured']);
     exit;
 }
 
@@ -384,6 +403,7 @@ echo json_encode([
     'crop_price' => $cropPrice,
     'crop_bmp_factors' => $cropBmpFactors,
     'crop_ref_factors' => $cropRefFactors,
-    'run_id' => $runId,
+    'workspace_run_variables' => $workspaceRunVariables,
+    'workspace_run_crop_factors' => $workspaceRunCropFactors,
     'baseline_run_id' => $baselineRunId,
 ]);

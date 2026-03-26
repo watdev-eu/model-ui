@@ -43,6 +43,21 @@ try {
             $variableSetId = (int)($_POST['variable_set_id'] ?? 0);
             $isDefault     = !empty($_POST['is_default']);
 
+            $presetItems = json_decode((string)($_POST['preset_items_json'] ?? '[]'), true);
+            if (!is_array($presetItems)) $presetItems = [];
+
+            $variables = json_decode((string)($_POST['variables_json'] ?? '[]'), true);
+            if (!is_array($variables)) $variables = [];
+
+            $cropVariables = json_decode((string)($_POST['crop_variables_json'] ?? '[]'), true);
+            if (!is_array($cropVariables)) $cropVariables = [];
+
+            $cropRefFactors = json_decode((string)($_POST['crop_ref_factors_json'] ?? '[]'), true);
+            if (!is_array($cropRefFactors)) $cropRefFactors = [];
+
+            $runInputs = json_decode((string)($_POST['run_inputs_json'] ?? '[]'), true);
+            if (!is_array($runInputs)) $runInputs = [];
+
             $datasetIds = json_decode((string)($_POST['dataset_ids_json'] ?? '[]'), true);
             if (!is_array($datasetIds)) $datasetIds = [];
 
@@ -58,7 +73,12 @@ try {
                 $presetSetId,
                 $variableSetId,
                 $datasetIds,
-                $isDefault
+                $isDefault,
+                $presetItems,
+                $variables,
+                $cropVariables,
+                $cropRefFactors,
+                $runInputs
             );
 
             echo json_encode(['ok' => true, 'workspace_id' => $id]);
@@ -71,6 +91,21 @@ try {
             $presetSetId   = (int)($_POST['preset_set_id'] ?? 0);
             $variableSetId = (int)($_POST['variable_set_id'] ?? 0);
             $isDefault     = !empty($_POST['is_default']);
+
+            $presetItems = json_decode((string)($_POST['preset_items_json'] ?? '[]'), true);
+            if (!is_array($presetItems)) $presetItems = [];
+
+            $variables = json_decode((string)($_POST['variables_json'] ?? '[]'), true);
+            if (!is_array($variables)) $variables = [];
+
+            $cropVariables = json_decode((string)($_POST['crop_variables_json'] ?? '[]'), true);
+            if (!is_array($cropVariables)) $cropVariables = [];
+
+            $cropRefFactors = json_decode((string)($_POST['crop_ref_factors_json'] ?? '[]'), true);
+            if (!is_array($cropRefFactors)) $cropRefFactors = [];
+
+            $runInputs = json_decode((string)($_POST['run_inputs_json'] ?? '[]'), true);
+            if (!is_array($runInputs)) $runInputs = [];
 
             $datasetIds = json_decode((string)($_POST['dataset_ids_json'] ?? '[]'), true);
             if (!is_array($datasetIds)) $datasetIds = [];
@@ -87,7 +122,12 @@ try {
                 $presetSetId,
                 $variableSetId,
                 $datasetIds,
-                $isDefault
+                $isDefault,
+                $presetItems,
+                $variables,
+                $cropVariables,
+                $cropRefFactors,
+                $runInputs
             );
 
             echo json_encode(['ok' => true]);

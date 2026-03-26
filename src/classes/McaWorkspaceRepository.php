@@ -49,6 +49,43 @@ final class McaWorkspaceRepository
         }
     }
 
+    private static function replaceWorkspaceStateTx(
+        PDO $pdo,
+        int $workspaceId,
+        array $datasetIds,
+        array $presetItems,
+        array $variables,
+        array $cropVariables,
+        array $cropRefFactors,
+        array $runInputs
+    ): void {
+        self::replaceSelectedDatasetsTx($pdo, $workspaceId, $datasetIds);
+        self::replacePresetItemsTx($pdo, $workspaceId, $presetItems);
+        self::replaceVariablesTx($pdo, $workspaceId, $variables);
+        self::replaceCropVariablesTx($pdo, $workspaceId, $cropVariables);
+        self::replaceCropRefFactorsTx($pdo, $workspaceId, $cropRefFactors);
+        self::replaceRunInputsTx($pdo, $workspaceId, $runInputs);
+
+        $snapshot = [
+            'dataset_ids' => array_values($datasetIds),
+            'preset_items' => array_values($presetItems),
+            'variables' => array_values($variables),
+            'crop_variables' => array_values($cropVariables),
+            'crop_ref_factors' => array_values($cropRefFactors),
+            'run_inputs' => array_values($runInputs),
+        ];
+
+        $stmt = $pdo->prepare("
+            UPDATE mca_workspaces
+            SET workspace_state_json = CAST(:state_json AS jsonb)
+            WHERE id = :id
+        ");
+        $stmt->execute([
+            ':id' => $workspaceId,
+            ':state_json' => json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        ]);
+    }
+
     public static function listForStudyArea(int $studyAreaId, string $userId): array
     {
         $pdo = Database::pdo();
@@ -126,6 +163,144 @@ final class McaWorkspaceRepository
         return array_values(array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []));
     }
 
+    public static function getPresetItems(int $workspaceId): array
+    {
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare("
+            SELECT
+                indicator_calc_key,
+                indicator_code,
+                indicator_name,
+                weight,
+                direction,
+                is_enabled,
+                sort_order
+            FROM mca_workspace_preset_items
+            WHERE workspace_id = :id
+            ORDER BY sort_order ASC, indicator_calc_key ASC
+        ");
+        $stmt->execute([':id' => $workspaceId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public static function getVariables(int $workspaceId): array
+    {
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare("
+            SELECT
+                key,
+                name,
+                unit,
+                description,
+                data_type,
+                value_num,
+                value_text,
+                value_bool,
+                sort_order
+            FROM mca_workspace_variables
+            WHERE workspace_id = :id
+            ORDER BY sort_order ASC, key ASC
+        ");
+        $stmt->execute([':id' => $workspaceId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public static function getCropVariables(int $workspaceId): array
+    {
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare("
+            SELECT
+                crop_code,
+                crop_name,
+                key,
+                name,
+                unit,
+                description,
+                data_type,
+                value_num,
+                value_text,
+                value_bool,
+                sort_order
+            FROM mca_workspace_crop_variables
+            WHERE workspace_id = :id
+            ORDER BY crop_code ASC, sort_order ASC, key ASC
+        ");
+        $stmt->execute([':id' => $workspaceId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public static function getCropRefFactors(int $workspaceId): array
+    {
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare("
+            SELECT
+                crop_code,
+                crop_name,
+                key,
+                name,
+                unit,
+                description,
+                data_type,
+                value_num,
+                value_text,
+                value_bool,
+                sort_order
+            FROM mca_workspace_crop_ref_factors
+            WHERE workspace_id = :id
+            ORDER BY crop_code ASC, sort_order ASC, key ASC
+        ");
+        $stmt->execute([':id' => $workspaceId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public static function getRunVariables(int $workspaceId): array
+    {
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare("
+            SELECT
+                dataset_id,
+                key,
+                name,
+                unit,
+                description,
+                data_type,
+                value_num,
+                value_text,
+                value_bool,
+                sort_order
+            FROM mca_workspace_run_variables
+            WHERE workspace_id = :id
+            ORDER BY dataset_id ASC, sort_order ASC, key ASC
+        ");
+        $stmt->execute([':id' => $workspaceId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public static function getRunCropFactors(int $workspaceId): array
+    {
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare("
+            SELECT
+                dataset_id,
+                crop_code,
+                crop_name,
+                key,
+                name,
+                unit,
+                description,
+                data_type,
+                value_num,
+                value_text,
+                value_bool,
+                sort_order
+            FROM mca_workspace_run_crop_factors
+            WHERE workspace_id = :id
+            ORDER BY dataset_id ASC, crop_code ASC, sort_order ASC, key ASC
+        ");
+        $stmt->execute([':id' => $workspaceId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
     public static function create(
         int $studyAreaId,
         string $userId,
@@ -134,7 +309,12 @@ final class McaWorkspaceRepository
         int $presetSetId,
         int $variableSetId,
         array $datasetIds,
-        bool $isDefault = false
+        bool $isDefault = false,
+        array $presetItems = [],
+        array $variables = [],
+        array $cropVariables = [],
+        array $cropRefFactors = [],
+        array $runInputs = []
     ): int {
         $pdo = Database::pdo();
         $pdo->beginTransaction();
@@ -165,7 +345,7 @@ final class McaWorkspaceRepository
             ");
 
             $stmt->bindValue(':sa', $studyAreaId, PDO::PARAM_INT);
-            $stmt->bindValue(':uid', $userId, PDO::PARAM_INT);
+            $stmt->bindValue(':uid', $userId, PDO::PARAM_STR);
             $stmt->bindValue(':name', $name, PDO::PARAM_STR);
 
             if ($description === null) {
@@ -182,7 +362,16 @@ final class McaWorkspaceRepository
 
             $workspaceId = (int)$stmt->fetchColumn();
 
-            self::replaceSelectedDatasetsTx($pdo, $workspaceId, $datasetIds);
+            self::replaceWorkspaceStateTx(
+                $pdo,
+                $workspaceId,
+                $datasetIds,
+                $presetItems,
+                $variables,
+                $cropVariables,
+                $cropRefFactors,
+                $runInputs
+            );
 
             $pdo->commit();
             return $workspaceId;
@@ -202,7 +391,12 @@ final class McaWorkspaceRepository
         int $presetSetId,
         int $variableSetId,
         array $datasetIds,
-        bool $isDefault = false
+        bool $isDefault = false,
+        array $presetItems = [],
+        array $variables = [],
+        array $cropVariables = [],
+        array $cropRefFactors = [],
+        array $runInputs = []
     ): void {
         $pdo = Database::pdo();
         $pdo->beginTransaction();
@@ -247,7 +441,7 @@ final class McaWorkspaceRepository
             ");
 
             $stmt->bindValue(':id', $workspaceId, PDO::PARAM_INT);
-            $stmt->bindValue(':uid', $userId, PDO::PARAM_INT);
+            $stmt->bindValue(':uid', $userId, PDO::PARAM_STR);
             $stmt->bindValue(':name', $name, PDO::PARAM_STR);
 
             if ($description === null) {
@@ -262,7 +456,16 @@ final class McaWorkspaceRepository
 
             $stmt->execute();
 
-            self::replaceSelectedDatasetsTx($pdo, $workspaceId, $datasetIds);
+            self::replaceWorkspaceStateTx(
+                $pdo,
+                $workspaceId,
+                $datasetIds,
+                $presetItems,
+                $variables,
+                $cropVariables,
+                $cropRefFactors,
+                $runInputs
+            );
 
             $pdo->commit();
         } catch (Throwable $e) {
@@ -319,6 +522,230 @@ final class McaWorkspaceRepository
                 ':dataset_id' => $datasetId,
                 ':sort_order' => $sort++,
             ]);
+        }
+    }
+
+    private static function replacePresetItemsTx(PDO $pdo, int $workspaceId, array $rows): void
+    {
+        $pdo->prepare("DELETE FROM mca_workspace_preset_items WHERE workspace_id = :id")
+            ->execute([':id' => $workspaceId]);
+
+        $ins = $pdo->prepare("
+        INSERT INTO mca_workspace_preset_items
+            (workspace_id, indicator_calc_key, indicator_code, indicator_name, weight, direction, is_enabled, sort_order)
+        VALUES
+            (:workspace_id, :indicator_calc_key, :indicator_code, :indicator_name, :weight, :direction, :is_enabled, :sort_order)
+    ");
+
+        foreach ($rows as $i => $r) {
+            $calcKey = trim((string)($r['indicator_calc_key'] ?? ''));
+            if ($calcKey === '') continue;
+
+            $direction = ((string)($r['direction'] ?? 'pos') === 'neg') ? 'neg' : 'pos';
+
+            $ins->execute([
+                ':workspace_id' => $workspaceId,
+                ':indicator_calc_key' => $calcKey,
+                ':indicator_code' => (($r['indicator_code'] ?? null) !== null ? (string)$r['indicator_code'] : null),
+                ':indicator_name' => (($r['indicator_name'] ?? null) !== null ? (string)$r['indicator_name'] : null),
+                ':weight' => (float)($r['weight'] ?? 0),
+                ':direction' => $direction,
+                ':is_enabled' => !empty($r['is_enabled']),
+                ':sort_order' => (int)($r['sort_order'] ?? $i),
+            ]);
+        }
+    }
+
+    private static function replaceVariablesTx(PDO $pdo, int $workspaceId, array $rows): void
+    {
+        $pdo->prepare("DELETE FROM mca_workspace_variables WHERE workspace_id = :id")
+            ->execute([':id' => $workspaceId]);
+
+        $ins = $pdo->prepare("
+        INSERT INTO mca_workspace_variables
+            (workspace_id, key, name, unit, description, data_type, value_num, value_text, value_bool, sort_order)
+        VALUES
+            (:workspace_id, :key, :name, :unit, :description, :data_type, :value_num, :value_text, :value_bool, :sort_order)
+    ");
+
+        foreach ($rows as $i => $r) {
+            $key = trim((string)($r['key'] ?? ''));
+            if ($key === '') continue;
+
+            $dataType = (string)($r['data_type'] ?? 'number');
+            if (!in_array($dataType, ['number', 'text', 'bool'], true)) {
+                $dataType = 'number';
+            }
+
+            $ins->execute([
+                ':workspace_id' => $workspaceId,
+                ':key' => $key,
+                ':name' => (($r['name'] ?? null) !== null ? (string)$r['name'] : null),
+                ':unit' => (($r['unit'] ?? null) !== null ? (string)$r['unit'] : null),
+                ':description' => (($r['description'] ?? null) !== null ? (string)$r['description'] : null),
+                ':data_type' => $dataType,
+                ':value_num' => $r['value_num'] ?? null,
+                ':value_text' => $r['value_text'] ?? null,
+                ':value_bool' => array_key_exists('value_bool', $r) ? $r['value_bool'] : null,
+                ':sort_order' => (int)($r['sort_order'] ?? $i),
+            ]);
+        }
+    }
+
+    private static function replaceCropVariablesTx(PDO $pdo, int $workspaceId, array $rows): void
+    {
+        $pdo->prepare("DELETE FROM mca_workspace_crop_variables WHERE workspace_id = :id")
+            ->execute([':id' => $workspaceId]);
+
+        $ins = $pdo->prepare("
+        INSERT INTO mca_workspace_crop_variables
+            (workspace_id, crop_code, crop_name, key, name, unit, description, data_type, value_num, value_text, value_bool, sort_order)
+        VALUES
+            (:workspace_id, :crop_code, :crop_name, :key, :name, :unit, :description, :data_type, :value_num, :value_text, :value_bool, :sort_order)
+    ");
+
+        foreach ($rows as $i => $r) {
+            $cropCode = trim((string)($r['crop_code'] ?? ''));
+            $key = trim((string)($r['key'] ?? ''));
+            if ($cropCode === '' || $key === '') continue;
+
+            $dataType = (string)($r['data_type'] ?? 'number');
+            if (!in_array($dataType, ['number', 'text', 'bool'], true)) {
+                $dataType = 'number';
+            }
+
+            $ins->execute([
+                ':workspace_id' => $workspaceId,
+                ':crop_code' => $cropCode,
+                ':crop_name' => (($r['crop_name'] ?? null) !== null ? (string)$r['crop_name'] : null),
+                ':key' => $key,
+                ':name' => (($r['name'] ?? null) !== null ? (string)$r['name'] : null),
+                ':unit' => (($r['unit'] ?? null) !== null ? (string)$r['unit'] : null),
+                ':description' => (($r['description'] ?? null) !== null ? (string)$r['description'] : null),
+                ':data_type' => $dataType,
+                ':value_num' => $r['value_num'] ?? null,
+                ':value_text' => $r['value_text'] ?? null,
+                ':value_bool' => array_key_exists('value_bool', $r) ? $r['value_bool'] : null,
+                ':sort_order' => (int)($r['sort_order'] ?? $i),
+            ]);
+        }
+    }
+
+    private static function replaceCropRefFactorsTx(PDO $pdo, int $workspaceId, array $rows): void
+    {
+        $pdo->prepare("DELETE FROM mca_workspace_crop_ref_factors WHERE workspace_id = :id")
+            ->execute([':id' => $workspaceId]);
+
+        $ins = $pdo->prepare("
+        INSERT INTO mca_workspace_crop_ref_factors
+            (workspace_id, crop_code, crop_name, key, name, unit, description, data_type, value_num, value_text, value_bool, sort_order)
+        VALUES
+            (:workspace_id, :crop_code, :crop_name, :key, :name, :unit, :description, :data_type, :value_num, :value_text, :value_bool, :sort_order)
+    ");
+
+        foreach ($rows as $i => $r) {
+            $cropCode = trim((string)($r['crop_code'] ?? ''));
+            $key = trim((string)($r['key'] ?? ''));
+            if ($cropCode === '' || $key === '') continue;
+
+            $dataType = (string)($r['data_type'] ?? 'number');
+            if (!in_array($dataType, ['number', 'text', 'bool'], true)) {
+                $dataType = 'number';
+            }
+
+            $ins->execute([
+                ':workspace_id' => $workspaceId,
+                ':crop_code' => $cropCode,
+                ':crop_name' => (($r['crop_name'] ?? null) !== null ? (string)$r['crop_name'] : null),
+                ':key' => $key,
+                ':name' => (($r['name'] ?? null) !== null ? (string)$r['name'] : null),
+                ':unit' => (($r['unit'] ?? null) !== null ? (string)$r['unit'] : null),
+                ':description' => (($r['description'] ?? null) !== null ? (string)$r['description'] : null),
+                ':data_type' => $dataType,
+                ':value_num' => $r['value_num'] ?? null,
+                ':value_text' => $r['value_text'] ?? null,
+                ':value_bool' => array_key_exists('value_bool', $r) ? $r['value_bool'] : null,
+                ':sort_order' => (int)($r['sort_order'] ?? $i),
+            ]);
+        }
+    }
+
+    private static function replaceRunInputsTx(PDO $pdo, int $workspaceId, array $runInputs): void
+    {
+        $pdo->prepare("DELETE FROM mca_workspace_run_variables WHERE workspace_id = :id")
+            ->execute([':id' => $workspaceId]);
+
+        $pdo->prepare("DELETE FROM mca_workspace_run_crop_factors WHERE workspace_id = :id")
+            ->execute([':id' => $workspaceId]);
+
+        $insVar = $pdo->prepare("
+        INSERT INTO mca_workspace_run_variables
+            (workspace_id, dataset_id, key, name, unit, description, data_type, value_num, value_text, value_bool, sort_order)
+        VALUES
+            (:workspace_id, :dataset_id, :key, :name, :unit, :description, :data_type, :value_num, :value_text, :value_bool, :sort_order)
+    ");
+
+        $insCrop = $pdo->prepare("
+        INSERT INTO mca_workspace_run_crop_factors
+            (workspace_id, dataset_id, crop_code, crop_name, key, name, unit, description, data_type, value_num, value_text, value_bool, sort_order)
+        VALUES
+            (:workspace_id, :dataset_id, :crop_code, :crop_name, :key, :name, :unit, :description, :data_type, :value_num, :value_text, :value_bool, :sort_order)
+    ");
+
+        foreach ($runInputs as $ri) {
+            $datasetId = trim((string)($ri['dataset_id'] ?? ''));
+            if ($datasetId === '') continue;
+
+            foreach ((array)($ri['variables_run'] ?? []) as $i => $r) {
+                $key = trim((string)($r['key'] ?? ''));
+                if ($key === '') continue;
+
+                $dataType = (string)($r['data_type'] ?? 'number');
+                if (!in_array($dataType, ['number', 'text', 'bool'], true)) {
+                    $dataType = 'number';
+                }
+
+                $insVar->execute([
+                    ':workspace_id' => $workspaceId,
+                    ':dataset_id' => $datasetId,
+                    ':key' => $key,
+                    ':name' => (($r['name'] ?? null) !== null ? (string)$r['name'] : null),
+                    ':unit' => (($r['unit'] ?? null) !== null ? (string)$r['unit'] : null),
+                    ':description' => (($r['description'] ?? null) !== null ? (string)$r['description'] : null),
+                    ':data_type' => $dataType,
+                    ':value_num' => $r['value_num'] ?? null,
+                    ':value_text' => $r['value_text'] ?? null,
+                    ':value_bool' => array_key_exists('value_bool', $r) ? $r['value_bool'] : null,
+                    ':sort_order' => (int)($r['sort_order'] ?? $i),
+                ]);
+            }
+
+            foreach ((array)($ri['crop_factors'] ?? []) as $i => $r) {
+                $cropCode = trim((string)($r['crop_code'] ?? ''));
+                $key = trim((string)($r['key'] ?? ''));
+                if ($cropCode === '' || $key === '') continue;
+
+                $dataType = (string)($r['data_type'] ?? 'number');
+                if (!in_array($dataType, ['number', 'text', 'bool'], true)) {
+                    $dataType = 'number';
+                }
+
+                $insCrop->execute([
+                    ':workspace_id' => $workspaceId,
+                    ':dataset_id' => $datasetId,
+                    ':crop_code' => $cropCode,
+                    ':crop_name' => (($r['crop_name'] ?? null) !== null ? (string)$r['crop_name'] : null),
+                    ':key' => $key,
+                    ':name' => (($r['name'] ?? null) !== null ? (string)$r['name'] : null),
+                    ':unit' => (($r['unit'] ?? null) !== null ? (string)$r['unit'] : null),
+                    ':description' => (($r['description'] ?? null) !== null ? (string)$r['description'] : null),
+                    ':data_type' => $dataType,
+                    ':value_num' => $r['value_num'] ?? null,
+                    ':value_text' => $r['value_text'] ?? null,
+                    ':value_bool' => array_key_exists('value_bool', $r) ? $r['value_bool'] : null,
+                    ':sort_order' => (int)($r['sort_order'] ?? $i),
+                ]);
+            }
         }
     }
 }
