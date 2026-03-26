@@ -2,10 +2,10 @@
 // src/api/mca_presets_admin.php
 declare(strict_types=1);
 
+header('Content-Type: application/json');
 require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../classes/McaPresetRepository.php';
-
-header('Content-Type: application/json');
+require_once __DIR__ . '/../classes/Auth.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -22,7 +22,13 @@ if (!$csrf || !hash_equals($_SESSION['csrf_token'] ?? '', $csrf)) {
     exit;
 }
 
-$userId = (int)($_SESSION['user_id'] ?? 0); // adjust to your auth
+Auth::requireLogin();
+$userId = Auth::userId();
+if ($userId === null) {
+    http_response_code(401);
+    echo json_encode(['error' => 'Unauthorized']);
+    exit;
+}
 $action = $_POST['action'] ?? '';
 
 try {

@@ -75,6 +75,59 @@ export function initSubbasinDashboard({
     let preloadQueue = [];
     let preloadRunning = false;
 
+    let workspaceLoadConfirmBs = null;
+    let pendingWorkspaceSelection = null;
+
+    function initWorkspaceLoadConfirm() {
+        if (!els.mcaWorkspaceLoadConfirmModal) return;
+
+        workspaceLoadConfirmBs = new bootstrap.Modal(els.mcaWorkspaceLoadConfirmModal);
+
+        els.mcaWorkspaceLoadConfirmBtn?.addEventListener('click', async () => {
+            if (!pendingWorkspaceSelection || !mca) return;
+
+            const { workspaceMode, workspaceId, label } = pendingWorkspaceSelection;
+
+            try {
+                workspaceLoadConfirmBs?.hide();
+
+                if (!mcaEnabled) {
+                    if (els.mcaEnableSwitch) {
+                        els.mcaEnableSwitch.checked = true;
+                    }
+                    await setMcaEnabled(true);
+                }
+
+                if (els.mcaWorkspaceStatus) {
+                    els.mcaWorkspaceStatus.textContent =
+                        workspaceMode === 'system'
+                            ? 'Loading default configuration…'
+                            : `Loading workspace "${label}"…`;
+                }
+
+                await mca.loadActivePreset(currentStudyAreaId, workspaceId, { workspaceMode });
+
+                const workspaceDatasetIds = mca.getPreferredWorkspaceDatasetIds();
+                applyDatasetSelectionToUi(workspaceDatasetIds);
+                await handleDatasetSelectionChanged();
+
+                if (els.mcaWorkspaceStatus) {
+                    els.mcaWorkspaceStatus.textContent =
+                        workspaceMode === 'system'
+                            ? 'Default configuration loaded.'
+                            : `Workspace "${label}" loaded.`;
+                }
+            } catch (err) {
+                console.error('[MCA workspace load] failed', err);
+                if (els.mcaWorkspaceStatus) {
+                    els.mcaWorkspaceStatus.textContent = err.message || String(err);
+                }
+            } finally {
+                pendingWorkspaceSelection = null;
+            }
+        });
+    }
+
     function setPreloadStatus(done, total) {
         if (!els.preloadStatus) return;
         if (!total || done >= total) {
@@ -137,13 +190,24 @@ export function initSubbasinDashboard({
     // ---------- Boot ----------
     let mca = null;
     wireUI();
+    initWorkspaceLoadConfirm();
     mca = initMcaController({
         apiBase,
         els: {
-            // buttons
-            mcaComputeBtn: els.mcaComputeBtn,
+            mcaWorkspaceSelect: els.mcaWorkspaceSelect,
+            mcaWorkspaceSaveBtn: els.mcaWorkspaceSaveBtn,
+            mcaWorkspaceSaveAsBtn: els.mcaWorkspaceSaveAsBtn,
+            mcaWorkspaceStatus: els.mcaWorkspaceStatus,
 
-            // accordion
+            mcaWorkspaceModal: els.mcaWorkspaceModal,
+            mcaWorkspaceForm: els.mcaWorkspaceForm,
+            mcaWorkspaceNameInput: els.mcaWorkspaceNameInput,
+            mcaWorkspaceModalTitle: els.mcaWorkspaceModalTitle,
+            mcaWorkspaceModalHelp: els.mcaWorkspaceModalHelp,
+            mcaWorkspaceModalSubmit: els.mcaWorkspaceModalSubmit,
+            mcaWorkspaceDefaultInput: els.mcaWorkspaceDefaultInput,
+
+            mcaComputeBtn: els.mcaComputeBtn,
             mcaIndicatorsTableWrap: els.mcaIndicatorsTableWrap,
             mcaWeightSum: els.mcaWeightSum,
             mcaEditError: els.mcaEditError,
@@ -167,139 +231,7 @@ export function initSubbasinDashboard({
     // ---------- UI ----------
     function wireUI() {
         els.dataset.addEventListener('change', async () => {
-            selectedRunIds = getSelectedRunIdsFromSelect();
-            lastSelectedRunIds = selectedRunIds.slice();
-
-            // IMPORTANT: prioritize user action over background downloads
-            cancelPreloads();
-
-            // Any time scenario selection changes, reset the selected subbasin + charts
-            current.selectedSub = null;
-            if (els.seriesChart) Plotly.purge(els.seriesChart);
-            if (els.cropChart)   Plotly.purge(els.cropChart);
-
-            if (!selectedRunIds.length) {
-                current.selectedSub = null;
-                current.runId = null;
-                mapScenarioIds = [];
-                updateMapScenarioOptions();
-
-                if (els.mapNote) {
-                    els.mapNote.textContent = 'Select at least one scenario.';
-                }
-
-                if (els.seriesChart) Plotly.purge(els.seriesChart);
-                if (els.cropChart)   Plotly.purge(els.cropChart);
-
-                updateHelpText();
-                if (vectorLayer) vectorLayer.changed();
-                return;
-            }
-
-            showToast('Loading metrics for selected scenarios…', false, null, 'OK', 2500);
-            setBusy(true, 'Loading…');
-            updateHelpText();
-
-            try {
-                if (els.loadingDetail) els.loadingDetail.textContent = 'Loading indicator registry…';
-                await ensureIndicatorRegistryLoaded();
-
-                if (els.loadingDetail) els.loadingDetail.textContent = 'Loading crop names…';
-                await ensureCropLookupLoaded();
-
-                if (els.loadingDetail) els.loadingDetail.textContent = 'Loading scenario metrics…';
-                await Promise.all(selectedRunIds.map(id => ensureRunLoaded(id)));
-                // after user-selected runs loaded:
-                const remainingDefaultIds = (runsMeta || [])
-                    .filter(r => !!r.is_default && !isCustomDatasetId(r.id))
-                    .map(r => String(r.id))
-                    .filter(id => id !== '')
-                    .filter(id => !runsStore.has(id));
-
-                setTimeout(() => {
-                    startPreloadDefaultRuns(remainingDefaultIds, { concurrency: 2 });
-                }, 0);
-
-                if (els.loadingDetail) els.loadingDetail.textContent = 'Rendering…';
-
-                // union crops across selected runs
-                const cropSet = new Set();
-                for (const id of selectedRunIds) {
-                    const rd = runsStore.get(id);
-                    for (const c of (rd?.crops || [])) cropSet.add(c);
-                }
-
-                // Keep mapScenarioIds in sync
-                mapScenarioIds = mapScenarioIds.filter(id => selectedRunIds.includes(id));
-                if (!mapScenarioIds.length) mapScenarioIds = [selectedRunIds[0]];
-                if (mapScenarioIds.length > 2) mapScenarioIds = mapScenarioIds.slice(0, 2);
-
-                // Base run = first map scenario
-                const baseRunId = mapScenarioIds[0];
-                current.runId = baseRunId;
-
-                // Now that KPI data exists, we can populate UI
-                activateRun(baseRunId, { preserveCrop: true });
-
-                // Ensure we have an indicator selected (activateRun picks one)
-                if (current.indicatorId) {
-                    if (els.loadingDetail) els.loadingDetail.textContent = 'Loading selected metric…';
-                    await Promise.all(selectedRunIds.map(id => ensureIndicatorLoaded(id, current.indicatorId)));
-                }
-
-                updateMapScenarioOptions();
-                recomputeAndRedraw();
-
-                if (selectedRunIds.every(id => runsStore.has(id))) {
-                    showToast('Metrics loaded. Click a subbasin on the map to show graphs.', false, null, 'OK', 4000);
-                }
-
-                // MCA setAvailableRuns (if enabled) should happen after KPI loads, because we now have crop lists per run
-                // MCA setAvailableRuns (if enabled) should happen after KPI loads, because we now have crop lists per run
-                if (mcaEnabled && mca) {
-                    const runCropsById = {};
-                    for (const id of selectedRunIds) {
-                        const rd = runsStore.get(id);
-                        console.log(`[MCA] Run ${id} crops:`, rd?.crops);
-                        runCropsById[id] = (rd?.crops || []).slice();
-                    }
-
-                    const baselineRunId = mca ? mca.getBaselineRunId() : null;
-
-                    if (baselineRunId && Number.isFinite(baselineRunId) && baselineRunId > 0) {
-                        // Load baseline KPI data if not already loaded
-                        if (!runsStore.has(baselineRunId)) {
-                            console.log(`[MCA] Loading baseline run ${baselineRunId} for crop data`);
-                            await ensureRunLoaded(baselineRunId);
-                        }
-
-                        // Ensure baseline crops are in runCropsById (even if not selected)
-                        const baselineData = runsStore.get(baselineRunId);
-                        if (baselineData?.crops && !runCropsById[baselineRunId]) {
-                            runCropsById[baselineRunId] = baselineData.crops.slice();
-                            console.log(`[MCA] Added baseline run ${baselineRunId} crops to runCropsById:`, baselineData.crops);
-                        }
-                    }
-
-                    lastRunCropsById = runCropsById;
-
-                    await mca.setAvailableRuns({
-                        studyAreaId: currentStudyAreaId,
-                        selectedRunIds,
-                        runsMeta,
-                        runCropsById,
-                    });
-
-                    mca.setAllowedCrops([...cropSet]);
-                }
-
-            } catch (err) {
-                console.error('[dataset change] failed', err);
-                showToast('Failed to load metrics. Check console for details.', true, null, 'OK', 6000);
-            } finally {
-                setBusy(false);
-                updateHelpText();
-            }
+            await handleDatasetSelectionChanged();
         });
 
         els.metric.addEventListener('change', async () => {
@@ -351,6 +283,34 @@ export function initSubbasinDashboard({
             if (subLayer) subLayer.setVisible(vis);
             if (vectorLayer) vectorLayer.setVisible(vis);
         });
+
+        if (els.mcaWorkspaceLoadBtn && els.mcaWorkspaceSelect) {
+            els.mcaWorkspaceLoadBtn.addEventListener('click', () => {
+                if (!mca) return;
+
+                const rawValue = String(els.mcaWorkspaceSelect.value || '');
+                const workspaceMode = rawValue === 'system' ? 'system' : 'workspace';
+                const workspaceId = /^\d+$/.test(rawValue) ? Number(rawValue) : null;
+
+                const selectedOption = els.mcaWorkspaceSelect.options[els.mcaWorkspaceSelect.selectedIndex];
+                const label = selectedOption?.textContent?.trim() || 'selected workspace';
+
+                pendingWorkspaceSelection = {
+                    workspaceMode,
+                    workspaceId,
+                    label,
+                };
+
+                if (els.mcaWorkspaceLoadConfirmText) {
+                    els.mcaWorkspaceLoadConfirmText.textContent =
+                        workspaceMode === 'system'
+                            ? 'Loading the default configuration will enable MCA and replace the current unsaved values, selected scenarios, and MCA inputs.'
+                            : `Loading "${label}" will enable MCA and replace the current unsaved values, selected scenarios, and MCA inputs.`;
+                }
+
+                workspaceLoadConfirmBs?.show();
+            });
+        }
 
         // Opacity sliders
         const applySubOpacity = () => {
@@ -454,71 +414,77 @@ export function initSubbasinDashboard({
         if (els.mapNote) els.mapNote.textContent = 'Loading MCA preset…';
 
         try {
-            await mca.loadActivePreset(currentStudyAreaId);
-
-            // If the user already selected runs and we already loaded KPI data, hydrate MCA now
-            if (lastSelectedRunIds.length) {
-                // allowed crops = union crops across selected runs (from runsStore if present)
-                const cropSet = new Set();
-                for (const id of lastSelectedRunIds) {
-                    const rd = runsStore.get(id);
-                    for (const c of (rd?.crops || [])) cropSet.add(c);
-                }
-
-                // Build runCropsById with baseline included
-                const runCropsById = {};
-                for (const id of lastSelectedRunIds) {
-                    const rd = runsStore.get(id);
-                    runCropsById[id] = (rd?.crops || []).slice();
-                }
-
-                const baselineRunId = mca ? mca.getBaselineRunId() : null;
-
-                if (baselineRunId && Number.isFinite(baselineRunId) && baselineRunId > 0) {
-                    // Load baseline KPI data if not already loaded
-                    if (!runsStore.has(baselineRunId)) {
-                        console.log(`[MCA] Loading baseline run ${baselineRunId} for crop data`);
-                        await ensureRunLoaded(baselineRunId);
-                    }
-
-                    // Ensure baseline crops are in runCropsById (even if not selected)
-                    const baselineData = runsStore.get(baselineRunId);
-                    if (baselineData?.crops && !runCropsById[baselineRunId]) {
-                        runCropsById[baselineRunId] = baselineData.crops.slice();
-                        console.log(`[MCA] Added baseline run ${baselineRunId} crops to runCropsById:`, baselineData.crops);
-                    }
-                }
-
-                await mca.setAvailableRuns({
-                    studyAreaId: currentStudyAreaId,
-                    selectedRunIds: lastSelectedRunIds,
-                    runsMeta,
-                    runCropsById,
-                });
-
-                mca.setAllowedCrops([...cropSet]);
-            } else {
-                console.log('[MCA] building runCropsById for setAvailableRuns', {
-                    selectedRunIds,
-                    lastRunCropsById,
-                    cropsLenByRun: Object.fromEntries(Object.entries(lastRunCropsById).map(([k,v]) => [k, v.length]))
-                });
-                // No runs selected yet; show the built-in hint in scenario picker
-                await mca.setAvailableRuns({
-                    studyAreaId: currentStudyAreaId,
-                    selectedRunIds: [],
-                    runsMeta: [],
-                    runCropsById: {},
-                });
-
-                mca.setAllowedCrops([]);
-            }
+            if (els.mapNote) els.mapNote.textContent = 'Loading MCA preset…';
+            await rehydrateMcaFromCurrentRuns();
         } catch (e) {
             console.error('[MCA] enable failed:', e);
-            // keep UI enabled but show error if you have an element for it; otherwise rely on console
         } finally {
-            // restore mapNote (don’t clobber if something else wrote after)
+            // restore mapNote if needed
         }
+    }
+
+    async function rehydrateMcaFromCurrentRuns({
+                                                   workspaceId = null,
+                                                   workspaceMode = 'auto',
+                                                   reloadPreset = true
+                                               } = {}) {
+        if (!mca) return;
+        if (!Number.isFinite(+currentStudyAreaId) || +currentStudyAreaId <= 0) return;
+
+        if (reloadPreset) {
+            await mca.loadActivePreset(currentStudyAreaId, workspaceId, { workspaceMode });
+        }
+
+        if (!lastSelectedRunIds.length) {
+            await mca.setAvailableRuns({
+                studyAreaId: currentStudyAreaId,
+                selectedRunIds: [],
+                runsMeta,
+                runCropsById: {},
+            });
+            mca.setAllowedCrops([]);
+            return;
+        }
+
+        const cropSet = new Set();
+        const runCropsById = {};
+
+        for (const id of lastSelectedRunIds) {
+            const rd = runsStore.get(id);
+            if (!rd) continue;
+
+            const runCrops = (rd.crops || []).slice();
+            runCropsById[id] = runCrops;
+
+            for (const c of runCrops) cropSet.add(c);
+        }
+
+        const baselineRunId = mca.getBaselineRunId();
+
+        if (baselineRunId && Number.isFinite(baselineRunId) && baselineRunId > 0) {
+            const baselineKey = String(baselineRunId);
+
+            if (!runsStore.has(baselineKey)) {
+                console.log(`[MCA] Loading baseline run ${baselineRunId} for crop data`);
+                await ensureRunLoaded(baselineKey);
+            }
+
+            const baselineData = runsStore.get(baselineKey);
+            if (baselineData?.crops && !runCropsById[baselineKey]) {
+                runCropsById[baselineKey] = baselineData.crops.slice();
+            }
+        }
+
+        lastRunCropsById = runCropsById;
+
+        await mca.setAvailableRuns({
+            studyAreaId: currentStudyAreaId,
+            selectedRunIds: lastSelectedRunIds,
+            runsMeta,
+            runCropsById,
+        });
+
+        mca.setAllowedCrops([...cropSet]);
     }
 
     // ---------- Data load ----------
@@ -1343,6 +1309,153 @@ export function initSubbasinDashboard({
         updateHelpText();
     }
 
+    function applyDatasetSelectionToUi(datasetIds) {
+        const wanted = new Set((datasetIds || []).map(id => String(id).trim()).filter(Boolean));
+
+        if (!els.dataset) return;
+
+        const boxes = els.dataset.querySelectorAll('input.dataset-checkbox[data-run-id]');
+        boxes.forEach(box => {
+            const rid = String(box.dataset.runId || '').trim();
+            box.checked = wanted.has(rid);
+        });
+    }
+
+    async function handleDatasetSelectionChanged() {
+        selectedRunIds = getSelectedRunIdsFromSelect();
+        lastSelectedRunIds = selectedRunIds.slice();
+
+        cancelPreloads();
+
+        current.selectedSub = null;
+        if (els.seriesChart) Plotly.purge(els.seriesChart);
+        if (els.cropChart) Plotly.purge(els.cropChart);
+
+        if (!selectedRunIds.length) {
+            current.selectedSub = null;
+            current.runId = null;
+            mapScenarioIds = [];
+            updateMapScenarioOptions();
+
+            if (els.mapNote) {
+                els.mapNote.textContent = 'Select at least one scenario.';
+            }
+
+            if (els.seriesChart) Plotly.purge(els.seriesChart);
+            if (els.cropChart) Plotly.purge(els.cropChart);
+
+            updateHelpText();
+            if (vectorLayer) vectorLayer.changed();
+
+            if (mcaEnabled && mca) {
+                await mca.setAvailableRuns({
+                    studyAreaId: currentStudyAreaId,
+                    selectedRunIds: [],
+                    runsMeta,
+                    runCropsById: {},
+                });
+                mca.setAllowedCrops([]);
+            }
+            return;
+        }
+
+        showToast('Loading metrics for selected scenarios…', false, null, 'OK', 2500);
+        setBusy(true, 'Loading…');
+        updateHelpText();
+
+        try {
+            if (els.loadingDetail) els.loadingDetail.textContent = 'Loading indicator registry…';
+            await ensureIndicatorRegistryLoaded();
+
+            if (els.loadingDetail) els.loadingDetail.textContent = 'Loading crop names…';
+            await ensureCropLookupLoaded();
+
+            if (els.loadingDetail) els.loadingDetail.textContent = 'Loading scenario metrics…';
+            await Promise.all(selectedRunIds.map(id => ensureRunLoaded(id)));
+
+            const remainingDefaultIds = (runsMeta || [])
+                .filter(r => !!r.is_default && !isCustomDatasetId(r.id))
+                .map(r => String(r.id))
+                .filter(id => id !== '')
+                .filter(id => !runsStore.has(id));
+
+            setTimeout(() => {
+                startPreloadDefaultRuns(remainingDefaultIds, { concurrency: 2 });
+            }, 0);
+
+            if (els.loadingDetail) els.loadingDetail.textContent = 'Rendering…';
+
+            const cropSet = new Set();
+            for (const id of selectedRunIds) {
+                const rd = runsStore.get(id);
+                for (const c of (rd?.crops || [])) cropSet.add(c);
+            }
+
+            mapScenarioIds = mapScenarioIds.filter(id => selectedRunIds.includes(id));
+            if (!mapScenarioIds.length) mapScenarioIds = [selectedRunIds[0]];
+            if (mapScenarioIds.length > 2) mapScenarioIds = mapScenarioIds.slice(0, 2);
+
+            const baseRunId = mapScenarioIds[0];
+            current.runId = baseRunId;
+
+            activateRun(baseRunId, { preserveCrop: true });
+
+            if (current.indicatorId) {
+                if (els.loadingDetail) els.loadingDetail.textContent = 'Loading selected metric…';
+                await Promise.all(selectedRunIds.map(id => ensureIndicatorLoaded(id, current.indicatorId)));
+            }
+
+            updateMapScenarioOptions();
+            recomputeAndRedraw();
+
+            if (selectedRunIds.every(id => runsStore.has(id))) {
+                showToast('Metrics loaded. Click a subbasin on the map to show graphs.', false, null, 'OK', 4000);
+            }
+
+            if (mcaEnabled && mca) {
+                const runCropsById = {};
+                for (const id of selectedRunIds) {
+                    const rd = runsStore.get(id);
+                    runCropsById[id] = (rd?.crops || []).slice();
+                }
+
+                const baselineRunId = mca.getBaselineRunId();
+
+                if (baselineRunId && Number.isFinite(baselineRunId) && baselineRunId > 0) {
+                    const baselineKey = String(baselineRunId);
+
+                    if (!runsStore.has(baselineKey)) {
+                        console.log(`[MCA] Loading baseline run ${baselineRunId} for crop data`);
+                        await ensureRunLoaded(baselineKey);
+                    }
+
+                    const baselineData = runsStore.get(baselineKey);
+                    if (baselineData?.crops && !runCropsById[baselineKey]) {
+                        runCropsById[baselineKey] = baselineData.crops.slice();
+                        console.log(`[MCA] Added baseline run ${baselineRunId} crops to runCropsById:`, baselineData.crops);
+                    }
+                }
+
+                lastRunCropsById = runCropsById;
+
+                await mca.setAvailableRuns({
+                    studyAreaId: currentStudyAreaId,
+                    selectedRunIds,
+                    runsMeta,
+                    runCropsById,
+                });
+
+                mca.setAllowedCrops([...cropSet]);
+            }
+        } catch (err) {
+            console.error('[dataset change] failed', err);
+            showToast('Failed to load metrics. Check console for details.', true, null, 'OK', 6000);
+        } finally {
+            setBusy(false);
+            updateHelpText();
+        }
+    }
+
     function updateHelpText() {
         if (!els.seriesHint) return;
 
@@ -1399,17 +1512,15 @@ export function initSubbasinDashboard({
 
         const existing = runLoadPromises.get(runId);
 
-        // If user wants it and it's currently being preloaded: upgrade it
         if (existing && !isPreload && preloadAbortByRunId.has(runId)) {
             try { preloadAbortByRunId.get(runId).abort(); } catch (_) {}
             preloadAbortByRunId.delete(runId);
-
-            // IMPORTANT: remove the old promise so we don't await it
             runLoadPromises.delete(runId);
         } else if (existing) {
-            // Normal case: reuse in-flight promise
             return existing;
         }
+
+        const myEpoch = loadEpoch;   // add this
 
         let controller = null;
         let signal = undefined;
@@ -1422,6 +1533,10 @@ export function initSubbasinDashboard({
 
         const p = (async () => {
             const runData = await loadRunMeta(runId, { signal });
+
+            // ignore stale completion after study area switch
+            if (myEpoch !== loadEpoch) return;
+
             runsStore.set(runId, runData);
         })();
 
@@ -1888,6 +2003,8 @@ export function initSubbasinDashboard({
         current.runId = null;
         current.selectedSub = null;
         hasRunsForStudyArea = null;
+        runsMeta = [];
+        runsStore.clear();
 
         // reset MCA selection cache
         lastRunCropsById = {};
@@ -1919,8 +2036,19 @@ export function initSubbasinDashboard({
             if (els.mapNote) els.mapNote.textContent = 'Failed to load runs or data for this study area.';
         }
 
+        if (mca && els.mcaWorkspaceSelect) {
+            try {
+                await mca.refreshWorkspaceList(currentStudyAreaId);
+            } catch (err) {
+                console.error('[MCA] Failed to load workspace list', err);
+                if (els.mcaWorkspaceStatus) {
+                    els.mcaWorkspaceStatus.textContent = err.message || String(err);
+                }
+            }
+        }
+
         if (mcaEnabled && mca) {
-            await mca.loadActivePreset(currentStudyAreaId);
+            await rehydrateMcaFromCurrentRuns();
         }
     }
 

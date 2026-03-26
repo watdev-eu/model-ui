@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../classes/McaPresetRepository.php';
+require_once __DIR__ . '/../classes/Auth.php';
 
 header('Content-Type: application/json');
 
@@ -14,7 +15,13 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 }
 
 $studyAreaId = (int)($_GET['study_area_id'] ?? 0);
-$userId      = (int)($_SESSION['user_id'] ?? 0); // adjust to your auth
+Auth::requireLogin();
+$userId = Auth::userId();
+if ($userId === null) {
+    http_response_code(401);
+    echo json_encode(['error' => 'Unauthorized']);
+    exit;
+}
 
 if ($studyAreaId <= 0) {
     http_response_code(422);

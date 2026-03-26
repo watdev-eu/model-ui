@@ -103,13 +103,13 @@ final class StudyAreaRepository
             ':w'  => 10,
         ]);
 
-        // 4) Create default variable set linked to preset set
+        // 4) Create default variable set
         $stmtVarSet = $pdo->prepare("
-            INSERT INTO mca_variable_sets (study_area_id, user_id, name, is_default, preset_set_id)
-            VALUES (:sa, NULL, 'Default MCA variables', TRUE, :ps)
+            INSERT INTO mca_variable_sets (study_area_id, user_id, name, is_default)
+            VALUES (:sa, NULL, 'Default MCA variables', TRUE)
             RETURNING id
         ");
-        $stmtVarSet->execute([':sa' => $studyAreaId, ':ps' => $presetSetId]);
+        $stmtVarSet->execute([':sa' => $studyAreaId]);
         $varSetId = (int)$stmtVarSet->fetchColumn();
 
         return [

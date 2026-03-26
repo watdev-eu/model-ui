@@ -6,9 +6,24 @@ require_once __DIR__ . '/../config/database.php';
 
 final class McaPresetRepository
 {
-    public static function listForStudyArea(int $studyAreaId, int $userId): array
+    public static function listForStudyArea(int $studyAreaId, ?string $userId): array
     {
         $pdo = Database::pdo();
+
+        if ($userId === null || $userId === '') {
+            $stmt = $pdo->prepare("
+                SELECT
+                    ps.*,
+                    TRUE AS is_global
+                FROM mca_preset_sets ps
+                WHERE ps.study_area_id = :sa
+                  AND ps.user_id IS NULL
+                ORDER BY ps.is_default DESC, ps.name
+            ");
+            $stmt->execute([':sa' => $studyAreaId]);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        }
+
         $stmt = $pdo->prepare("
             SELECT
                 ps.*,
@@ -18,11 +33,15 @@ final class McaPresetRepository
               AND (ps.user_id IS NULL OR ps.user_id = :uid)
             ORDER BY ps.is_default DESC, ps.user_id NULLS FIRST, ps.name
         ");
-        $stmt->execute([':sa' => $studyAreaId, ':uid' => $userId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmt->execute([
+            ':sa' => $studyAreaId,
+            ':uid' => $userId,
+        ]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
-    public static function assertCanEdit(int $presetSetId, int $userId): void
+    public static function assertCanEdit(int $presetSetId, string $userId): void
     {
         $pdo = Database::pdo();
         $stmt = $pdo->prepare("SELECT user_id FROM mca_preset_sets WHERE id = :id");
@@ -37,12 +56,12 @@ final class McaPresetRepository
         if ($owner === null) {
             throw new InvalidArgumentException('Default preset set cannot be edited');
         }
-        if ((int)$owner !== $userId) {
+        if ((string)$owner !== $userId) {
             throw new InvalidArgumentException('Not allowed');
         }
     }
 
-    public static function createUserSet(int $studyAreaId, int $userId, string $name): int
+    public static function createUserSet(int $studyAreaId, string $userId, string $name): int
     {
         $pdo = Database::pdo();
         $stmt = $pdo->prepare("
@@ -54,7 +73,7 @@ final class McaPresetRepository
         return (int)$stmt->fetchColumn();
     }
 
-    public static function cloneDefaultToUser(int $studyAreaId, int $userId, string $name): int
+    public static function cloneDefaultToUser(int $studyAreaId, string $userId, string $name): int
     {
         $pdo = Database::pdo();
 
@@ -211,7 +230,7 @@ final class McaPresetRepository
         }
     }
 
-    public static function deleteSet(int $presetSetId, int $userId): void
+    public static function deleteSet(int $presetSetId, string $userId): void
     {
         $pdo = Database::pdo();
         $stmt = $pdo->prepare("DELETE FROM mca_preset_sets WHERE id = :id AND user_id = :uid");

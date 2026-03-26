@@ -209,17 +209,53 @@ if ($datasetType === 'run') {
 }
 
 // Find active variable set
-$stmt = $pdo->prepare("
-    SELECT id, study_area_id, name, user_id, is_default
-    FROM mca_variable_sets
-    WHERE study_area_id = :sa
-      AND is_default = TRUE
-      AND user_id IS NULL
-    ORDER BY id ASC
-    LIMIT 1
-");
-$stmt->execute([':sa' => $studyAreaId]);
-$varSet = $stmt->fetch(PDO::FETCH_ASSOC);
+$variableSetId = (int)($_GET['variable_set_id'] ?? 0);
+$userId = Auth::userId();
+
+if ($variableSetId > 0) {
+    if ($userId !== null && $userId !== '') {
+        $stmt = $pdo->prepare("
+            SELECT id, study_area_id, name, user_id, is_default
+            FROM mca_variable_sets
+            WHERE id = :id
+              AND study_area_id = :sa
+              AND (user_id IS NULL OR user_id = :uid)
+            LIMIT 1
+        ");
+        $stmt->execute([
+            ':id' => $variableSetId,
+            ':sa' => $studyAreaId,
+            ':uid' => $userId,
+        ]);
+    } else {
+        $stmt = $pdo->prepare("
+            SELECT id, study_area_id, name, user_id, is_default
+            FROM mca_variable_sets
+            WHERE id = :id
+              AND study_area_id = :sa
+              AND user_id IS NULL
+            LIMIT 1
+        ");
+        $stmt->execute([
+            ':id' => $variableSetId,
+            ':sa' => $studyAreaId,
+        ]);
+    }
+
+    $varSet = $stmt->fetch(PDO::FETCH_ASSOC);
+} else {
+    $stmt = $pdo->prepare("
+        SELECT id, study_area_id, name, user_id, is_default
+        FROM mca_variable_sets
+        WHERE study_area_id = :sa
+          AND is_default = TRUE
+          AND user_id IS NULL
+        ORDER BY id ASC
+        LIMIT 1
+    ");
+    $stmt->execute([':sa' => $studyAreaId]);
+    $varSet = $stmt->fetch(PDO::FETCH_ASSOC);
+}
 
 if (!$varSet) {
     http_response_code(404);

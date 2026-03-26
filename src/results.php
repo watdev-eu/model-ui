@@ -14,6 +14,7 @@ $allAreas  = StudyAreaRepository::all();
 $areas     = array_values(array_filter($allAreas, fn($a) => !empty($a['enabled'])));
 $firstId   = $areas ? (int)$areas[0]['id'] : 0;
 $canManageCustomScenarios = Auth::isLoggedIn();
+$canUseMcaWorkspaces = Auth::isLoggedIn();
 ?>
 
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
@@ -54,6 +55,41 @@ $canManageCustomScenarios = Auth::isLoggedIn();
             <?php endif; ?>
         </div>
     </div>
+
+<?php if ($canUseMcaWorkspaces): ?>
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-lg-5">
+                    <label class="form-label mb-1" for="mcaWorkspaceSelect">Workspace</label>
+                    <select id="mcaWorkspaceSelect" class="form-select form-select-sm">
+                        <option value="">Select a study area first</option>
+                    </select>
+                </div>
+
+                <div class="col-auto">
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Workspace actions">
+                        <button id="mcaWorkspaceLoadBtn" class="btn btn-outline-primary" type="button">
+                            Load
+                        </button>
+
+                        <button id="mcaWorkspaceSaveBtn" class="btn btn-primary d-none" type="button">
+                            Update
+                        </button>
+
+                        <button id="mcaWorkspaceSaveAsBtn" class="btn btn-outline-primary" type="button">
+                            Save as new
+                        </button>
+                    </div>
+                </div>
+
+                <div class="col">
+                    <div id="mcaWorkspaceStatus" class="small text-muted"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+<?php endif; ?>
 
 <?php if (!$areas): ?>
     <div class="alert alert-warning">No enabled study areas configured.</div>
@@ -235,10 +271,6 @@ $canManageCustomScenarios = Auth::isLoggedIn();
                     <!-- wrap ALL MCA content that should hide when disabled -->
                     <div id="mcaEnabledWrap" style="display:none;">
 
-                    <div class="mb-2">
-                        <div class="small text-muted">Preset: <span class="fw-semibold">Default for this study area</span></div>
-                    </div>
-
                     <div class="accordion" id="mcaAccordion">
 
                         <div class="accordion-item">
@@ -405,6 +437,11 @@ $canManageCustomScenarios = Auth::isLoggedIn();
                     opacityRiversVal: document.getElementById('opacityRiversVal'),
                     mapScenario: document.getElementById('mapScenarioSelect'),
 
+                    mcaWorkspaceSelect: document.getElementById('mcaWorkspaceSelect'),
+                    mcaWorkspaceSaveBtn: document.getElementById('mcaWorkspaceSaveBtn'),
+                    mcaWorkspaceSaveAsBtn: document.getElementById('mcaWorkspaceSaveAsBtn'),
+                    mcaWorkspaceStatus: document.getElementById('mcaWorkspaceStatus'),
+
                     preloadStatus: document.getElementById('preloadStatus'),
 
                     mcaCard: document.getElementById('mcaCard'),
@@ -420,6 +457,19 @@ $canManageCustomScenarios = Auth::isLoggedIn();
                     mcaCropGlobalsWrap: document.getElementById('mcaCropGlobalsWrap'),
                     mcaScenarioPickerWrap: document.getElementById('mcaScenarioPickerWrap'),
                     mcaScenarioCards: document.getElementById('mcaScenarioCards'),
+
+                    mcaWorkspaceModal: document.getElementById('mcaWorkspaceModal'),
+                    mcaWorkspaceForm: document.getElementById('mcaWorkspaceForm'),
+                    mcaWorkspaceNameInput: document.getElementById('mcaWorkspaceNameInput'),
+                    mcaWorkspaceModalTitle: document.getElementById('mcaWorkspaceModalTitle'),
+                    mcaWorkspaceModalHelp: document.getElementById('mcaWorkspaceModalHelp'),
+                    mcaWorkspaceModalSubmit: document.getElementById('mcaWorkspaceModalSubmit'),
+                    mcaWorkspaceDefaultInput: document.getElementById('mcaWorkspaceDefaultInput'),
+
+                    mcaWorkspaceLoadBtn: document.getElementById('mcaWorkspaceLoadBtn'),
+                    mcaWorkspaceLoadConfirmModal: document.getElementById('mcaWorkspaceLoadConfirmModal'),
+                    mcaWorkspaceLoadConfirmBtn: document.getElementById('mcaWorkspaceLoadConfirmBtn'),
+                    mcaWorkspaceLoadConfirmText: document.getElementById('mcaWorkspaceLoadConfirmText'),
 
                     mcaVizWrap: document.getElementById('mcaVizWrap'),
                     mcaRadarChart: document.getElementById('mcaRadarChart'),
@@ -471,6 +521,69 @@ $canManageCustomScenarios = Auth::isLoggedIn();
         });
     </script>
 
+<?php endif; ?>
+
+<?php if ($canUseMcaWorkspaces): ?>
+    <div class="modal fade" id="mcaWorkspaceLoadConfirmModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Load workspace?</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2">
+                        Loading this workspace will replace the current unsaved values in the interface.
+                    </p>
+                    <div class="small text-muted" id="mcaWorkspaceLoadConfirmText">
+                        Unsaved MCA settings and selected scenarios will be lost.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-sm btn-primary" id="mcaWorkspaceLoadConfirmBtn">Load</button>
+                </div>
+            </div>
+        </div>
+    </div>
+<?php endif; ?>
+
+<?php if ($canUseMcaWorkspaces): ?>
+    <div class="modal fade" id="mcaWorkspaceModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <form id="mcaWorkspaceForm">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="mcaWorkspaceModalTitle">Save as new workspace</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-2">
+                            <label for="mcaWorkspaceNameInput" class="form-label">Workspace name</label>
+                            <input
+                                    type="text"
+                                    class="form-control"
+                                    id="mcaWorkspaceNameInput"
+                                    maxlength="120"
+                                    required
+                            >
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="mcaWorkspaceDefaultInput">
+                                <label class="form-check-label" for="mcaWorkspaceDefaultInput">
+                                    Make this my default workspace
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-text" id="mcaWorkspaceModalHelp"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-sm btn-primary" id="mcaWorkspaceModalSubmit">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
 <?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

@@ -5,6 +5,11 @@ export function initMcaController({ apiBase, els }) {
     let presetId = null;
     let resultsCache = null;
 
+    let activeWorkspaceId = null;
+    let availableWorkspaces = [];
+    let currentVariableSetId = null;
+    let preferredWorkspaceDatasetIds = [];
+
     let defaultPresetItems = [];
     let currentPresetItems = [];
 
@@ -848,15 +853,16 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         );
         baselineDatasetId = baselineDataset ? datasetIdString(baselineDataset.id) : null;
 
-        // Compute allowed crops from the passed runCropsById
+        const effectiveSelectedRunIds = (selectedRunIds || []).map(datasetIdString);
+
         const cropSet = new Set();
-        for (const rid of (selectedRunIds || [])) {
+        for (const rid of effectiveSelectedRunIds) {
             const key = datasetIdString(rid);
             for (const c of (mcaRunCropsById?.[key] || [])) cropSet.add(String(c));
         }
         allowedCropSet = cropSet.size ? cropSet : null;
 
-        const selectedSet = new Set((selectedRunIds || []).map(datasetIdString));
+        const selectedSet = new Set(effectiveSelectedRunIds.map(datasetIdString));
 
         availableRuns = (runsMeta || [])
             .filter(r => selectedSet.has(datasetIdString(r.id)))
@@ -1145,7 +1151,8 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         updateComputeEnabled();
 
         try {
-            const url = `${apiBase}/mca_run_inputs.php?study_area_id=${encodeURIComponent(studyAreaId)}&run_id=${encodeURIComponent(rid)}`;
+            const vsPart = currentVariableSetId ? `&variable_set_id=${encodeURIComponent(currentVariableSetId)}` : '';
+            const url = `${apiBase}/mca_run_inputs.php?study_area_id=${encodeURIComponent(studyAreaId)}&run_id=${encodeURIComponent(rid)}${vsPart}`;
             const res = await fetch(url);
             const json = await res.json();
             if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
@@ -1284,22 +1291,235 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         });
     }
 
-    async function loadActivePreset(saId) {
-        studyAreaId = saId;
+    async function loadWorkspaceList() {
+        if (!studyAreaId || !els.mcaWorkspaceSelect) return;
 
-        const res = await fetch(`${apiBase}/mca_preset_active.php?study_area_id=${encodeURIComponent(saId)}`);
+        const res = await fetch(`${apiBase}/mca_workspaces_list.php?study_area_id=${encodeURIComponent(studyAreaId)}`);
         const json = await res.json();
         if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
+
+        availableWorkspaces = Array.isArray(json.workspaces) ? json.workspaces : [];
+
+        els.mcaWorkspaceSelect.innerHTML = `
+            <option value="system" ${activeWorkspaceId ? '' : 'selected'}>
+                Default configuration
+            </option>
+            ${availableWorkspaces.map(w => `
+                <option value="${String(w.id)}" ${Number(w.id) === Number(activeWorkspaceId) ? 'selected' : ''}>
+                    ${escapeHtml(w.name)}
+                </option>
+            `).join('')}
+        `;
+
+        updateWorkspaceActionUi();
+    }
+
+    async function refreshWorkspaceList(saId = null) {
+        if (saId != null) {
+            studyAreaId = Number(saId) || null;
+        }
+        await loadWorkspaceList();
+    }
+
+    async function saveCurrentWorkspace({ saveAsNew = false, explicitName = null } = {}) {
+        if (!studyAreaId) {
+            throw new Error('No study area selected.');
+        }
+        if (!presetId || !currentVariableSetId) {
+            throw new Error('MCA configuration is not loaded yet. Enable MCA and wait for the preset to load first.');
+        }
+
+        const selectedIsSystem = isSystemWorkspaceSelection();
+
+        if (!saveAsNew && (selectedIsSystem || !activeWorkspaceId)) {
+            throw new Error('System defaults cannot be updated. Use "Save as new" instead.');
+        }
+
+        const existing = availableWorkspaces.find(w => Number(w.id) === Number(activeWorkspaceId));
+        const defaultName = existing?.name || 'My MCA workspace';
+        const name = String(explicitName || defaultName).trim();
+        if (!name) return;
+
+        const fd = new FormData();
+        fd.append('csrf', window.CSRF_TOKEN);
+        fd.append('action', saveAsNew ? 'create' : 'update');
+
+        if (!saveAsNew) {
+            fd.append('workspace_id', String(activeWorkspaceId));
+        }
+
+        fd.append('study_area_id', String(studyAreaId));
+        fd.append('name', name);
+        fd.append('description', '');
+        fd.append('preset_set_id', String(presetId));
+        fd.append('variable_set_id', String(currentVariableSetId));
+        fd.append('dataset_ids_json', JSON.stringify([...includedRunIds].map(datasetIdString)));
+        fd.append('is_default', els.mcaWorkspaceDefaultInput?.checked ? '1' : '0');
+
+        const res = await fetch(`${apiBase}/mca_workspaces_admin.php`, {
+            method: 'POST',
+            body: fd,
+        });
+
+        const raw = await res.text();
+        let json = null;
+
+        try {
+            json = raw ? JSON.parse(raw) : null;
+        } catch (_) {
+            throw new Error(`HTTP ${res.status}: ${raw || 'Empty response'}`);
+        }
+
+        if (!res.ok || !json?.ok) {
+            throw new Error(json?.error || `HTTP ${res.status}`);
+        }
+
+        if (json.workspace_id) {
+            activeWorkspaceId = Number(json.workspace_id);
+        }
+
+        await loadWorkspaceList();
+
+        if (els.mcaWorkspaceStatus) {
+            els.mcaWorkspaceStatus.textContent = saveAsNew
+                ? 'Workspace created.'
+                : 'Workspace updated.';
+        }
+    }
+
+    let workspaceSaveMode = 'update'; // 'update' | 'create'
+    let workspaceModalBs = null;
+
+    function initWorkspaceModal() {
+        if (!els.mcaWorkspaceModal) return;
+        workspaceModalBs = new bootstrap.Modal(els.mcaWorkspaceModal);
+
+        els.mcaWorkspaceForm?.addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            const name = String(els.mcaWorkspaceNameInput?.value || '').trim();
+            if (!name) return;
+
+            try {
+                await saveCurrentWorkspace({
+                    saveAsNew: workspaceSaveMode === 'create',
+                    explicitName: name,
+                });
+                workspaceModalBs?.hide();
+            } catch (err) {
+                console.error(err);
+                if (els.mcaWorkspaceStatus) {
+                    els.mcaWorkspaceStatus.textContent = err.message || String(err);
+                }
+            }
+        });
+    }
+
+    function getSelectedWorkspaceValue() {
+        return String(els.mcaWorkspaceSelect?.value || 'system');
+    }
+
+    function isSystemWorkspaceSelection() {
+        return getSelectedWorkspaceValue() === 'system';
+    }
+
+    function updateWorkspaceActionUi() {
+        const isSystem = isSystemWorkspaceSelection() || !activeWorkspaceId;
+
+        if (els.mcaWorkspaceSaveBtn) {
+            els.mcaWorkspaceSaveBtn.classList.toggle('d-none', isSystem);
+            els.mcaWorkspaceSaveBtn.disabled = isSystem;
+            els.mcaWorkspaceSaveBtn.title = isSystem
+                ? 'System defaults cannot be updated directly'
+                : 'Update this workspace';
+        }
+    }
+
+    function openWorkspaceModal({ saveAsNew }) {
+        if (!els.mcaWorkspaceModal || !els.mcaWorkspaceNameInput) return;
+
+        workspaceSaveMode = saveAsNew ? 'create' : 'update';
+
+        const existing = availableWorkspaces.find(w => Number(w.id) === Number(activeWorkspaceId));
+        const defaultName = existing?.name || 'My MCA workspace';
+
+        if (els.mcaWorkspaceModalTitle) {
+            els.mcaWorkspaceModalTitle.textContent = saveAsNew ? 'Save as new workspace' : 'Update workspace';
+        }
+
+        if (els.mcaWorkspaceModalHelp) {
+            els.mcaWorkspaceModalHelp.textContent = saveAsNew
+                ? 'Create a new workspace from the current MCA settings.'
+                : 'Update the selected workspace with the MCA settings shown here.';
+        }
+
+        if (els.mcaWorkspaceModalSubmit) {
+            els.mcaWorkspaceModalSubmit.textContent = saveAsNew ? 'Save as new' : 'Update';
+        }
+
+        if (els.mcaWorkspaceDefaultInput) {
+            els.mcaWorkspaceDefaultInput.checked = saveAsNew
+                ? false
+                : !!existing?.is_default;
+        }
+
+        els.mcaWorkspaceNameInput.value = defaultName;
+        workspaceModalBs?.show();
+
+        setTimeout(() => {
+            els.mcaWorkspaceNameInput?.focus();
+            els.mcaWorkspaceNameInput?.select();
+        }, 100);
+    }
+
+    async function loadActivePreset(saId, workspaceId = null, { workspaceMode = 'auto' } = {}) {
+        resultsCache = null;
+        runInputs.clear();
+        includedRunIds = new Set();
+        allowedCropSet = null;
+        baselineDatasetId = null;
+        mcaSelectedIndicator = null;
+
+        studyAreaId = saId;
+        preferredWorkspaceDatasetIds = [];
+
+        const qs = new URLSearchParams({
+            study_area_id: String(saId),
+            workspace_mode: String(workspaceMode),
+        });
+
+        if (workspaceMode === 'workspace' && workspaceId) {
+            qs.set('workspace_id', String(workspaceId));
+        }
+
+        const res = await fetch(`${apiBase}/mca_preset_active.php?${qs.toString()}`);
+        const json = await res.json();
+        if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
+
+        currentVariableSetId = Number(json?.variable_set?.id || 0) || null;
+        activeWorkspaceId = Number(json?.workspace?.id || 0) || null;
+
+        preferredWorkspaceDatasetIds = Array.isArray(json?.selected_dataset_ids)
+            ? json.selected_dataset_ids.map(datasetIdString)
+            : [];
+
+        if (els.mcaWorkspaceSelect) {
+            try {
+                await loadWorkspaceList();
+            } catch (e) {
+                console.error('[MCA] Failed to load workspace list', e);
+                if (els.mcaWorkspaceStatus) {
+                    els.mcaWorkspaceStatus.textContent = e.message || String(e);
+                }
+            }
+        }
 
         // IMPORTANT: set presetId so compute can enable
         const pidRaw =
             json.preset_set_id ??
             json.preset_id ??
-            json.id ??
             json.preset?.id ??
             json.preset?.preset_set_id ??
-            json.preset?.preset_id ??
-            json.variable_set?.id; // if your backend calls it this
+            json.preset?.preset_id;
 
         presetId = Number.isFinite(Number(pidRaw)) ? Number(pidRaw) : null;
 
@@ -1346,7 +1566,7 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
             crop_ref_factors_sample: Array.isArray(json.crop_ref_factors) ? json.crop_ref_factors.slice(0, 3) : null,
         });
 
-        // Build baseline REF map from API field crop_ref_cost
+        // Build baseline reference factor map from API field crop_ref_factors
         // Baseline (reference) factors: store rows by crop+key
         cropRefFactorByCropKey = new Map();
         for (const r of (json.crop_ref_factors || [])) {
@@ -1489,6 +1709,8 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         return t ? t.total_weighted_score : null;
     }
 
+    initWorkspaceModal()
+
     // ---- UI wiring ----
     els.mcaComputeBtn?.addEventListener('click', () => compute());
 
@@ -1497,14 +1719,28 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         if (resultsCache) renderRawTimeseries(resultsCache);
     });
 
+    els.mcaWorkspaceSaveBtn?.addEventListener('click', () => {
+        openWorkspaceModal({ saveAsNew: false });
+    });
+
+    els.mcaWorkspaceSaveAsBtn?.addEventListener('click', () => {
+        openWorkspaceModal({ saveAsNew: true });
+    });
+
+    els.mcaWorkspaceSelect?.addEventListener('change', () => {
+        updateWorkspaceActionUi();
+    });
+
     return {
         loadActivePreset,
+        refreshWorkspaceList,
         compute,
         getScenarioScore,
         hasResults: () => !!resultsCache,
         setAllowedCrops,
         setAvailableRuns,
         getBaselineRunId: () => baselineRunId,
+        getPreferredWorkspaceDatasetIds: () => preferredWorkspaceDatasetIds.slice(),
         ensureRunInputsLoaded,
         getLocalInputsForRun,
         getRunVarNum,
