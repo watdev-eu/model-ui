@@ -5,13 +5,13 @@ $pageTitle   = 'Database migrations';
 $pageButtons = [];
 
 require_once __DIR__ . '/config/app.php';
-//require_admin();  // Protect the page
+require_once __DIR__ . '/classes/Auth.php';
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/includes/layout.php';
 
 $pdo = Database::pdo();
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-
+Auth::requireAdmin();
 $migrationsDir = __DIR__ . '/../db/migrations';
 
 // If the directory does not exist, just show a notice and bail out gracefully

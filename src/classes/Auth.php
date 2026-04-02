@@ -85,6 +85,26 @@ final class Auth
         exit;
     }
 
+    public static function requireAdvanced(): void
+    {
+        self::requireLogin();
+
+        if (!self::isAdvanced()) {
+            http_response_code(403);
+            exit('Forbidden');
+        }
+    }
+
+    public static function requireAdmin(): void
+    {
+        self::requireLogin();
+
+        if (!self::isAdmin()) {
+            http_response_code(403);
+            exit('Forbidden');
+        }
+    }
+
     public static function requireRole(string $role): void
     {
         self::requireLogin();
