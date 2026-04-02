@@ -169,4 +169,58 @@ final class SwatRunRepository
         $stmt = $pdo->prepare("DELETE FROM swat_runs WHERE id = :id");
         $stmt->execute([':id' => $id]);
     }
+
+    public static function visibleForStudyAreaId(int $studyAreaId, ?string $userId): array
+    {
+        $pdo = Database::pdo();
+
+        $stmt = $pdo->prepare("
+            SELECT
+                r.*,
+                sa.name AS study_area_name,
+                sa.id   AS study_area_id
+            FROM swat_runs r
+            JOIN study_areas sa ON sa.id = r.study_area
+            WHERE r.study_area = :study_area_id
+              AND (
+                    r.is_default = TRUE
+                    OR r.visibility = 'public'
+                    OR (:has_user = 1 AND r.created_by = :created_by)
+              )
+            ORDER BY r.is_default DESC, r.run_date DESC NULLS LAST, r.created_at DESC
+        ");
+
+        $stmt->execute([
+            ':study_area_id' => $studyAreaId,
+            ':has_user'      => $userId !== null ? 1 : 0,
+            ':created_by'    => $userId,
+        ]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public static function userCanAccess(int $runId, ?string $userId): bool
+    {
+        $pdo = Database::pdo();
+
+        $stmt = $pdo->prepare("
+        SELECT 1
+        FROM swat_runs
+        WHERE id = :id
+          AND (
+                is_default = TRUE
+                OR visibility = 'public'
+                OR (:has_user = 1 AND created_by = :created_by)
+          )
+        LIMIT 1
+    ");
+
+        $stmt->execute([
+            ':id'         => $runId,
+            ':has_user'   => $userId !== null ? 1 : 0,
+            ':created_by' => $userId,
+        ]);
+
+        return (bool)$stmt->fetchColumn();
+    }
 }
