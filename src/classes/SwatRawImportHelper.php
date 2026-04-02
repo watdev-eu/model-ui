@@ -1,5 +1,5 @@
 <?php
-// classes/SwatImportHelper.php
+// classes/SwatRawImportHelper.php
 
 declare(strict_types=1);
 
@@ -330,182 +330,6 @@ final class SwatRawImportHelper
             'period_end_guess' => $maxDate,
             'ok' => $rowCount > 0,
         ];
-    }
-
-    public static function convertHruToCsv(string $rawPath, array $cio, string $targetCsvPath): void
-    {
-        $fh = fopen($rawPath, 'rb');
-        if (!$fh) {
-            throw new RuntimeException("Cannot open output.hru: {$rawPath}");
-        }
-
-        $out = fopen($targetCsvPath, 'wb');
-        if (!$out) {
-            fclose($fh);
-            throw new RuntimeException("Cannot create temp CSV: {$targetCsvPath}");
-        }
-
-        $header = [
-            'LULC','HRU','HRUGIS','SUB','YEAR','MON',
-            'AREAkm2','PRECIPmm','SNOWFALLmm','SNOWMELTmm','IRRmm','PETmm','ETmm',
-            'SW_INITmm','SW_ENDmm','PERCmm','GW_RCHGmm','DA_RCHGmm','REVAPmm',
-            'SA_IRRmm','DA_IRRmm','SA_STmm','DA_STmm','SURQ_GENmm','SURQ_CNTmm',
-            'TLOSS_mm','LATQ_mm','GW_Qmm','WYLD_Qmm','DAILYCN','TMP_AVdgC','TMP_MXdgC',
-            'TMP_MNdgC','SOL_TMPdgC','SOLARmj_m2','SYLDt_ha','USLEt_ha','N_APPkg_ha',
-            'P_APPkg_ha','N_AUTOkg_ha','P_AUTOkg_ha','NGRZkg_ha','PGRZkg_ha','NCFRTkg_ha',
-            'PCFRTkg_ha','NRAINkg_ha','NFIXkg_ha','F_MNkg_ha','A_MNkg_ha','A_SNkg_ha',
-            'F_MPkg_aha','AO_LPkg_ha','L_APkg_ha','A_SPkg_ha','DNITkg_ha','NUP_kg_ha',
-            'PUPkg_ha','ORGNkg_ha','ORGPkg_ha','SEDPkg_h','NSURQkg_ha','NLATQkg_ha',
-            'NO3Lkg_ha','NO3GWkg_ha','SOLPkg_ha','P_GWkg_ha','W_STRS','TMP_STRS',
-            'N_STRS','P_STRS','BIOMt_ha','LAI','YLDt_ha','BACTPct','BACTLPct',
-            'WATB_CLI','WATB_SOL','SNOmm','CMUPkg_ha','CMTOTkg_ha','QTILEmm',
-            'TNO3kg_ha','LNO3kg_ha'
-        ];
-        fputcsv($out, $header);
-
-        $baseYear = (int)$cio['printed_begin_year'];
-        $monthIndex = 0;
-        $firstSequenceKey = null;
-        $seenAtLeastOneRow = false;
-        $lineNo = 0;
-
-        while (($line = fgets($fh)) !== false) {
-            $lineNo++;
-
-            $row = self::parseHruLine($line);
-            if ($row === null) {
-                continue;
-            }
-
-            [$year, $mon, $monthIndex, $firstSequenceKey, $seenAtLeastOneRow] =
-                self::deriveHruYearMonth(
-                    $row,
-                    $baseYear,
-                    $monthIndex,
-                    $firstSequenceKey,
-                    $seenAtLeastOneRow
-                );
-
-            $row['YEAR'] = $year;
-            $row['MON']  = $mon;
-
-            self::assertValidHruRow($row, trim($line), $lineNo);
-
-            $ordered = [];
-            foreach ($header as $col) {
-                $ordered[] = $row[$col] ?? '';
-            }
-            fputcsv($out, $ordered);
-        }
-
-        fclose($fh);
-        fclose($out);
-    }
-
-    public static function convertRchToCsv(string $rawPath, array $cio, string $targetCsvPath): void
-    {
-        $fh = fopen($rawPath, 'rb');
-        if (!$fh) {
-            throw new RuntimeException("Cannot open output.rch: {$rawPath}");
-        }
-
-        $out = fopen($targetCsvPath, 'wb');
-        if (!$out) {
-            fclose($fh);
-            throw new RuntimeException("Cannot create temp CSV: {$targetCsvPath}");
-        }
-
-        $header = [
-            'SUB','YEAR','MON','AREAkm2','FLOW_INcms','FLOW_OUTcms','EVAPcms','TLOSScms',
-            'SED_INtons','SED_OUTtons','SEDCONCmg_kg','ORGN_INkg','ORGN_OUTkg','ORGP_INkg','ORGP_OUTkg',
-            'NO3_INkg','NO3_OUTkg','NH4_INkg','NH4_OUTkg','NO2_INkg','NO2_OUTkg','MINP_INkg','MINP_OUTkg',
-            'CHLA_INkg','CHLA_OUTkg','CBOD_INkg','CBOD_OUTkg','DISOX_INkg','DISOX_OUTkg',
-            'SOLPST_INmg','SOLPST_OUTmg','SORPST_INmg','SORPST_OUTmg','REACTPTmg','VOLPSTmg',
-            'SETTLPST_mg','RESUSP_PSTmg','DIFUSEPSTmg','REACHBEDPSTmg','BURYPSTmg','BED_PSTmg',
-            'BACTP_OUTct','BACTLP_OUTct','CMETAL1kg','CMETAL2kg','CMETAL3kg','TOT_Nkg','TOT_Pkg',
-            'NO3CONCmg_l','WTMPdegc'
-        ];
-        fputcsv($out, $header);
-
-        $year = (int)$cio['printed_begin_year'];
-        $prevMon = null;
-        $lineNo = 0;
-
-        while (($line = fgets($fh)) !== false) {
-            $lineNo++;
-
-            $row = self::parseRchLine($line);
-            if ($row === null) {
-                continue;
-            }
-
-            $mon = (int)$row['MON'];
-
-            if ($prevMon !== null && $mon < $prevMon) {
-                $year++;
-            }
-            $prevMon = $mon;
-            $row['YEAR'] = $year;
-
-            self::assertValidRchRow($row, trim($line), $lineNo);
-
-            $ordered = [];
-            foreach ($header as $col) {
-                $ordered[] = $row[$col] ?? '';
-            }
-            fputcsv($out, $ordered);
-        }
-
-        fclose($fh);
-        fclose($out);
-    }
-
-    public static function convertSnuToCsv(string $rawPath, array $cio, string $targetCsvPath): void
-    {
-        $fh = fopen($rawPath, 'rb');
-        if (!$fh) {
-            throw new RuntimeException("Cannot open output.snu: {$rawPath}");
-        }
-
-        $out = fopen($targetCsvPath, 'wb');
-        if (!$out) {
-            fclose($fh);
-            throw new RuntimeException("Cannot create temp CSV: {$targetCsvPath}");
-        }
-
-        $header = ['YEAR','DAY','HRUGIS','SOL_RSD','SOL_P','NO3','ORG_N','ORG_P','CN'];
-        fputcsv($out, $header);
-
-        $year = (int)$cio['printed_begin_year'];
-        $prevDay = null;
-        $lineNo = 0;
-
-        while (($line = fgets($fh)) !== false) {
-            $lineNo++;
-
-            $row = self::parseSnuLine($line);
-            if ($row === null) {
-                continue;
-            }
-
-            $day = (int)$row['DAY'];
-            if ($prevDay !== null && $day < $prevDay) {
-                $year++;
-            }
-            $prevDay = $day;
-            $row['YEAR'] = $year;
-
-            self::assertValidSnuRow($row, trim($line), $lineNo);
-
-            $ordered = [];
-            foreach ($header as $col) {
-                $ordered[] = $row[$col] ?? '';
-            }
-            fputcsv($out, $ordered);
-        }
-
-        fclose($fh);
-        fclose($out);
     }
 
     public static function buildPreviewTable(array $header, array $rows): string
@@ -865,81 +689,34 @@ final class SwatRawImportHelper
         return $a >= $b ? $a : $b;
     }
 
-    private static function isNumericToken(?string $v): bool
+    public static function parseHruDataLine(string $line): ?array
     {
-        $v = trim((string)$v);
-        if ($v === '') {
-            return true;
-        }
-
-        return (bool)preg_match('/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?$/', $v);
+        return self::parseHruLine($line);
     }
 
-    private static function assertValidHruRow(array $row, string $rawLine, int $lineNo): void
+    public static function parseRchDataLine(string $line): ?array
     {
-        $numericFields = [
-            'AREAkm2','PRECIPmm','SNOWFALLmm','SNOWMELTmm','IRRmm','PETmm','ETmm',
-            'SW_INITmm','SW_ENDmm','PERCmm','GW_RCHGmm','DA_RCHGmm','REVAPmm',
-            'SA_IRRmm','DA_IRRmm','SA_STmm','DA_STmm','SURQ_GENmm','SURQ_CNTmm',
-            'TLOSS_mm','LATQ_mm','GW_Qmm','WYLD_Qmm','DAILYCN','TMP_AVdgC','TMP_MXdgC',
-            'TMP_MNdgC','SOL_TMPdgC','SOLARmj_m2','SYLDt_ha','USLEt_ha','N_APPkg_ha',
-            'P_APPkg_ha','N_AUTOkg_ha','P_AUTOkg_ha','NGRZkg_ha','PGRZkg_ha','NCFRTkg_ha',
-            'PCFRTkg_ha','NRAINkg_ha','NFIXkg_ha','F_MNkg_ha','A_MNkg_ha','A_SNkg_ha',
-            'F_MPkg_aha','AO_LPkg_ha','L_APkg_ha','A_SPkg_ha','DNITkg_ha','NUP_kg_ha',
-            'PUPkg_ha','ORGNkg_ha','ORGPkg_ha','SEDPkg_h','NSURQkg_ha','NLATQkg_ha',
-            'NO3Lkg_ha','NO3GWkg_ha','SOLPkg_ha','P_GWkg_ha','W_STRS','TMP_STRS',
-            'N_STRS','P_STRS','BIOMt_ha','LAI','YLDt_ha','BACTPct','BACTLPct',
-            'WATB_CLI','WATB_SOL','SNOmm','CMUPkg_ha','CMTOTkg_ha','QTILEmm',
-            'TNO3kg_ha','LNO3kg_ha','GW_Q_Dmm','LATQCNTmm','TVAPkg_ha'
-        ];
-
-        foreach ($numericFields as $field) {
-            if (!self::isNumericToken($row[$field] ?? null)) {
-                throw new RuntimeException(
-                    "Invalid HRU numeric token at raw line {$lineNo}, field {$field}: " .
-                    json_encode($row[$field] ?? null) .
-                    " | raw=" . $rawLine
-                );
-            }
-        }
+        return self::parseRchLine($line);
     }
 
-    private static function assertValidRchRow(array $row, string $rawLine, int $lineNo): void
+    public static function parseSnuDataLine(string $line): ?array
     {
-        $numericFields = [
-            'AREAkm2','FLOW_INcms','FLOW_OUTcms','EVAPcms','TLOSScms',
-            'SED_INtons','SED_OUTtons','SEDCONCmg_kg','ORGN_INkg','ORGN_OUTkg',
-            'ORGP_INkg','ORGP_OUTkg','NO3_INkg','NO3_OUTkg','NH4_INkg','NH4_OUTkg',
-            'NO2_INkg','NO2_OUTkg','MINP_INkg','MINP_OUTkg','CHLA_INkg','CHLA_OUTkg',
-            'CBOD_INkg','CBOD_OUTkg','DISOX_INkg','DISOX_OUTkg','SOLPST_INmg','SOLPST_OUTmg',
-            'SORPST_INmg','SORPST_OUTmg','REACTPTmg','VOLPSTmg','SETTLPST_mg','RESUSP_PSTmg',
-            'DIFUSEPSTmg','REACHBEDPSTmg','BURYPSTmg','BED_PSTmg','BACTP_OUTct','BACTLP_OUTct',
-            'CMETAL1kg','CMETAL2kg','CMETAL3kg','TOT_Nkg','TOT_Pkg','NO3CONCmg_l','WTMPdegc'
-        ];
-
-        foreach ($numericFields as $field) {
-            if (!self::isNumericToken($row[$field] ?? null)) {
-                throw new RuntimeException(
-                    "Invalid RCH numeric token at raw line {$lineNo}, field {$field}: " .
-                    json_encode($row[$field] ?? null) .
-                    " | raw=" . $rawLine
-                );
-            }
-        }
+        return self::parseSnuLine($line);
     }
 
-    private static function assertValidSnuRow(array $row, string $rawLine, int $lineNo): void
-    {
-        $numericFields = ['SOL_RSD','SOL_P','NO3','ORG_N','ORG_P','CN'];
-
-        foreach ($numericFields as $field) {
-            if (!self::isNumericToken($row[$field] ?? null)) {
-                throw new RuntimeException(
-                    "Invalid SNU numeric token at raw line {$lineNo}, field {$field}: " .
-                    json_encode($row[$field] ?? null) .
-                    " | raw=" . $rawLine
-                );
-            }
-        }
+    public static function deriveHruYearMonthPublic(
+        array $row,
+        int $baseYear,
+        int $monthIndex,
+        ?string $firstSequenceKey,
+        bool $seenAtLeastOneRow
+    ): array {
+        return self::deriveHruYearMonth(
+            $row,
+            $baseYear,
+            $monthIndex,
+            $firstSequenceKey,
+            $seenAtLeastOneRow
+        );
     }
 }

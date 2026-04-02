@@ -1374,11 +1374,8 @@ final class McaComputeService
                         'series' => [],
                     ];
                 } elseif (($ds['dataset_type'] ?? 'run') === 'custom') {
-                    $warnings[] = "dataset {$datasetId}: water_rights_access is not yet implemented for merged custom scenarios.";
-                    $results['raw']['by_dataset'][$datasetId]['water_rights_access'] = [
-                        'raw' => null,
-                        'series' => [],
-                    ];
+                    $results['raw']['by_dataset'][$datasetId]['water_rights_access'] =
+                        self::buildMergedCustomDatasetWaterRightsSeries($ds, (float)$farmSizeHa);
                 } else {
                     $sourceRunId = (int)($ds['source_run_ids'][0] ?? 0);
                     $w = McaWaterRightsRepository::getIrrigatedAreaHaMonthlyAndYearlyAvg($sourceRunId, []);
@@ -1683,6 +1680,178 @@ final class McaComputeService
                 'crop_ref_factors'    => $payload['crop_ref_factors'] ?? [],
                 'preset_items'        => $presetItems,
                 'crop_code'           => $cropFilter,
+            ],
+        ];
+    }
+
+    private static function loadIrrigationAreaContextByRun(int $runId): array
+    {
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare("
+        SELECT year, month, sub, irrigated_area_ha
+        FROM swat_irrigation_area_context
+        WHERE run_id = :run_id
+        ORDER BY year, month, sub
+    ");
+        $stmt->execute([':run_id' => $runId]);
+
+        $out = [];
+        while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $year = (int)($r['year'] ?? 0);
+            $month = (int)($r['month'] ?? 0);
+            $sub = (int)($r['sub'] ?? 0);
+            $ha = isset($r['irrigated_area_ha']) && is_numeric($r['irrigated_area_ha'])
+                ? (float)$r['irrigated_area_ha']
+                : 0.0;
+
+            if ($year <= 0 || $month < 1 || $month > 12 || $sub <= 0) {
+                continue;
+            }
+
+            $out[$sub][$year][$month] = $ha;
+        }
+
+        ksort($out);
+        foreach ($out as $sub => $years) {
+            ksort($out[$sub]);
+            foreach ($out[$sub] as $year => $months) {
+                ksort($out[$sub][$year]);
+            }
+        }
+
+        return $out;
+    }
+
+    private static function buildMergedCustomDatasetWaterRightsSeries(
+        array $datasetCtx,
+        float $farmSizeHa
+    ): array {
+        $effectiveRunMap = is_array($datasetCtx['effective_run_map'] ?? null)
+            ? $datasetCtx['effective_run_map']
+            : [];
+
+        if (!$effectiveRunMap || $farmSizeHa <= 0) {
+            return [
+                'raw' => null,
+                'series' => [],
+                'debug' => [
+                    'farm_size_ha' => $farmSizeHa,
+                    'yearly_avg_monthly_irrigated_area_ha' => [],
+                    'monthly_total_irrigated_area_ha' => [],
+                    'yearly_avg_monthly_irrigated_area_ha_by_sub' => [],
+                    'monthly_irrigated_area_ha_by_sub' => [],
+                    'yearly_irrigated_farms_by_sub' => [],
+                ],
+            ];
+        }
+
+        $monthlyBySub = [];
+
+        $cacheByRun = [];
+        foreach (array_values(array_unique(array_map('intval', array_values($effectiveRunMap)))) as $runId) {
+            if ($runId > 0) {
+                $cacheByRun[$runId] = self::loadIrrigationAreaContextByRun($runId);
+            }
+        }
+
+        foreach ($effectiveRunMap as $sub => $sourceRunId) {
+            $sub = (int)$sub;
+            $sourceRunId = (int)$sourceRunId;
+            if ($sub <= 0 || $sourceRunId <= 0) {
+                continue;
+            }
+
+            $runData = $cacheByRun[$sourceRunId][$sub] ?? null;
+            if (!is_array($runData)) {
+                continue;
+            }
+
+            foreach ($runData as $year => $months) {
+                foreach ($months as $month => $ha) {
+                    $monthKey = sprintf('%04d-%02d-01', (int)$year, (int)$month);
+                    $monthlyBySub[$sub][$monthKey] = (float)$ha;
+                }
+            }
+        }
+
+        $monthlyTotal = [];
+        $monthsByYear = [];
+        foreach ($monthlyBySub as $sub => $series) {
+            foreach ($series as $monthKey => $ha) {
+                $monthlyTotal[$monthKey] = ($monthlyTotal[$monthKey] ?? 0.0) + (float)$ha;
+                $year = (int)substr($monthKey, 0, 4);
+                $monthsByYear[$year][$monthKey] = true;
+            }
+        }
+
+        $yearlyTotal = [];
+        foreach ($monthsByYear as $year => $monthSet) {
+            $sum = 0.0;
+            $n = 0;
+            foreach (array_keys($monthSet) as $m) {
+                if (isset($monthlyTotal[$m])) {
+                    $sum += (float)$monthlyTotal[$m];
+                    $n++;
+                }
+            }
+            $yearlyTotal[(int)$year] = $n > 0 ? ($sum / $n) : 0.0;
+        }
+
+        $yearlyBySub = [];
+        foreach ($monthlyBySub as $sub => $series) {
+            foreach ($monthsByYear as $year => $monthSet) {
+                $sum = 0.0;
+                $n = 0;
+                foreach (array_keys($monthSet) as $m) {
+                    if (isset($series[$m])) {
+                        $sum += (float)$series[$m];
+                        $n++;
+                    }
+                }
+                if ($n > 0) {
+                    $yearlyBySub[(int)$sub][(int)$year] = $sum / $n;
+                }
+            }
+        }
+
+        $seriesYearly = [];
+        foreach ($yearlyTotal as $year => $irrHaAvg) {
+            $seriesYearly[(int)$year] = ((float)$irrHaAvg) / $farmSizeHa;
+        }
+
+        $seriesYearlyBySub = [];
+        foreach ($yearlyBySub as $sub => $yearMap) {
+            foreach ($yearMap as $year => $irrHaAvg) {
+                $seriesYearlyBySub[(int)$sub][(int)$year] = ((float)$irrHaAvg) / $farmSizeHa;
+            }
+        }
+
+        ksort($monthlyTotal);
+        ksort($yearlyTotal);
+        ksort($monthlyBySub);
+        foreach ($monthlyBySub as $sub => $s) {
+            ksort($monthlyBySub[$sub]);
+        }
+        ksort($yearlyBySub);
+        foreach ($yearlyBySub as $sub => $s) {
+            ksort($yearlyBySub[$sub]);
+        }
+        ksort($seriesYearly);
+        ksort($seriesYearlyBySub);
+        foreach ($seriesYearlyBySub as $sub => $s) {
+            ksort($seriesYearlyBySub[$sub]);
+        }
+
+        return [
+            'raw' => self::mean(array_values($seriesYearly)),
+            'series' => $seriesYearly,
+            'debug' => [
+                'farm_size_ha' => $farmSizeHa,
+                'yearly_avg_monthly_irrigated_area_ha' => $yearlyTotal,
+                'monthly_total_irrigated_area_ha' => $monthlyTotal,
+                'yearly_avg_monthly_irrigated_area_ha_by_sub' => $yearlyBySub,
+                'monthly_irrigated_area_ha_by_sub' => $monthlyBySub,
+                'yearly_irrigated_farms_by_sub' => $seriesYearlyBySub,
             ],
         ];
     }

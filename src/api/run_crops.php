@@ -38,12 +38,12 @@ try {
 
     foreach ($runIds as $runId) {
         $stmt = $pdo->prepare("
-            SELECT DISTINCT h.lulc
-            FROM swat_hru_kpi h
-            WHERE h.run_id = :run_id
-              AND h.lulc IS NOT NULL
-              AND h.lulc <> ''
-            ORDER BY h.lulc
+            SELECT DISTINCT crop
+            FROM swat_crop_area_context
+            WHERE run_id = :run_id
+              AND crop IS NOT NULL
+              AND crop <> ''
+            ORDER BY crop
         ");
         $stmt->execute([':run_id' => $runId]);
         $crops = $stmt->fetchAll(PDO::FETCH_COLUMN);

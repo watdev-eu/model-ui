@@ -9,6 +9,7 @@ require_once __DIR__ . '/Auth.php';
 require_once __DIR__ . '/CropRepository.php';
 require_once __DIR__ . '/RunLicenseRepository.php';
 require_once __DIR__ . '/SwatRawImportHelper.php';
+require_once __DIR__ . '/SwatYearlyMaterializer.php';
 
 final class SwatRawRunImportService
 {
@@ -91,14 +92,9 @@ final class SwatRawRunImportService
             throw new RuntimeException('One or more required uploaded files are missing.');
         }
 
-        $normalized = self::buildNormalizedFiles($baseDir, $rawFiles, $cioMeta);
-
         $pg = null;
         $txStarted = false;
         $runId = null;
-        $tmpHruQ = null;
-        $tmpRchQ = null;
-        $tmpSnuQ = null;
 
         try {
             $pg = self::pgConnFromEnv();
@@ -135,18 +131,16 @@ final class SwatRawRunImportService
 
             self::insertRunSubbasins($pg, $runId, $studyAreaId, $selectedSubbasins);
 
-            $tmpHruQ = self::pgIdent($pg, 'public', 'tmp_hru_import_' . $runId);
-            $tmpRchQ = self::pgIdent($pg, 'public', 'tmp_rch_import_' . $runId);
-            $tmpSnuQ = self::pgIdent($pg, 'public', 'tmp_snu_import_' . $runId);
+            $artifacts = SwatYearlyMaterializer::buildImportArtifacts(
+                $rawFiles,
+                $cioMeta,
+                $selectedSubbasins
+            );
 
-            self::importHru($pg, $tmpHruQ, $normalized['hru'], $runId, $selectedSubbasins);
-
-            if (!empty($normalized['rch']) && is_file($normalized['rch'])) {
-                self::importRch($pg, $tmpRchQ, $normalized['rch'], $runId, $selectedSubbasins);
-            }
-
-            self::importSnu($pg, $tmpSnuQ, $normalized['snu'], $runId);
-            self::updateRunDateRange($pg, $runId);
+            self::insertYearlyIndicatorRows($pg, $runId, $artifacts['yearly_rows'] ?? []);
+            self::insertCropAreaContextRows($pg, $runId, $artifacts['crop_area_rows'] ?? []);
+            self::insertIrrigationAreaContextRows($pg, $runId, $artifacts['irrigation_area_rows'] ?? []);
+            self::updateRunDateRangeFromMetaOrYearly($pg, $runId, $meta);
 
             self::pgExec($pg, "COMMIT");
             $txStarted = false;
@@ -158,9 +152,6 @@ final class SwatRawRunImportService
                 @pg_query($pg, "ROLLBACK");
             }
             if ($pg) {
-                if ($tmpHruQ) @pg_query($pg, "DROP TABLE IF EXISTS {$tmpHruQ}");
-                if ($tmpRchQ) @pg_query($pg, "DROP TABLE IF EXISTS {$tmpRchQ}");
-                if ($tmpSnuQ) @pg_query($pg, "DROP TABLE IF EXISTS {$tmpSnuQ}");
                 @pg_close($pg);
             }
             throw $e;
@@ -228,27 +219,6 @@ final class SwatRawRunImportService
         }
     }
 
-    private static function buildNormalizedFiles(string $baseDir, array $rawFiles, array $cioMeta): array
-    {
-        $normalized = [
-            'hru' => $baseDir . '/normalized_hru.csv',
-            'rch' => $baseDir . '/normalized_rch.csv',
-            'snu' => $baseDir . '/normalized_snu.csv',
-        ];
-
-        SwatRawImportHelper::convertHruToCsv($rawFiles['hru'], $cioMeta, $normalized['hru']);
-
-        if (!empty($rawFiles['rch'])) {
-            SwatRawImportHelper::convertRchToCsv($rawFiles['rch'], $cioMeta, $normalized['rch']);
-        } else {
-            $normalized['rch'] = null;
-        }
-
-        SwatRawImportHelper::convertSnuToCsv($rawFiles['snu'], $cioMeta, $normalized['snu']);
-
-        return $normalized;
-    }
-
     private static function insertRun(
         $pg,
         int $studyAreaId,
@@ -274,7 +244,7 @@ final class SwatRawRunImportService
               ($1,$2,$3,$4,$5,$6,
                $7,$8,$9,$10,
                $11,$12,FALSE,
-               NULL,NULL,'MONTHLY')
+               NULL,NULL,'YEARLY')
             RETURNING id
         ", [
             $studyAreaId,
@@ -306,158 +276,6 @@ final class SwatRawRunImportService
                 VALUES ($1, $2, $3)
                 RETURNING run_id
             ", [$runId, $studyAreaId, $sub]);
-        }
-    }
-
-    private static function importHru($pg, string $tmpHruQ, string $normalizedHru, int $runId, array $selectedSubbasins): void
-    {
-        self::pgExec($pg, "DROP TABLE IF EXISTS {$tmpHruQ}");
-        self::pgExec($pg, "CREATE UNLOGGED TABLE {$tmpHruQ} (
-            LULC VARCHAR(16), HRU INTEGER, HRUGIS INTEGER, SUB INTEGER, YEAR INTEGER, MON INTEGER,
-            AREAkm2 TEXT, PRECIPmm TEXT, SNOWFALLmm TEXT, SNOWMELTmm TEXT, IRRmm TEXT, PETmm TEXT, ETmm TEXT,
-            SW_INITmm TEXT, SW_ENDmm TEXT, PERCmm TEXT, GW_RCHGmm TEXT, DA_RCHGmm TEXT, REVAPmm TEXT,
-            SA_IRRmm TEXT, DA_IRRmm TEXT, SA_STmm TEXT, DA_STmm TEXT, SURQ_GENmm TEXT, SURQ_CNTmm TEXT,
-            TLOSS_mm TEXT, LATQ_mm TEXT, GW_Qmm TEXT, WYLD_Qmm TEXT, DAILYCN TEXT, TMP_AVdgC TEXT,
-            TMP_MXdgC TEXT, TMP_MNdgC TEXT, SOL_TMPdgC TEXT, SOLARmj_m2 TEXT, SYLDt_ha TEXT, USLEt_ha TEXT,
-            N_APPkg_ha TEXT, P_APPkg_ha TEXT, N_AUTOkg_ha TEXT, P_AUTOkg_ha TEXT, NGRZkg_ha TEXT,
-            PGRZkg_ha TEXT, NCFRTkg_ha TEXT, PCFRTkg_ha TEXT, NRAINkg_ha TEXT, NFIXkg_ha TEXT,
-            F_MNkg_ha TEXT, A_MNkg_ha TEXT, A_SNkg_ha TEXT, F_MPkg_aha TEXT, AO_LPkg_ha TEXT,
-            L_APkg_ha TEXT, A_SPkg_ha TEXT, DNITkg_ha TEXT, NUP_kg_ha TEXT, PUPkg_ha TEXT,
-            ORGNkg_ha TEXT, ORGPkg_ha TEXT, SEDPkg_h TEXT, NSURQkg_ha TEXT, NLATQkg_ha TEXT,
-            NO3Lkg_ha TEXT, NO3GWkg_ha TEXT, SOLPkg_ha TEXT, P_GWkg_ha TEXT, W_STRS TEXT, TMP_STRS TEXT,
-            N_STRS TEXT, P_STRS TEXT, BIOMt_ha TEXT, LAI TEXT, YLDt_ha TEXT, BACTPct TEXT, BACTLPct TEXT,
-            WATB_CLI TEXT, WATB_SOL TEXT, SNOmm TEXT, CMUPkg_ha TEXT, CMTOTkg_ha TEXT, QTILEmm TEXT,
-            TNO3kg_ha TEXT, LNO3kg_ha TEXT
-        )");
-
-        self::pgCopyFromCsvFile($pg, $tmpHruQ, $normalizedHru);
-
-        self::pgExec($pg, "
-            INSERT INTO swat_hru_kpi (
-                run_id, hru, sub, gis, lulc, period_date, period_res,
-                area_km2, irr_mm, irr_sa_mm, irr_da_mm,
-                yld_t_ha, biom_t_ha, syld_t_ha,
-                nup_kg_ha, pup_kg_ha, no3l_kg_ha,
-                n_app_kg_ha, p_app_kg_ha, nauto_kg_ha, pauto_kg_ha,
-                ngraz_kg_ha, pgraz_kg_ha, cfertn_kg_ha, cfertp_kg_ha
-            )
-            SELECT
-                {$runId}, HRU, SUB, HRUGIS, LULC,
-                make_date(YEAR, MON, 1), 'MONTHLY'::period_res_enum,
-                NULLIF(AREAkm2, '')::double precision,
-                NULLIF(IRRmm, '')::double precision,
-                NULLIF(SA_IRRmm, '')::double precision,
-                NULLIF(DA_IRRmm, '')::double precision,
-                NULLIF(YLDt_ha, '')::double precision,
-                NULLIF(BIOMt_ha, '')::double precision,
-                NULLIF(SYLDt_ha, '')::double precision,
-                NULLIF(NUP_kg_ha, '')::double precision,
-                NULLIF(PUPkg_ha, '')::double precision,
-                NULLIF(NO3Lkg_ha, '')::double precision,
-                NULLIF(N_APPkg_ha, '')::double precision,
-                NULLIF(P_APPkg_ha, '')::double precision,
-                NULLIF(N_AUTOkg_ha, '')::double precision,
-                NULLIF(P_AUTOkg_ha, '')::double precision,
-                NULLIF(NGRZkg_ha, '')::double precision,
-                NULLIF(PGRZkg_ha, '')::double precision,
-                NULLIF(NCFRTkg_ha, '')::double precision,
-                NULLIF(PCFRTkg_ha, '')::double precision
-            FROM {$tmpHruQ}
-            WHERE YEAR > 0 AND MON > 0
-              AND SUB IN (" . implode(',', array_map('intval', $selectedSubbasins)) . ")
-        ");
-    }
-
-    private static function importRch($pg, string $tmpRchQ, string $normalizedRch, int $runId, array $selectedSubbasins): void
-    {
-        self::pgExec($pg, "DROP TABLE IF EXISTS {$tmpRchQ}");
-        self::pgExec($pg, "CREATE UNLOGGED TABLE {$tmpRchQ} (
-            SUB INTEGER, YEAR INTEGER, MON INTEGER, AREAkm2 TEXT,
-            FLOW_INcms TEXT, FLOW_OUTcms TEXT, EVAPcms TEXT, TLOSScms TEXT,
-            SED_INtons TEXT, SED_OUTtons TEXT, SEDCONCmg_kg TEXT,
-            ORGN_INkg TEXT, ORGN_OUTkg TEXT, ORGP_INkg TEXT, ORGP_OUTkg TEXT,
-            NO3_INkg TEXT, NO3_OUTkg TEXT, NH4_INkg TEXT, NH4_OUTkg TEXT,
-            NO2_INkg TEXT, NO2_OUTkg TEXT, MINP_INkg TEXT, MINP_OUTkg TEXT,
-            CHLA_INkg TEXT, CHLA_OUTkg TEXT, CBOD_INkg TEXT, CBOD_OUTkg TEXT,
-            DISOX_INkg TEXT, DISOX_OUTkg TEXT, SOLPST_INmg TEXT, SOLPST_OUTmg TEXT,
-            SORPST_INmg TEXT, SORPST_OUTmg TEXT, REACTPTmg TEXT, VOLPSTmg TEXT,
-            SETTLPST_mg TEXT, RESUSP_PSTmg TEXT, DIFUSEPSTmg TEXT, REACHBEDPSTmg TEXT,
-            BURYPSTmg TEXT, BED_PSTmg TEXT, BACTP_OUTct TEXT, BACTLP_OUTct TEXT,
-            CMETAL1kg TEXT, CMETAL2kg TEXT, CMETAL3kg TEXT, TOT_Nkg TEXT, TOT_Pkg TEXT,
-            NO3CONCmg_l TEXT, WTMPdegc TEXT
-        )");
-
-        self::pgCopyFromCsvFile($pg, $tmpRchQ, $normalizedRch);
-
-        self::pgExec($pg, "
-            INSERT INTO swat_rch_kpi (
-                run_id, rch, sub, area_km2, period_date, period_res,
-                flow_out_cms, no3_out_kg, sed_out_t
-            )
-            SELECT
-                {$runId}, SUB, SUB,
-                NULLIF(AREAkm2, '')::double precision,
-                make_date(YEAR, MON, 1), 'MONTHLY'::period_res_enum,
-                NULLIF(FLOW_OUTcms, '')::double precision,
-                NULLIF(NO3_OUTkg, '')::double precision,
-                NULLIF(SED_OUTtons, '')::double precision
-            FROM {$tmpRchQ}
-            WHERE YEAR > 0 AND MON > 0
-              AND SUB IN (" . implode(',', array_map('intval', $selectedSubbasins)) . ")
-        ");
-    }
-
-    private static function importSnu($pg, string $tmpSnuQ, string $normalizedSnu, int $runId): void
-    {
-        self::pgExec($pg, "DROP TABLE IF EXISTS {$tmpSnuQ}");
-        self::pgExec($pg, "CREATE UNLOGGED TABLE {$tmpSnuQ} (
-            YEAR INTEGER, DAY INTEGER, HRUGIS INTEGER,
-            SOL_RSD TEXT, SOL_P TEXT, NO3 TEXT, ORG_N TEXT, ORG_P TEXT, CN TEXT
-        )");
-
-        self::pgCopyFromCsvFile($pg, $tmpSnuQ, $normalizedSnu);
-
-        self::pgExec($pg, "
-            INSERT INTO swat_snu_kpi (
-                run_id, gisnum, period_date, period_res,
-                sol_p, no3, org_n, org_p, cn, sol_rsd
-            )
-            SELECT
-                {$runId}, HRUGIS,
-                (make_date(YEAR, 1, 1) + (DAY - 1) * INTERVAL '1 day')::date,
-                'DAILY'::period_res_enum,
-                NULLIF(SOL_P, '')::double precision,
-                NULLIF(NO3, '')::double precision,
-                NULLIF(ORG_N, '')::double precision,
-                NULLIF(ORG_P, '')::double precision,
-                NULLIF(CN, '')::double precision,
-                NULLIF(SOL_RSD, '')::double precision
-            FROM {$tmpSnuQ}
-            WHERE YEAR > 0 AND DAY > 0
-        ");
-    }
-
-    private static function updateRunDateRange($pg, int $runId): void
-    {
-        $range = self::pgOne($pg, "
-            SELECT MIN(period_date) AS min_d, MAX(period_date) AS max_d
-            FROM (
-                SELECT period_date FROM swat_hru_kpi WHERE run_id = $1
-                UNION ALL
-                SELECT period_date FROM swat_rch_kpi WHERE run_id = $1
-                UNION ALL
-                SELECT period_date FROM swat_snu_kpi WHERE run_id = $1
-            ) AS u
-        ", [$runId]);
-
-        if ($range && !empty($range['min_d'])) {
-            self::pgExec(
-                $pg,
-                "UPDATE swat_runs
-                 SET period_start = " . pg_escape_literal($pg, $range['min_d']) . ",
-                     period_end = " . pg_escape_literal($pg, $range['max_d']) . "
-                 WHERE id = " . (int)$runId
-            );
         }
     }
 
@@ -532,46 +350,123 @@ final class SwatRawRunImportService
         return array_values($row)[0] ?? null;
     }
 
-    private static function pgIdent($pg, string $schema, string $name): string
+    private static function insertYearlyIndicatorRows($pg, int $runId, array $rows): void
     {
-        return pg_escape_identifier($pg, $schema) . '.' . pg_escape_identifier($pg, $name);
+        if (!$rows) {
+            throw new RuntimeException('No yearly indicator rows were generated from the uploaded files.');
+        }
+
+        $sql = "
+        INSERT INTO swat_indicator_yearly
+            (run_id, indicator_code, year, sub, crop, value)
+        VALUES
+            ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (run_id, indicator_code, year, sub, crop)
+        DO UPDATE SET value = EXCLUDED.value
+    ";
+
+        foreach ($rows as $row) {
+            $res = pg_query_params($pg, $sql, [
+                $runId,
+                (string)$row['indicator_code'],
+                (int)$row['year'],
+                (int)$row['sub'],
+                (string)($row['crop'] ?? ''),
+                $row['value'] !== null ? (float)$row['value'] : null,
+            ]);
+
+            if ($res === false) {
+                throw new RuntimeException('Postgres error: ' . pg_last_error($pg));
+            }
+        }
     }
 
-    private static function pgCopyFromCsvFile($pg, string $table, string $path): void
+    private static function updateRunDateRangeFromMetaOrYearly($pg, int $runId, array $meta): void
     {
-        if (!is_file($path)) {
-            throw new RuntimeException("CSV file not found for COPY: $path");
+        $periodStart = trim((string)($meta['period_start_guess'] ?? ''));
+        $periodEnd   = trim((string)($meta['period_end_guess'] ?? ''));
+
+        if ($periodStart !== '' && $periodEnd !== '') {
+            self::pgExec(
+                $pg,
+                "UPDATE swat_runs
+             SET period_start = " . pg_escape_literal($pg, $periodStart) . ",
+                 period_end = " . pg_escape_literal($pg, $periodEnd) . ",
+                 time_step = 'YEARLY'
+             WHERE id = " . (int)$runId
+            );
+            return;
         }
 
-        $copySql = "COPY {$table} FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER ',')";
-        $res = @pg_query($pg, $copySql);
-        if ($res === false) {
-            throw new RuntimeException('COPY start failed: ' . pg_last_error($pg));
-        }
+        $range = self::pgOne($pg, "
+        SELECT MIN(year) AS min_y, MAX(year) AS max_y
+        FROM swat_indicator_yearly
+        WHERE run_id = $1
+    ", [$runId]);
 
-        $fh = fopen($path, 'rb');
-        if (!$fh) {
-            throw new RuntimeException("Failed to open CSV for COPY: $path");
-        }
+        if ($range && !empty($range['min_y'])) {
+            $fallbackStart = sprintf('%04d-01-01', (int)$range['min_y']);
+            $fallbackEnd   = sprintf('%04d-12-31', (int)$range['max_y']);
 
-        while (!feof($fh)) {
-            $chunk = fread($fh, 1024 * 1024);
-            if ($chunk === false) {
-                fclose($fh);
-                throw new RuntimeException("Failed reading CSV during COPY: $path");
+            self::pgExec(
+                $pg,
+                "UPDATE swat_runs
+             SET period_start = " . pg_escape_literal($pg, $fallbackStart) . ",
+                 period_end = " . pg_escape_literal($pg, $fallbackEnd) . ",
+                 time_step = 'YEARLY'
+             WHERE id = " . (int)$runId
+            );
+        }
+    }
+
+    private static function insertCropAreaContextRows($pg, int $runId, array $rows): void
+    {
+        $sql = "
+        INSERT INTO swat_crop_area_context
+            (run_id, sub, crop, area_ha)
+        VALUES
+            ($1, $2, $3, $4)
+        ON CONFLICT (run_id, sub, crop)
+        DO UPDATE SET area_ha = EXCLUDED.area_ha
+    ";
+
+        foreach ($rows as $row) {
+            $res = pg_query_params($pg, $sql, [
+                $runId,
+                (int)$row['sub'],
+                (string)$row['crop'],
+                (float)$row['area_ha'],
+            ]);
+
+            if ($res === false) {
+                throw new RuntimeException('Postgres error: ' . pg_last_error($pg));
             }
-            if ($chunk !== '') {
-                if (!pg_put_line($pg, $chunk)) {
-                    fclose($fh);
-                    throw new RuntimeException('COPY streaming failed: ' . pg_last_error($pg));
-                }
-            }
         }
-        fclose($fh);
+    }
 
-        pg_put_line($pg, "\\.\n");
-        if (!pg_end_copy($pg)) {
-            throw new RuntimeException('COPY end failed: ' . pg_last_error($pg));
+    private static function insertIrrigationAreaContextRows($pg, int $runId, array $rows): void
+    {
+        $sql = "
+        INSERT INTO swat_irrigation_area_context
+            (run_id, sub, year, month, irrigated_area_ha)
+        VALUES
+            ($1, $2, $3, $4, $5)
+        ON CONFLICT (run_id, sub, year, month)
+        DO UPDATE SET irrigated_area_ha = EXCLUDED.irrigated_area_ha
+    ";
+
+        foreach ($rows as $row) {
+            $res = pg_query_params($pg, $sql, [
+                $runId,
+                (int)$row['sub'],
+                (int)$row['year'],
+                (int)$row['month'],
+                (float)$row['irrigated_area_ha'],
+            ]);
+
+            if ($res === false) {
+                throw new RuntimeException('Postgres error: ' . pg_last_error($pg));
+            }
         }
     }
 }

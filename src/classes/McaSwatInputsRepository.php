@@ -8,9 +8,7 @@ require_once __DIR__ . '/../config/database.php';
 final class McaSwatInputsRepository
 {
     /**
-     * Get crop area (ha) per (sub, crop) from HRU areas.
-     *
-     * We avoid month duplication by taking MAX(area_km2) per (sub,gis,lulc) then summing.
+     * Get crop area (ha) per (sub, crop) from persisted crop-area context.
      *
      * @return array<int, array<string,float>> [sub][crop] => ha
      */
@@ -18,28 +16,12 @@ final class McaSwatInputsRepository
     {
         $pdo = Database::pdo();
 
-        $sql = "
-            WITH hru_one AS (
-                SELECT
-                    h.sub,
-                    h.lulc AS crop,
-                    h.gis,
-                    MAX(COALESCE(h.area_km2,0)) AS area_km2
-                FROM swat_hru_kpi h
-                WHERE h.run_id = :run_id
-                GROUP BY h.sub, h.lulc, h.gis
-            )
-            SELECT
-                sub,
-                crop,
-                SUM(area_km2) * 100.0 AS area_ha
-            FROM hru_one
-            WHERE crop IS NOT NULL AND crop <> ''
-            GROUP BY sub, crop
+        $stmt = $pdo->prepare("
+            SELECT sub, crop, area_ha
+            FROM swat_crop_area_context
+            WHERE run_id = :run_id
             ORDER BY sub, crop
-        ";
-
-        $stmt = $pdo->prepare($sql);
+        ");
         $stmt->execute([':run_id' => $runId]);
 
         $out = [];
@@ -47,12 +29,18 @@ final class McaSwatInputsRepository
             $sub  = (int)($r['sub'] ?? 0);
             $crop = (string)($r['crop'] ?? '');
             $ha   = (isset($r['area_ha']) && is_numeric($r['area_ha'])) ? (float)$r['area_ha'] : null;
-            if ($sub <= 0 || $crop === '' || $ha === null) continue;
+
+            if ($sub <= 0 || $crop === '' || $ha === null) {
+                continue;
+            }
+
             $out[$sub][$crop] = $ha;
         }
 
         ksort($out);
-        foreach ($out as $sub => $m) ksort($out[$sub]);
+        foreach ($out as $sub => $m) {
+            ksort($out[$sub]);
+        }
 
         return $out;
     }
@@ -76,43 +64,58 @@ final class McaSwatInputsRepository
         array $opts = [],
         ?string $cropFilter = null
     ): array {
-        if ($runId <= 0) throw new InvalidArgumentException('runId must be > 0');
+        if ($runId <= 0) {
+            throw new InvalidArgumentException('runId must be > 0');
+        }
 
         $codes = array_values(array_filter(array_map('strval', $swatIndicatorCodes)));
-        if (!$codes) return [];
+        if (!$codes) {
+            return [];
+        }
 
         $raw = SwatResultsRepository::getYearlyMany($runId, $codes, $opts);
-
-        // weights for sub->overall aggregation
         $subCropAreaHa = self::cropAreaHaBySub($runId);
 
         $out = [];
         foreach ($codes as $code) {
             $block = $raw[$code] ?? null;
             if (!is_array($block) || ($block['status'] ?? null) !== 'ok') {
-                $out[$code] = ['overall' => [], 'by_sub' => [], 'sub_crop_area_ha' => $subCropAreaHa];
+                $out[$code] = [
+                    'overall' => [],
+                    'by_sub' => [],
+                    'sub_crop_area_ha' => $subCropAreaHa,
+                ];
                 continue;
             }
 
             $rows = $block['rows'] ?? [];
             if (!is_array($rows)) {
-                $out[$code] = ['overall' => [], 'by_sub' => [], 'sub_crop_area_ha' => $subCropAreaHa];
+                $out[$code] = [
+                    'overall' => [],
+                    'by_sub' => [],
+                    'sub_crop_area_ha' => $subCropAreaHa,
+                ];
                 continue;
             }
 
-            $bySub = [];     // [sub][crop][year] => val
+            $bySub = [];
 
             foreach ($rows as $r) {
                 $year = isset($r['year']) ? (int)$r['year'] : 0;
                 $sub  = isset($r['sub']) ? (int)$r['sub'] : 0;
                 $crop = $r['crop'] ?? null;
 
-                if ($year <= 0) continue;
-                if ($sub <= 0) continue;
-                if ($crop === null || $crop === '') continue;
+                if ($year <= 0 || $sub <= 0) {
+                    continue;
+                }
+                if ($crop === null || $crop === '') {
+                    continue;
+                }
 
                 $cropCode = (string)$crop;
-                if ($cropFilter !== null && $cropCode !== $cropFilter) continue;
+                if ($cropFilter !== null && $cropCode !== $cropFilter) {
+                    continue;
+                }
 
                 $val = $r['value'] ?? null;
                 $num = ($val === null || $val === '') ? null : (is_numeric($val) ? (float)$val : null);
@@ -120,15 +123,19 @@ final class McaSwatInputsRepository
                 $bySub[$sub][$cropCode][$year] = $num;
             }
 
-            // overall per crop/year (area-weighted across subs)
-            $overall = []; // [crop][year] => val
+            $overall = [];
             foreach ($bySub as $sub => $crops) {
                 foreach ($crops as $crop => $series) {
                     $area = $subCropAreaHa[$sub][$crop] ?? null;
-                    if ($area === null || $area <= 0) continue;
+                    if ($area === null || $area <= 0) {
+                        continue;
+                    }
 
                     foreach ($series as $year => $val) {
-                        if ($val === null || !is_numeric($val)) continue;
+                        if ($val === null || !is_numeric($val)) {
+                            continue;
+                        }
+
                         $y = (int)$year;
                         $overall[$crop][$y] = $overall[$crop][$y] ?? ['num' => 0.0, 'den' => 0.0];
                         $overall[$crop][$y]['num'] += ((float)$val) * (float)$area;
@@ -145,14 +152,18 @@ final class McaSwatInputsRepository
                 }
             }
 
-            // sorting
             ksort($bySub);
             foreach ($bySub as $sub => $crops) {
                 ksort($bySub[$sub]);
-                foreach ($bySub[$sub] as $crop => $series) ksort($bySub[$sub][$crop]);
+                foreach ($bySub[$sub] as $crop => $series) {
+                    ksort($bySub[$sub][$crop]);
+                }
             }
+
             ksort($overallFinal);
-            foreach ($overallFinal as $crop => $series) ksort($overallFinal[$crop]);
+            foreach ($overallFinal as $crop => $series) {
+                ksort($overallFinal[$crop]);
+            }
 
             $out[$code] = [
                 'overall' => $overallFinal,

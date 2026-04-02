@@ -57,7 +57,7 @@ function customScenarioCropList(PDO $pdo, array $effectiveRunMap): array
         $runId = (int)$runId;
         if ($sub <= 0 || $runId <= 0) continue;
 
-        $pairs[] = "(h.run_id = :run{$i} AND h.sub = :sub{$i})";
+        $pairs[] = "(run_id = :run{$i} AND sub = :sub{$i})";
         $params[":run{$i}"] = $runId;
         $params[":sub{$i}"] = $sub;
         $i++;
@@ -66,12 +66,12 @@ function customScenarioCropList(PDO $pdo, array $effectiveRunMap): array
     if (!$pairs) return [];
 
     $sql = "
-        SELECT DISTINCT h.lulc AS crop_code
-        FROM swat_hru_kpi h
-        WHERE h.lulc IS NOT NULL
-          AND h.lulc <> ''
+        SELECT DISTINCT crop
+        FROM swat_crop_area_context
+        WHERE crop IS NOT NULL
+          AND crop <> ''
           AND (" . implode(' OR ', $pairs) . ")
-        ORDER BY h.lulc
+        ORDER BY crop
     ";
 
     $stmt = $pdo->prepare($sql);
@@ -93,12 +93,12 @@ function runCropList(PDO $pdo, int $runId): array
     if ($runId <= 0) return [];
 
     $stmt = $pdo->prepare("
-        SELECT DISTINCT h.lulc AS crop_code
-        FROM swat_hru_kpi h
-        WHERE h.run_id = :run_id
-          AND h.lulc IS NOT NULL
-          AND h.lulc <> ''
-        ORDER BY h.lulc
+        SELECT DISTINCT crop
+        FROM swat_crop_area_context
+        WHERE run_id = :run_id
+          AND crop IS NOT NULL
+          AND crop <> ''
+        ORDER BY crop
     ");
     $stmt->execute([':run_id' => $runId]);
 
