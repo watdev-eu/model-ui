@@ -14,10 +14,10 @@ require_once __DIR__ . '/classes/RunLicenseRepository.php';
 
 Auth::requireAdvanced();
 
-$allAreas    = StudyAreaRepository::all();
-$studyAreas  = array_filter($allAreas, fn($row) => !empty($row['enabled']));
-$licenses    = RunLicenseRepository::all();
-$user        = Auth::user();
+$allAreas      = StudyAreaRepository::all();
+$studyAreas    = array_filter($allAreas, fn($row) => !empty($row['enabled']));
+$licenses      = RunLicenseRepository::all();
+$user          = Auth::user();
 $defaultAuthor = trim((string)($user['display_name'] ?? ''));
 ?>
 
@@ -25,51 +25,62 @@ $defaultAuthor = trim((string)($user['display_name'] ?? ''));
         <div class="card-body">
             <h1 class="title">Import model run</h1>
             <p class="text-muted mb-4">
-                Upload and validate the CSV files first. Then add metadata, check crops, select subbasins, and import the results.
+                Upload the original SWAT output files. The system will inspect them, detect crops and subbasins,
+                and then import the normalized results into the database.
             </p>
 
             <div id="importWizard" data-default-author="<?= h($defaultAuthor) ?>">
-                <!-- Step 1 -->
                 <section class="mb-4" id="step1">
-                    <h4 class="mb-3">Step 1 — Upload and validate files</h4>
+                    <h4 class="mb-3">Step 1 — Upload and inspect raw SWAT files</h4>
 
                     <form id="inspectForm" class="row g-3" enctype="multipart/form-data" onsubmit="return false;">
                         <input type="hidden" name="csrf" value="<?= h($csrfToken ?? '') ?>">
 
-                        <div class="col-md-3">
-                            <label class="form-label">Field separator</label>
-                            <select name="field_sep" id="fieldSep" class="form-select" required>
-                                <option value=";">Semicolon (;)</option>
-                                <option value=",">Comma (,)</option>
-                                <option value="\t">Tab</option>
-                            </select>
+                        <div class="col-md-6">
+                            <label class="form-label">file.cio</label>
+                            <input type="file" name="cio_file" class="form-control" accept=".cio,.txt" required>
+                            <div class="form-text">Required. Used to derive simulation timing metadata.</div>
                         </div>
 
-                        <div class="col-md-4">
-                            <label class="form-label">HRU CSV</label>
-                            <input type="file" name="hru_csv" class="form-control" accept=".csv,.txt">
+                        <div class="col-md-6">
+                            <label class="form-label">output.hru</label>
+                            <input type="file" name="hru_file" class="form-control" accept=".hru,.txt" required>
+                            <div class="form-text">Required. Used for crops, subbasins, GIS mapping and monthly HRU indicators.</div>
                         </div>
 
-                        <div class="col-md-4">
-                            <label class="form-label">RCH CSV</label>
-                            <input type="file" name="rch_csv" class="form-control" accept=".csv,.txt">
+                        <div class="col-md-6">
+                            <label class="form-label">output.rch</label>
+                            <input type="file" name="rch_file" class="form-control" accept=".rch,.txt">
+                            <div class="form-text">Optional for study areas without reach results.</div>
                         </div>
 
-                        <div class="col-md-4">
-                            <label class="form-label">SNU CSV</label>
-                            <input type="file" name="snu_csv" class="form-control" accept=".csv,.txt">
+                        <div class="col-md-6">
+                            <label class="form-label">output.snu</label>
+                            <input type="file" name="snu_file" class="form-control" accept=".snu,.txt" required>
+                            <div class="form-text">Required. Daily soil profile results.</div>
                         </div>
 
                         <div class="col-12">
                             <button id="btnInspect" type="button" class="btn btn-primary">
-                                Validate files
+                                Inspect files
                             </button>
                         </div>
                     </form>
 
                     <div id="inspectResult" class="mt-4 d-none">
                         <div class="alert alert-success">
-                            Files validated. Continue with metadata and assignment.
+                            Files were parsed successfully. Continue with metadata and assignment.
+                        </div>
+
+                        <div class="row g-3 mb-3">
+                            <div class="col-lg-6">
+                                <h6>file.cio summary</h6>
+                                <div id="preview-cio" class="border rounded p-2 bg-light small"></div>
+                            </div>
+                            <div class="col-lg-6">
+                                <h6>Detected period</h6>
+                                <div id="preview-period" class="border rounded p-2 bg-light small"></div>
+                            </div>
                         </div>
 
                         <div class="row g-3">
@@ -91,7 +102,6 @@ $defaultAuthor = trim((string)($user['display_name'] ?? ''));
 
                 <hr>
 
-                <!-- Step 2 -->
                 <section class="mb-4 opacity-50" id="step2">
                     <h4 class="mb-3">Step 2 — Metadata</h4>
 
@@ -180,7 +190,6 @@ $defaultAuthor = trim((string)($user['display_name'] ?? ''));
 
                 <hr>
 
-                <!-- Step 3 -->
                 <section class="mb-4 opacity-50" id="step3">
                     <h4 class="mb-3">Step 3 — Crops and subbasins</h4>
 

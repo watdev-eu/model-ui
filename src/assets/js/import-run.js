@@ -1,3 +1,5 @@
+// assets/js/import-run.js
+
 (function () {
     const inspectForm = document.getElementById('inspectForm');
     const finalizeForm = document.getElementById('finalizeForm');
@@ -43,7 +45,29 @@
 
     function setPreview(id, html) {
         const el = document.getElementById(id);
-        el.innerHTML = html || '<span class="text-muted">No file uploaded.</span>';
+        if (el) {
+            el.innerHTML = html || '<span class="text-muted">No preview available.</span>';
+        }
+    }
+
+    function renderCioSummary(cio) {
+        const html = `
+            <div><strong>Simulation years:</strong> ${escapeHtml(cio?.simulation_years ?? '')}</div>
+            <div><strong>Begin year:</strong> ${escapeHtml(cio?.begin_year ?? '')}</div>
+            <div><strong>Begin julian day:</strong> ${escapeHtml(cio?.begin_julian_day ?? '')}</div>
+            <div><strong>Skip years:</strong> ${escapeHtml(cio?.skip_years ?? '')}</div>
+            <div><strong>Printed begin year:</strong> ${escapeHtml(cio?.printed_begin_year ?? '')}</div>
+            <div><strong>Printed begin date:</strong> ${escapeHtml(cio?.printed_begin_date ?? '')}</div>
+        `;
+        setPreview('preview-cio', html);
+    }
+
+    function renderPeriodSummary(start, end) {
+        setPreview(
+            'preview-period',
+            `<div><strong>Detected start:</strong> ${escapeHtml(start || '')}</div>
+             <div><strong>Detected end:</strong> ${escapeHtml(end || '')}</div>`
+        );
     }
 
     function renderUnknownCrops(codes) {
@@ -161,9 +185,7 @@
         map = new ol.Map({
             target: 'subbasinMap',
             layers: [
-                new ol.layer.Tile({
-                    source: new ol.source.OSM()
-                }),
+                new ol.layer.Tile({ source: new ol.source.OSM() }),
                 selectionLayer
             ],
             view: new ol.View({
@@ -196,29 +218,35 @@
             const data = await res.json();
 
             if (!res.ok || !data.ok) {
-                showToast(data.error || 'Validation failed.', true);
+                showToast(data.error || 'Inspection failed.', true);
                 return;
             }
+
+            console.log('HRU inspect', data.inspections?.hru);
+            console.log('RCH inspect', data.inspections?.rch);
+            console.log('SNU inspect', data.inspections?.snu);
 
             inspectData = data;
             importTokenInput.value = data.import_token;
             detectedSubbasins = (data.detected_subbasins || []).map(v => parseInt(v, 10)).filter(v => v > 0);
 
             inspectResult.classList.remove('d-none');
+            renderCioSummary(data.cio || {});
+            renderPeriodSummary(data.period_start_guess, data.period_end_guess);
             setPreview('preview-hru', data.inspections?.hru?.preview_html || '');
-            setPreview('preview-rch', data.inspections?.rch?.preview_html || '');
+            setPreview('preview-rch', data.inspections?.rch?.preview_html || '<span class="text-muted">No RCH file uploaded.</span>');
             setPreview('preview-snu', data.inspections?.snu?.preview_html || '');
 
             renderUnknownCrops(data.unknown_crops || []);
             enableStep2And3();
-            showToast('Files validated successfully.');
+            showToast('Files inspected successfully.');
 
             if (data.period_start_guess && !finalizeForm.querySelector('input[name="run_date"]').value) {
                 finalizeForm.querySelector('input[name="run_date"]').value = data.period_start_guess;
             }
         } catch (err) {
             console.error(err);
-            showToast('Server error during validation.', true);
+            showToast('Server error during inspection.', true);
         } finally {
             btnInspect.disabled = false;
         }
@@ -272,7 +300,7 @@
         fd.set('unknown_crop_names_json', JSON.stringify(readUnknownCropNames()));
 
         if (!fd.get('import_token')) {
-            showToast('Please validate the files first.', true);
+            showToast('Please inspect the files first.', true);
             return;
         }
         if (!fd.get('study_area')) {

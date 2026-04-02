@@ -1,4 +1,6 @@
 <?php
+// api/import_run.php
+
 declare(strict_types=1);
 
 // Start buffering + suppress HTML error output BEFORE any includes
