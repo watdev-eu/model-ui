@@ -32,14 +32,20 @@ if (!$csrf || !hash_equals($_SESSION['csrf_token'] ?? '', $csrf)) {
 }
 
 try {
-    $result = SwatRawRunInspectService::inspectUploadedFiles($_FILES);
+    $result = SwatRawRunInspectService::inspectUploadedFiles($_FILES, $_POST);
     echo json_encode($result);
     exit;
 } catch (Throwable $e) {
     error_log('[import_inspect] ' . $e->getMessage());
 
     $message = $e->getMessage();
-    $status = str_starts_with($message, 'Missing required file:') ? 422 : 500;
+
+    $status = (
+        str_starts_with($message, 'Missing required file:') ||
+        str_contains($message, 'no valid HRU rows could be parsed') ||
+        str_contains($message, 'no valid SNU rows could be parsed') ||
+        str_starts_with($message, 'Unsupported import source.')
+    ) ? 422 : 500;
 
     http_response_code($status);
     echo json_encode(['error' => $message]);

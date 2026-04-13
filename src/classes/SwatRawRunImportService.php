@@ -76,19 +76,34 @@ final class SwatRawRunImportService
             $licenseId = RunLicenseRepository::findOrCreateByName($licenseName);
         }
 
+        if ($licenseName === '') throw new RuntimeException('License is required.');
+        if ($description === '') throw new RuntimeException('Description is required.');
+
+        $sourceType = (string)($meta['source_type'] ?? 'original');
+
         $cioMeta = $meta['cio'] ?? null;
-        if (!is_array($cioMeta) || empty($cioMeta['printed_begin_year'])) {
+        if (!is_array($cioMeta)) {
+            throw new RuntimeException('Missing import timing metadata.');
+        }
+
+        if ($sourceType === 'original' && empty($cioMeta['printed_begin_year'])) {
             throw new RuntimeException('Missing parsed file.cio metadata.');
         }
 
+        $fileMeta = is_array($meta['files'] ?? null) ? $meta['files'] : [];
+
         $rawFiles = [
-            'cio' => $baseDir . '/file.cio',
-            'hru' => $baseDir . '/output.hru',
-            'rch' => is_file($baseDir . '/output.rch') ? $baseDir . '/output.rch' : null,
-            'snu' => $baseDir . '/output.snu',
+            'cio' => !empty($fileMeta['cio']) ? ($baseDir . '/' . (string)$fileMeta['cio']) : null,
+            'hru' => $baseDir . '/' . (string)($fileMeta['hru'] ?? ($sourceType === 'csv' ? 'hru.csv' : 'output.hru')),
+            'rch' => !empty($fileMeta['rch']) ? ($baseDir . '/' . (string)$fileMeta['rch']) : null,
+            'snu' => $baseDir . '/' . (string)($fileMeta['snu'] ?? ($sourceType === 'csv' ? 'snu.csv' : 'output.snu')),
         ];
 
-        if (!is_file($rawFiles['cio']) || !is_file($rawFiles['hru']) || !is_file($rawFiles['snu'])) {
+        if (
+            ($sourceType === 'original' && !is_file((string)$rawFiles['cio'])) ||
+            !is_file((string)$rawFiles['hru']) ||
+            !is_file((string)$rawFiles['snu'])
+        ) {
             throw new RuntimeException('One or more required uploaded files are missing.');
         }
 
@@ -134,7 +149,8 @@ final class SwatRawRunImportService
             $artifacts = SwatYearlyMaterializer::buildImportArtifacts(
                 $rawFiles,
                 $cioMeta,
-                $selectedSubbasins
+                $selectedSubbasins,
+                $sourceType
             );
 
             self::insertYearlyIndicatorRows($pg, $runId, $artifacts['yearly_rows'] ?? []);

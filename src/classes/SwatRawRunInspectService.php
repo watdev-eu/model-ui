@@ -8,9 +8,14 @@ require_once __DIR__ . '/SwatRawImportHelper.php';
 
 final class SwatRawRunInspectService
 {
-    public static function inspectUploadedFiles(array $files): array
+    public static function inspectUploadedFiles(array $files, array $post = []): array
     {
-        self::assertRequiredUploads($files);
+        $sourceType = trim((string)($post['import_source'] ?? 'original'));
+        if (!in_array($sourceType, ['original', 'csv'], true)) {
+            throw new RuntimeException('Unsupported import source.');
+        }
+
+        self::assertRequiredUploads($files, $sourceType);
 
         $token   = bin2hex(random_bytes(16));
         $baseDir = rtrim(UPLOAD_DIR, '/\\') . '/import_sessions/' . $token;
@@ -19,41 +24,63 @@ final class SwatRawRunInspectService
             throw new RuntimeException('Failed to create temporary import directory.');
         }
 
-        $paths = [
-            'cio' => $baseDir . '/file.cio',
-            'hru' => $baseDir . '/output.hru',
-            'rch' => $baseDir . '/output.rch',
-            'snu' => $baseDir . '/output.snu',
-        ];
+        if ($sourceType === 'original') {
+            $paths = [
+                'cio' => $baseDir . '/file.cio',
+                'hru' => $baseDir . '/output.hru',
+                'rch' => $baseDir . '/output.rch',
+                'snu' => $baseDir . '/output.snu',
+            ];
 
-        SwatRawImportHelper::saveUploadedFile($files['cio_file'], $paths['cio']);
-        SwatRawImportHelper::saveUploadedFile($files['hru_file'], $paths['hru']);
-        SwatRawImportHelper::saveUploadedFile($files['snu_file'], $paths['snu']);
+            SwatRawImportHelper::saveUploadedFile($files['cio_file'], $paths['cio']);
+            SwatRawImportHelper::saveUploadedFile($files['hru_file'], $paths['hru']);
+            SwatRawImportHelper::saveUploadedFile($files['snu_file'], $paths['snu']);
 
-        if (!empty($files['rch_file']) && (int)($files['rch_file']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
-            SwatRawImportHelper::saveUploadedFile($files['rch_file'], $paths['rch']);
+            if (!empty($files['rch_file']) && (int)($files['rch_file']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+                SwatRawImportHelper::saveUploadedFile($files['rch_file'], $paths['rch']);
+            } else {
+                $paths['rch'] = null;
+            }
         } else {
-            $paths['rch'] = null;
+            $paths = [
+                'cio' => null,
+                'hru' => $baseDir . '/hru.csv',
+                'rch' => $baseDir . '/rch.csv',
+                'snu' => $baseDir . '/snu.csv',
+            ];
+
+            SwatRawImportHelper::saveUploadedFile($files['hru_csv_file'], $paths['hru']);
+            SwatRawImportHelper::saveUploadedFile($files['snu_csv_file'], $paths['snu']);
+
+            if (!empty($files['rch_csv_file']) && (int)($files['rch_csv_file']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+                SwatRawImportHelper::saveUploadedFile($files['rch_csv_file'], $paths['rch']);
+            } else {
+                $paths['rch'] = null;
+            }
         }
 
         $inspect = SwatRawImportHelper::inspectRawSet(
             $paths['cio'],
             $paths['hru'],
             $paths['rch'],
-            $paths['snu']
+            $paths['snu'],
+            $sourceType
         );
+
+        self::assertInspectionSucceeded($inspect);
 
         $unknownCrops = self::detectUnknownCrops($inspect['all_crop_codes'] ?? []);
 
         $meta = [
             'created_at' => date(DATE_ATOM),
             'token' => $token,
+            'source_type' => $sourceType,
             'cio' => $inspect['cio'],
             'files' => [
-                'cio' => 'file.cio',
-                'hru' => 'output.hru',
-                'rch' => $paths['rch'] ? 'output.rch' : null,
-                'snu' => 'output.snu',
+                'cio' => $paths['cio'] ? basename((string)$paths['cio']) : null,
+                'hru' => basename((string)$paths['hru']),
+                'rch' => $paths['rch'] ? basename((string)$paths['rch']) : null,
+                'snu' => basename((string)$paths['snu']),
             ],
             'all_crop_codes' => $inspect['all_crop_codes'],
             'all_subbasins' => $inspect['all_subbasins'],
@@ -61,11 +88,19 @@ final class SwatRawRunInspectService
             'period_end_guess' => $inspect['period_end_guess'],
         ];
 
-        file_put_contents($baseDir . '/meta.json', json_encode($meta, JSON_PRETTY_PRINT));
+        $metaJson = json_encode($meta, JSON_PRETTY_PRINT);
+        if ($metaJson === false) {
+            throw new RuntimeException('Failed to encode import session metadata.');
+        }
+
+        if (file_put_contents($baseDir . '/meta.json', $metaJson) === false) {
+            throw new RuntimeException('Failed to save import session metadata.');
+        }
 
         return [
             'ok' => true,
             'import_token' => $token,
+            'source_type' => $sourceType,
             'cio' => $inspect['cio'],
             'inspections' => $inspect['inspections'],
             'unknown_crops' => $unknownCrops,
@@ -75,9 +110,13 @@ final class SwatRawRunInspectService
         ];
     }
 
-    private static function assertRequiredUploads(array $files): void
+    private static function assertRequiredUploads(array $files, string $sourceType): void
     {
-        foreach (['cio_file', 'hru_file', 'snu_file'] as $field) {
+        $required = $sourceType === 'csv'
+            ? ['hru_csv_file', 'snu_csv_file']
+            : ['cio_file', 'hru_file', 'snu_file'];
+
+        foreach ($required as $field) {
             if (empty($files[$field]) || (int)($files[$field]['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
                 throw new RuntimeException("Missing required file: {$field}");
             }
@@ -101,5 +140,19 @@ final class SwatRawRunInspectService
 
         sort($unknown);
         return $unknown;
+    }
+
+    private static function assertInspectionSucceeded(array $inspect): void
+    {
+        $hruOk = (bool)($inspect['inspections']['hru']['ok'] ?? false);
+        $snuOk = (bool)($inspect['inspections']['snu']['ok'] ?? false);
+
+        if (!$hruOk) {
+            throw new RuntimeException('The HRU file was uploaded, but no valid HRU rows could be parsed.');
+        }
+
+        if (!$snuOk) {
+            throw new RuntimeException('The SNU file was uploaded, but no valid SNU rows could be parsed.');
+        }
     }
 }

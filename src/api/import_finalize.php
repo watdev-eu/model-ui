@@ -1,4 +1,6 @@
 <?php
+// api/import_finalize.php
+
 declare(strict_types=1);
 
 ini_set('display_errors', '0');
@@ -33,6 +35,45 @@ if (!$csrf || !hash_equals($_SESSION['csrf_token'] ?? '', $csrf)) {
     exit;
 }
 
+function importFinalizeStatusForMessage(string $message): int
+{
+    $validationStarts = [
+        'Invalid import token.',
+        'Import session not found or expired.',
+        'Import session metadata is invalid.',
+        'Study area is required.',
+        'Run name is required.',
+        'Model run date is required.',
+        'Model run author is required.',
+        'Selected subbasins are invalid.',
+        'Please select at least one subbasin.',
+        'Unknown crop names are invalid.',
+        'License is required.',
+        'Description is required.',
+        'Missing import timing metadata.',
+        'Missing parsed file.cio metadata.',
+        'One or more required uploaded files are missing.',
+        'A run with this name already exists for this study area.',
+        'Invalid or disabled study area.',
+    ];
+
+    foreach ($validationStarts as $prefix) {
+        if (str_starts_with($message, $prefix)) {
+            return 422;
+        }
+    }
+
+    if (
+        str_starts_with($message, 'Selected subbasin ') ||
+        str_starts_with($message, 'Subbasin ') ||
+        str_starts_with($message, 'Please provide a name for crop code ')
+    ) {
+        return 422;
+    }
+
+    return 500;
+}
+
 try {
     $result = SwatRawRunImportService::importFromSession($_POST);
 
@@ -49,7 +90,8 @@ try {
         ob_clean();
     }
 
-    http_response_code(500);
-    echo json_encode(['error' => $e->getMessage()]);
+    $message = $e->getMessage();
+    http_response_code(importFinalizeStatusForMessage($message));
+    echo json_encode(['error' => $message]);
     exit;
 }

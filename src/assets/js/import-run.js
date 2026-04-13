@@ -14,14 +14,77 @@
     const unknownCropsFields = document.getElementById('unknownCropsFields');
     const subbasinChecklist = document.getElementById('subbasinChecklist');
     const btnSelectDetected = document.getElementById('btnSelectDetected');
-    const btnSelectAll = document.getElementById('btnSelectAll');
+    const btnSelectDetectedOnly = document.getElementById('btnSelectDetectedOnly');
     const btnClearSubs = document.getElementById('btnClearSubs');
+
+    const uploadOriginalBlock = document.getElementById('uploadOriginalBlock');
+    const uploadCsvBlock = document.getElementById('uploadCsvBlock');
+    const uploadGithubBlock = document.getElementById('uploadGithubBlock');
 
     let inspectData = null;
     let selectedSubbasins = new Set();
     let allSubbasins = [];
     let detectedSubbasins = [];
     let map, vectorSource, selectionLayer;
+    let inspectRequestEpoch = 0;
+
+    function resetInspectionState() {
+        inspectData = null;
+        detectedSubbasins = [];
+        selectedSubbasins = new Set();
+
+        importTokenInput.value = '';
+        inspectResult.classList.add('d-none');
+
+        setPreview('preview-cio', '');
+        setPreview('preview-period', '');
+        setPreview('preview-hru', '');
+        setPreview('preview-rch', '');
+        setPreview('preview-snu', '');
+
+        unknownCropsFields.innerHTML = '';
+        unknownCropsBlock.classList.add('d-none');
+
+        document.querySelectorAll('#step2 .form-control, #step2 .form-select, #step2 .form-check-input').forEach(el => {
+            el.disabled = true;
+        });
+
+        document.getElementById('step2').classList.add('opacity-50');
+        document.getElementById('step3').classList.add('opacity-50');
+
+        btnFinalize.disabled = true;
+        btnSelectDetected.disabled = true;
+        btnSelectDetectedOnly.disabled = true;
+        btnClearSubs.disabled = true;
+
+        renderSubbasinChecklist();
+        refreshMapStyles();
+        inspectRequestEpoch++;
+    }
+
+    function currentSource() {
+        return inspectForm.querySelector('input[name="import_source"]:checked')?.value || 'original';
+    }
+
+    function toggleSourceUi() {
+        const source = currentSource();
+
+        uploadOriginalBlock.classList.toggle('d-none', source !== 'original');
+        uploadCsvBlock.classList.toggle('d-none', source !== 'csv');
+        uploadGithubBlock.classList.toggle('d-none', source !== 'github');
+
+        inspectForm.querySelectorAll('.source-original').forEach(el => {
+            el.required = source === 'original' && ['cio_file', 'hru_file', 'snu_file'].includes(el.name);
+        });
+
+        inspectForm.querySelectorAll('.source-csv').forEach(el => {
+            el.required = source === 'csv' && ['hru_csv_file', 'snu_csv_file'].includes(el.name);
+        });
+
+        btnInspect.disabled = source === 'github';
+
+        resetInspectionState();
+    }
 
     function enableStep2And3() {
         document.querySelectorAll('#step2 .form-control, #step2 .form-select, #step2 .form-check-input').forEach(el => {
@@ -31,8 +94,13 @@
         document.getElementById('step3').classList.remove('opacity-50');
         btnFinalize.disabled = false;
         btnSelectDetected.disabled = false;
-        btnSelectAll.disabled = false;
+        btnSelectDetectedOnly.disabled = false;
         btnClearSubs.disabled = false;
+
+        downloadableFromDate.disabled = !isDownloadable.checked;
+        if (!isDownloadable.checked) {
+            downloadableFromDate.value = '';
+        }
     }
 
     function escapeHtml(v) {
@@ -206,6 +274,16 @@
     }
 
     btnInspect.addEventListener('click', async () => {
+        if (currentSource() === 'github') {
+            showToast('GitHub import is not implemented yet.', true);
+            return;
+        }
+
+        if (!inspectForm.reportValidity()) {
+            return;
+        }
+
+        const myEpoch = ++inspectRequestEpoch;
         const fd = new FormData(inspectForm);
 
         btnInspect.disabled = true;
@@ -217,14 +295,14 @@
             });
             const data = await res.json();
 
+            if (myEpoch !== inspectRequestEpoch) {
+                return;
+            }
+
             if (!res.ok || !data.ok) {
                 showToast(data.error || 'Inspection failed.', true);
                 return;
             }
-
-            console.log('HRU inspect', data.inspections?.hru);
-            console.log('RCH inspect', data.inspections?.rch);
-            console.log('SNU inspect', data.inspections?.snu);
 
             inspectData = data;
             importTokenInput.value = data.import_token;
@@ -241,14 +319,20 @@
             enableStep2And3();
             showToast('Files inspected successfully.');
 
-            if (data.period_start_guess && !finalizeForm.querySelector('input[name="run_date"]').value) {
-                finalizeForm.querySelector('input[name="run_date"]').value = data.period_start_guess;
+            const runDateInput = finalizeForm.querySelector('input[name="run_date"]');
+            if (data.period_start_guess) {
+                runDateInput.value = data.period_start_guess;
             }
         } catch (err) {
+            if (myEpoch !== inspectRequestEpoch) {
+                return;
+            }
             console.error(err);
             showToast('Server error during inspection.', true);
         } finally {
-            btnInspect.disabled = false;
+            if (myEpoch === inspectRequestEpoch) {
+                btnInspect.disabled = currentSource() === 'github';
+            }
         }
     });
 
@@ -258,7 +342,12 @@
 
         if (!studyAreaId) {
             allSubbasins = [];
+            selectedSubbasins = new Set();
+            if (vectorSource) {
+                vectorSource.clear();
+            }
             renderSubbasinChecklist();
+            refreshMapStyles();
             return;
         }
 
@@ -284,8 +373,13 @@
         refreshMapStyles();
     });
 
-    btnSelectAll.addEventListener('click', () => {
-        allSubbasins.forEach(sub => selectedSubbasins.add(sub));
+    btnSelectDetectedOnly.addEventListener('click', () => {
+        const detectedSet = new Set(detectedSubbasins);
+        allSubbasins.forEach(sub => {
+            if (detectedSet.has(sub)) {
+                selectedSubbasins.add(sub);
+            }
+        });
         refreshMapStyles();
     });
 
@@ -299,6 +393,9 @@
         fd.set('selected_subbasins_json', JSON.stringify(Array.from(selectedSubbasins).sort((a, b) => a - b)));
         fd.set('unknown_crop_names_json', JSON.stringify(readUnknownCropNames()));
 
+        if (!finalizeForm.reportValidity()) {
+            return;
+        }
         if (!fd.get('import_token')) {
             showToast('Please inspect the files first.', true);
             return;
@@ -309,6 +406,30 @@
         }
         if (!fd.get('run_label')) {
             showToast('Please enter a run name.', true);
+            return;
+        }
+        if (!fd.get('run_date')) {
+            showToast('Please enter a model run date.', true);
+            return;
+        }
+        if (!fd.get('model_run_author')) {
+            showToast('Please enter a model run author.', true);
+            return;
+        }
+        if (!fd.get('license_name')) {
+            showToast('Please choose a license.', true);
+            return;
+        }
+        if (!fd.get('visibility')) {
+            showToast('Please choose a visibility.', true);
+            return;
+        }
+        if (!fd.get('is_baseline')) {
+            showToast('Please choose whether this is a baseline run.', true);
+            return;
+        }
+        if (!fd.get('description')) {
+            showToast('Please enter a description.', true);
             return;
         }
         if (selectedSubbasins.size === 0) {
@@ -348,5 +469,10 @@
         }
     });
 
+    inspectForm.querySelectorAll('input[name="import_source"]').forEach(el => {
+        el.addEventListener('change', toggleSourceUi);
+    });
+
     initMap();
+    toggleSourceUi();
 })();

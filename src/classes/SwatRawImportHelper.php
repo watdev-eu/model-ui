@@ -73,9 +73,20 @@ final class SwatRawImportHelper
         return $meta;
     }
 
-    public static function inspectRawSet(string $cioPath, ?string $hruPath, ?string $rchPath, ?string $snuPath): array
-    {
-        $cio = self::parseCioMetadata($cioPath);
+    public static function inspectRawSet(
+        ?string $cioPath,
+        ?string $hruPath,
+        ?string $rchPath,
+        ?string $snuPath,
+        string $sourceType = 'original'
+    ): array {
+        $cio = [];
+        if ($sourceType === 'original') {
+            if (!$cioPath || !is_file($cioPath)) {
+                throw new RuntimeException('file.cio is required for original import.');
+            }
+            $cio = self::parseCioMetadata($cioPath);
+        }
 
         $inspections = [];
         $allCropCodes = [];
@@ -84,7 +95,7 @@ final class SwatRawImportHelper
         $periodEnd = null;
 
         if ($hruPath && is_file($hruPath)) {
-            $info = self::inspectHru($hruPath, $cio);
+            $info = self::inspectHru($hruPath, $cio, $sourceType);
             $inspections['hru'] = $info;
             foreach ($info['crop_codes'] as $code) {
                 $allCropCodes[$code] = true;
@@ -97,7 +108,7 @@ final class SwatRawImportHelper
         }
 
         if ($rchPath && is_file($rchPath)) {
-            $info = self::inspectRch($rchPath, $cio);
+            $info = self::inspectRch($rchPath, $cio, $sourceType);
             $inspections['rch'] = $info;
             foreach ($info['detected_subbasins'] as $sub) {
                 $allSubbasins[$sub] = true;
@@ -107,10 +118,14 @@ final class SwatRawImportHelper
         }
 
         if ($snuPath && is_file($snuPath)) {
-            $info = self::inspectSnu($snuPath, $cio);
+            $info = self::inspectSnu($snuPath, $cio, $sourceType);
             $inspections['snu'] = $info;
             $periodStart = self::minDate($periodStart, $info['period_start_guess']);
             $periodEnd   = self::maxDate($periodEnd, $info['period_end_guess']);
+        }
+
+        if ($sourceType === 'csv') {
+            $cio = self::buildCsvDerivedMetadata($periodStart, $periodEnd);
         }
 
         return [
@@ -123,8 +138,72 @@ final class SwatRawImportHelper
         ];
     }
 
-    public static function inspectHru(string $path, array $cio): array
+    public static function inspectHru(string $path, array $cio, string $sourceType = 'original'): array
     {
+        if ($sourceType === 'csv') {
+            $previewRows = [];
+            $cropCodes = [];
+            $subbasins = [];
+            $rowCount = 0;
+            $minDate = null;
+            $maxDate = null;
+
+            foreach (self::csvRowsAssoc($path) as $row) {
+                $year = (int)($row['YEAR'] ?? 0);
+                $mon  = (int)($row['MON'] ?? 0);
+                $sub  = (int)($row['SUB'] ?? 0);
+                $crop = strtoupper(trim((string)($row['LULC'] ?? '')));
+
+                if ($year <= 0 || $mon <= 0 || $mon > 12 || $sub <= 0 || $crop === '') {
+                    continue;
+                }
+
+                $rowCount++;
+                $cropCodes[$crop] = true;
+                $subbasins[$sub] = true;
+
+                $date = sprintf('%04d-%02d-01', $year, $mon);
+                $minDate = self::minDate($minDate, $date);
+                $maxDate = self::maxDate($maxDate, $date);
+
+                if (count($previewRows) < 5) {
+                    $previewRows[] = [
+                        $crop,
+                        trim((string)($row['HRU'] ?? '')),
+                        trim((string)($row['HRUGIS'] ?? '')),
+                        $sub,
+                        $year,
+                        $mon,
+                        self::csvNumber($row['AREAKM2'] ?? ''),
+                        self::csvNumber($row['IRRMM'] ?? ''),
+                        self::csvNumber($row['SA_IRRMM'] ?? ''),
+                        self::csvNumber($row['DA_IRRMM'] ?? ''),
+                        self::csvNumber($row['YLDT_HA'] ?? ''),
+                        self::csvNumber($row['BIOMT_HA'] ?? ''),
+                        self::csvNumber($row['SYLDT_HA'] ?? ''),
+                    ];
+                }
+            }
+
+            $header = [
+                'LULC','HRU','HRUGIS','SUB','YEAR','MON',
+                'AREAkm2','IRRmm','SA_IRRmm','DA_IRRmm','YLDt_ha','BIOMt_ha','SYLDt_ha'
+            ];
+
+            return [
+                'type' => 'hru',
+                'header' => $header,
+                'preview_rows' => $previewRows,
+                'preview_html' => self::buildPreviewTable($header, $previewRows),
+                'row_count' => $rowCount,
+                'crop_codes' => array_values(array_keys($cropCodes)),
+                'detected_subbasins' => array_map('intval', array_values(array_keys($subbasins))),
+                'period_start_guess' => $minDate,
+                'period_end_guess' => $maxDate,
+                'ok' => $rowCount > 0,
+            ];
+        }
+
         $previewRows = [];
         $cropCodes = [];
         $subbasins = [];
@@ -209,8 +288,60 @@ final class SwatRawImportHelper
         ];
     }
 
-    public static function inspectRch(string $path, array $cio): array
+    public static function inspectRch(string $path, array $cio, string $sourceType = 'original'): array
     {
+        if ($sourceType === 'csv') {
+            $previewRows = [];
+            $subbasins = [];
+            $rowCount = 0;
+            $minDate = null;
+            $maxDate = null;
+
+            foreach (self::csvRowsAssoc($path) as $row) {
+                $year = (int)($row['YEAR'] ?? 0);
+                $mon  = (int)($row['MON'] ?? 0);
+                $sub  = (int)($row['SUB'] ?? 0);
+
+                if ($year <= 0 || $mon <= 0 || $mon > 12 || $sub <= 0) {
+                    continue;
+                }
+
+                $rowCount++;
+                $subbasins[$sub] = true;
+
+                $date = sprintf('%04d-%02d-01', $year, $mon);
+                $minDate = self::minDate($minDate, $date);
+                $maxDate = self::maxDate($maxDate, $date);
+
+                if (count($previewRows) < 5) {
+                    $previewRows[] = [
+                        $sub,
+                        $year,
+                        $mon,
+                        self::csvNumber($row['AREAKM2'] ?? ''),
+                        self::csvNumber($row['FLOW_OUTCMS'] ?? ''),
+                        self::csvNumber($row['NO3_OUTKG'] ?? ''),
+                        self::csvNumber($row['SED_OUTTONS'] ?? ''),
+                    ];
+                }
+            }
+
+            $header = ['SUB','YEAR','MON','AREAkm2','FLOW_OUTcms','NO3_OUTkg','SED_OUTtons'];
+
+            return [
+                'type' => 'rch',
+                'header' => $header,
+                'preview_rows' => $previewRows,
+                'preview_html' => self::buildPreviewTable($header, $previewRows),
+                'row_count' => $rowCount,
+                'crop_codes' => [],
+                'detected_subbasins' => array_map('intval', array_values(array_keys($subbasins))),
+                'period_start_guess' => $minDate,
+                'period_end_guess' => $maxDate,
+                'ok' => $rowCount > 0,
+            ];
+        }
+
         $previewRows = [];
         $subbasins = [];
         $rowCount = 0;
@@ -272,8 +403,58 @@ final class SwatRawImportHelper
         ];
     }
 
-    public static function inspectSnu(string $path, array $cio): array
+    public static function inspectSnu(string $path, array $cio, string $sourceType = 'original'): array
     {
+        if ($sourceType === 'csv') {
+            $previewRows = [];
+            $rowCount = 0;
+            $minDate = null;
+            $maxDate = null;
+
+            foreach (self::csvRowsAssoc($path) as $row) {
+                $year = (int)($row['YEAR'] ?? 0);
+                $day  = (int)($row['DAY'] ?? 0);
+
+                if ($year <= 0 || $day <= 0) {
+                    continue;
+                }
+
+                $rowCount++;
+                $date = self::dateFromYearDoy($year, $day);
+                $minDate = self::minDate($minDate, $date);
+                $maxDate = self::maxDate($maxDate, $date);
+
+                if (count($previewRows) < 5) {
+                    $previewRows[] = [
+                        $year,
+                        $day,
+                        trim((string)($row['HRUGIS'] ?? '')),
+                        self::csvNumber($row['SOL_RSD'] ?? ''),
+                        self::csvNumber($row['SOL_P'] ?? ''),
+                        self::csvNumber($row['NO3'] ?? ''),
+                        self::csvNumber($row['ORG_N'] ?? ''),
+                        self::csvNumber($row['ORG_P'] ?? ''),
+                        self::csvNumber($row['CN'] ?? ''),
+                    ];
+                }
+            }
+
+            $header = ['YEAR','DAY','HRUGIS','SOL_RSD','SOL_P','NO3','ORG_N','ORG_P','CN'];
+
+            return [
+                'type' => 'snu',
+                'header' => $header,
+                'preview_rows' => $previewRows,
+                'preview_html' => self::buildPreviewTable($header, $previewRows),
+                'row_count' => $rowCount,
+                'crop_codes' => [],
+                'detected_subbasins' => [],
+                'period_start_guess' => $minDate,
+                'period_end_guess' => $maxDate,
+                'ok' => $rowCount > 0,
+            ];
+        }
+
         $previewRows = [];
         $rowCount = 0;
 
@@ -718,5 +899,119 @@ final class SwatRawImportHelper
             $firstSequenceKey,
             $seenAtLeastOneRow
         );
+    }
+
+    private static function openCsv(string $path)
+    {
+        $fh = fopen($path, 'rb');
+        if (!$fh) {
+            throw new RuntimeException("Cannot open CSV: {$path}");
+        }
+        return $fh;
+    }
+
+    private static function parseDelimitedCsvRow($fh): ?array
+    {
+        $row = fgetcsv($fh, 0, ';');
+        if ($row === false) {
+            return null;
+        }
+
+        return array_map(static function ($v) {
+            $v = trim((string)$v);
+            return trim($v, "\" \t\n\r\0\x0B");
+        }, $row);
+    }
+
+    private static function normalizeCsvHeaderName(string $name): string
+    {
+        $name = preg_replace('/^\xEF\xBB\xBF/', '', $name) ?? $name; // strip BOM
+        return strtoupper(trim($name));
+    }
+
+    public static function csvRowsAssocPublic(string $path): iterable
+    {
+        return self::csvRowsAssoc($path);
+    }
+
+    private static function csvRowsAssoc(string $path): iterable
+    {
+        $fh = self::openCsv($path);
+        try {
+            $header = self::parseDelimitedCsvRow($fh);
+            if (!$header) {
+                throw new RuntimeException("CSV header missing: {$path}");
+            }
+
+            $header = array_map(
+                static fn($h) => self::normalizeCsvHeaderName((string)$h),
+                $header
+            );
+
+            while (($row = self::parseDelimitedCsvRow($fh)) !== null) {
+                if (!array_filter($row, static fn($v) => $v !== '')) {
+                    continue;
+                }
+
+                $assoc = [];
+                foreach ($header as $i => $col) {
+                    if ($col === '') {
+                        continue;
+                    }
+                    $assoc[$col] = $row[$i] ?? '';
+                }
+
+                yield $assoc;
+            }
+        } finally {
+            fclose($fh);
+        }
+    }
+
+    private static function csvNumber(?string $value): string
+    {
+        $value = trim((string)$value);
+        if ($value === '') {
+            return '';
+        }
+
+        if (preg_match('/^-?\d+,\d+(?:e[+-]?\d+)?$/i', $value)) {
+            $value = str_replace(',', '.', $value);
+        } elseif (preg_match('/^-?\d{1,3}(?:\.\d{3})*,\d+(?:e[+-]?\d+)?$/i', $value)) {
+            $value = str_replace('.', '', $value);
+            $value = str_replace(',', '.', $value);
+        }
+
+        return $value;
+    }
+
+    private static function buildCsvDerivedMetadata(?string $periodStart, ?string $periodEnd): array
+    {
+        if (!$periodStart) {
+            return [
+                'simulation_years' => null,
+                'begin_year' => null,
+                'begin_julian_day' => null,
+                'end_julian_day' => null,
+                'skip_years' => 0,
+                'icalen' => null,
+                'printed_begin_year' => null,
+                'printed_begin_date' => null,
+            ];
+        }
+
+        $start = new DateTimeImmutable($periodStart);
+        $end = $periodEnd ? new DateTimeImmutable($periodEnd) : $start;
+
+        return [
+            'simulation_years' => ((int)$end->format('Y') - (int)$start->format('Y')) + 1,
+            'begin_year' => (int)$start->format('Y'),
+            'begin_julian_day' => (int)$start->format('z') + 1,
+            'end_julian_day' => (int)$end->format('z') + 1,
+            'skip_years' => 0,
+            'icalen' => null,
+            'printed_begin_year' => (int)$start->format('Y'),
+            'printed_begin_date' => $start->format('Y-m-d'),
+        ];
     }
 }

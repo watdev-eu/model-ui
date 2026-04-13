@@ -25,39 +25,104 @@ $defaultAuthor = trim((string)($user['display_name'] ?? ''));
         <div class="card-body">
             <h1 class="title">Import model run</h1>
             <p class="text-muted mb-4">
-                Upload the original SWAT output files. The system will inspect them, detect crops and subbasins,
-                and then import the normalized results into the database.
+                Import a SWAT run from original output files, CSV exports, or later from GitHub.
+                The system will inspect the files, detect crops and subbasins, and then import the normalized results.
             </p>
 
             <div id="importWizard" data-default-author="<?= h($defaultAuthor) ?>">
                 <section class="mb-4" id="step1">
-                    <h4 class="mb-3">Step 1 — Upload and inspect raw SWAT files</h4>
+                    <h4 class="mb-3">Step 1 — Choose source and inspect files</h4>
 
                     <form id="inspectForm" class="row g-3" enctype="multipart/form-data" onsubmit="return false;">
                         <input type="hidden" name="csrf" value="<?= h($csrfToken ?? '') ?>">
 
-                        <div class="col-md-6">
-                            <label class="form-label">file.cio</label>
-                            <input type="file" name="cio_file" class="form-control" accept=".cio,.txt" required>
-                            <div class="form-text">Required. Used to derive simulation timing metadata.</div>
+                        <div class="col-12">
+                            <label class="form-label d-block">Import source</label>
+                            <div class="btn-group" role="group" aria-label="Import source">
+                                <input type="radio" class="btn-check" name="import_source" id="srcOriginal" value="original" checked>
+                                <label class="btn btn-outline-primary" for="srcOriginal">Original SWAT output files</label>
+
+                                <input type="radio" class="btn-check" name="import_source" id="srcCsv" value="csv">
+                                <label class="btn btn-outline-primary" for="srcCsv">CSV files</label>
+
+                                <input type="radio" class="btn-check" name="import_source" id="srcGithub" value="github">
+                                <label class="btn btn-outline-primary" for="srcGithub">GitHub</label>
+                            </div>
                         </div>
 
-                        <div class="col-md-6">
-                            <label class="form-label">output.hru</label>
-                            <input type="file" name="hru_file" class="form-control" accept=".hru,.txt" required>
-                            <div class="form-text">Required. Used for crops, subbasins, GIS mapping and monthly HRU indicators.</div>
+                        <div id="uploadOriginalBlock" class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">file.cio</label>
+                                <input type="file" name="cio_file" class="form-control source-original" accept=".cio,.txt">
+                                <div class="form-text">Required for original output import. Used to derive simulation timing metadata.</div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">output.hru</label>
+                                <input type="file" name="hru_file" class="form-control source-original" accept=".hru,.txt">
+                                <div class="form-text">Required for original output import.</div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">output.rch</label>
+                                <input type="file" name="rch_file" class="form-control source-original" accept=".rch,.txt">
+                                <div class="form-text">Optional for study areas without reach results.</div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">output.snu</label>
+                                <input type="file" name="snu_file" class="form-control source-original" accept=".snu,.txt">
+                                <div class="form-text">Required for original output import.</div>
+                            </div>
                         </div>
 
-                        <div class="col-md-6">
-                            <label class="form-label">output.rch</label>
-                            <input type="file" name="rch_file" class="form-control" accept=".rch,.txt">
-                            <div class="form-text">Optional for study areas without reach results.</div>
+                        <div id="uploadCsvBlock" class="row g-3 d-none">
+
+                            <div class="col-md-6">
+                                <label class="form-label">hru.csv</label>
+                                <input type="file" name="hru_csv_file" class="form-control source-csv" accept=".csv,.txt">
+                                <div class="form-text">Required for CSV import.</div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">rch.csv</label>
+                                <input type="file" name="rch_csv_file" class="form-control source-csv" accept=".csv,.txt">
+                                <div class="form-text">Optional for study areas without reach results.</div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">snu.csv</label>
+                                <input type="file" name="snu_csv_file" class="form-control source-csv" accept=".csv,.txt">
+                                <div class="form-text">Required for CSV import.</div>
+                            </div>
                         </div>
 
-                        <div class="col-md-6">
-                            <label class="form-label">output.snu</label>
-                            <input type="file" name="snu_file" class="form-control" accept=".snu,.txt" required>
-                            <div class="form-text">Required. Daily soil profile results.</div>
+                        <div id="uploadGithubBlock" class="row g-3 d-none">
+                            <div class="col-md-6">
+                                <label class="form-label">GitHub repository URL</label>
+                                <input type="url" name="github_repo_url" class="form-control" placeholder="https://github.com/org/repo" disabled>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">Branch / tag</label>
+                                <input type="text" name="github_ref" class="form-control" placeholder="main" disabled>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">Folder path</label>
+                                <input type="text" name="github_path" class="form-control" placeholder="outputs/" disabled>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">Personal access token</label>
+                                <input type="password" name="github_token" class="form-control" disabled>
+                            </div>
+
+                            <div class="col-12">
+                                <div class="alert alert-secondary mb-0">
+                                    GitHub import UI will be implemented later.
+                                </div>
+                            </div>
                         </div>
 
                         <div class="col-12">
@@ -74,7 +139,7 @@ $defaultAuthor = trim((string)($user['display_name'] ?? ''));
 
                         <div class="row g-3 mb-3">
                             <div class="col-lg-6">
-                                <h6>file.cio summary</h6>
+                                <h6>Import summary</h6>
                                 <div id="preview-cio" class="border rounded p-2 bg-light small"></div>
                             </div>
                             <div class="col-lg-6">
@@ -133,27 +198,28 @@ $defaultAuthor = trim((string)($user['display_name'] ?? ''));
 
                         <div class="col-md-4">
                             <label class="form-label">Model run author</label>
-                            <input type="text" name="model_run_author" class="form-control" value="<?= h($defaultAuthor) ?>" disabled>
+                            <input type="text" name="model_run_author" class="form-control" value="<?= h($defaultAuthor) ?>" required disabled>
                         </div>
 
                         <div class="col-md-4">
                             <label class="form-label">Publication / GitHub link</label>
                             <input type="url" name="publication_url" class="form-control" placeholder="https://..." disabled>
+                            <div class="form-text">Optional.</div>
                         </div>
 
                         <div class="col-md-4">
                             <label class="form-label">License</label>
-                            <input type="text" name="license_name" class="form-control" list="licenseOptions" placeholder="e.g. CC-BY" disabled>
-                            <datalist id="licenseOptions">
+                            <select name="license_name" class="form-select" required disabled>
+                                <option value="">Choose…</option>
                                 <?php foreach ($licenses as $license): ?>
-                                    <option value="<?= h($license['name']) ?>"></option>
+                                    <option value="<?= h($license['name']) ?>"><?= h($license['name']) ?></option>
                                 <?php endforeach; ?>
-                            </datalist>
+                            </select>
                         </div>
 
                         <div class="col-md-3">
                             <label class="form-label">Visibility</label>
-                            <select name="visibility" class="form-select" disabled>
+                            <select name="visibility" class="form-select" required disabled>
                                 <option value="private" selected>Private</option>
                                 <option value="public">Public</option>
                             </select>
@@ -161,7 +227,7 @@ $defaultAuthor = trim((string)($user['display_name'] ?? ''));
 
                         <div class="col-md-3">
                             <label class="form-label">Baseline run</label>
-                            <select name="is_baseline" class="form-select" disabled>
+                            <select name="is_baseline" class="form-select" required disabled>
                                 <option value="0" selected>No</option>
                                 <option value="1">Yes</option>
                             </select>
@@ -183,7 +249,7 @@ $defaultAuthor = trim((string)($user['display_name'] ?? ''));
 
                         <div class="col-12">
                             <label class="form-label">Description</label>
-                            <textarea name="description" class="form-control" rows="3" disabled></textarea>
+                            <textarea name="description" class="form-control" rows="3" required disabled></textarea>
                         </div>
                     </form>
                 </section>
@@ -215,7 +281,7 @@ $defaultAuthor = trim((string)($user['display_name'] ?? ''));
                             <label class="form-label">Selected subbasins</label>
                             <div class="d-flex gap-2 mb-2">
                                 <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSelectDetected" disabled>Select detected</button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSelectAll" disabled>Select all</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSelectDetectedOnly" disabled>Select detected</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" id="btnClearSubs" disabled>Clear</button>
                             </div>
                             <div id="subbasinChecklist" class="border rounded p-2" style="max-height: 420px; overflow:auto;"></div>
