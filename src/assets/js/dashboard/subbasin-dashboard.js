@@ -28,7 +28,8 @@ export function initSubbasinDashboard({
     let subbasinGeoUrl = `/api/study_area_subbasins_geo.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;
     let riversGeoUrl   = `/api/study_area_reaches_geo.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;
 
-    let indicatorDefs = []; // from swat_indicators_list.php
+    let indicatorDefs = [];     // SWAT indicators
+    let mcaIndicatorDefs = [];  // computed MCA viewer indicators
     let subCropIndicatorIds = new Set(); // filled after registry load
 
     let map, subLayer, subSource, subFeatures = [];
@@ -176,6 +177,7 @@ export function initSubbasinDashboard({
         indicatorDefs = (json.indicators || []).map(d => ({
             ...d,
             id: d.code ?? d.id,
+            isMca: false,
         }));
 
         subCropIndicatorIds = new Set(
@@ -184,7 +186,7 @@ export function initSubbasinDashboard({
                 .map(d => d.id)
         );
 
-        console.debug('[INDICATORS] Loaded', indicatorDefs.length, 'definitions');
+        console.debug('[INDICATORS] Loaded', indicatorDefs.length, 'SWAT definitions');
     }
 
     // ---------- Boot ----------
@@ -223,6 +225,42 @@ export function initSubbasinDashboard({
             mcaRawTsChart: els.mcaRawTsChart,
         }
     });
+
+    document.addEventListener('watdev:mca-results-cleared', () => {
+        const oldMcaDefs = mcaIndicatorDefs.slice();
+        mcaIndicatorDefs = [];
+
+        for (const [, rd] of runsStore.entries()) {
+            for (const d of oldMcaDefs) {
+                delete rd.index[d.id];
+                rd.indicatorCache.delete(`${d.id}|yearly`);
+            }
+        }
+
+        populateMetricsCombined();
+        updateCropVisibility();
+        recomputeAndRedraw();
+    });
+
+    document.addEventListener('watdev:mca-computed', async () => {
+        mcaIndicatorDefs = mca?.getViewerIndicatorDefs?.() || [];
+
+        for (const [, rd] of runsStore.entries()) {
+            for (const d of mcaIndicatorDefs) {
+                delete rd.index[d.id];
+                rd.indicatorCache.delete(`${d.id}|yearly`);
+            }
+        }
+
+        populateMetricsCombined();
+
+        if (current.indicatorId && mcaIndicatorDefs.some(d => d.id === current.indicatorId)) {
+            await Promise.all(selectedRunIds.map(id => ensureIndicatorLoaded(id, current.indicatorId)));
+        }
+
+        recomputeAndRedraw();
+    });
+
     setIdleState();
     if (currentStudyAreaId > 0) {
         bootstrapFromApi().catch(err => console.error('[bootstrap] failed', err));
@@ -586,25 +624,44 @@ export function initSubbasinDashboard({
         const rd = runsStore.get(runId);
         if (!rd) return;
 
+        const def = allIndicatorDefs().find(d => d.id === indicatorId);
+        if (!def) return;
+
         const key = `${indicatorId}|yearly`;
         if (rd.indicatorCache.has(key)) return;
 
-        const res = await fetch(
-            `${apiBase}/swat_indicator_yearly.php?run_id=${encodeURIComponent(runId)}&indicator=${encodeURIComponent(indicatorId)}`,
-            { signal }
-        );
-        if (!res.ok) throw new Error(`swat_indicator_yearly HTTP ${res.status}`);
+        let payload = null;
 
-        const payload = await res.json();
+        if (def.source === 'mca') {
+            const rows = mca?.getViewerRows(runId, indicatorId) || [];
+            payload = {
+                status: 'ok',
+                meta: {
+                    code: def.id,
+                    sector: def.sector,
+                    name: def.name,
+                    unit: def.unit,
+                    description: def.description,
+                    source: def.source,
+                    grain: def.grain,
+                },
+                rows,
+            };
+        } else {
+            const res = await fetch(
+                `${apiBase}/swat_indicator_yearly.php?run_id=${encodeURIComponent(runId)}&indicator=${encodeURIComponent(indicatorId)}`,
+                { signal }
+            );
+            if (!res.ok) throw new Error(`swat_indicator_yearly HTTP ${res.status}`);
+            payload = await res.json();
+        }
+
         rd.indicatorCache.set(key, payload);
 
-        // only index if ok
         if (payload?.status === 'ok') {
-            const def = (indicatorDefs || []).find(d => d.id === indicatorId);
-            const grain = def?.grain || 'sub';
+            const grain = def?.grain || payload?.meta?.grain || 'sub';
             rd.index[indicatorId] = buildIndexForIndicator(payload.rows || [], grain);
         } else {
-            // mark as "loaded but not usable"
             rd.index[indicatorId] = null;
         }
     }
@@ -1152,11 +1209,9 @@ export function initSubbasinDashboard({
     function populateMetricsCombined() {
         if (!els.metric) return;
 
-        // Use the active run to decide what is available
-        const rd = runsStore.get(current.runId);
-        const defs = (indicatorDefs || []).map(d => ({ ...d, enabled: true }));
+        const defs = allIndicatorDefs().map(d => ({ ...d, enabled: true }));
+        const previous = current.indicatorId;
 
-        // group by sector
         const bySector = new Map();
         for (const d of defs) {
             const sector = d.sector || 'Other';
@@ -1179,9 +1234,8 @@ export function initSubbasinDashboard({
 
         els.metric.innerHTML = html;
 
-        // Keep current selection if possible
-        const stillValid = defs.find(d => d.enabled && d.id === current.indicatorId);
-        const pick = stillValid || defs.find(d => d.enabled);
+        const stillValid = defs.find(d => d.id === previous);
+        const pick = stillValid || defs.find(d => !d.isMca) || defs[0] || null;
 
         if (pick) {
             els.metric.value = pick.id;
@@ -1189,6 +1243,7 @@ export function initSubbasinDashboard({
         } else {
             current.indicatorId = null;
         }
+
         updateCropVisibility();
     }
 
@@ -1307,6 +1362,10 @@ export function initSubbasinDashboard({
         if (els.cropChart)   Plotly.purge(els.cropChart);
 
         updateHelpText();
+    }
+
+    function allIndicatorDefs() {
+        return [...indicatorDefs, ...mcaIndicatorDefs];
     }
 
     function applyDatasetSelectionToUi(datasetIds) {
@@ -1784,7 +1843,7 @@ export function initSubbasinDashboard({
     }
 
     function currentIndicator() {
-        return (indicatorDefs || []).find(d => d.id === current.indicatorId) || null;
+        return allIndicatorDefs().find(d => d.id === current.indicatorId) || null;
     }
     function cropSuffix() {
         const def = currentIndicator();
@@ -2047,6 +2106,7 @@ export function initSubbasinDashboard({
         hasRunsForStudyArea = null;
         runsMeta = [];
         runsStore.clear();
+        mcaIndicatorDefs = [];
 
         // reset MCA selection cache
         lastRunCropsById = {};

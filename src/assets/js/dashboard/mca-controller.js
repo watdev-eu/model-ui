@@ -1568,6 +1568,7 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
 
     async function loadActivePreset(saId, workspaceId = null, { workspaceMode = 'auto' } = {}) {
         resultsCache = null;
+        document.dispatchEvent(new CustomEvent('watdev:mca-results-cleared'));
         runInputs.clear();
         includedRunIds = new Set();
         allowedCropSet = null;
@@ -1827,6 +1828,14 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
 
             resultsCache = json;
             renderMcaViz(json);
+
+            document.dispatchEvent(new CustomEvent('watdev:mca-computed', {
+                detail: {
+                    viewerIndicators: getViewerIndicatorDefs(),
+                    datasetIds: (json?.dataset_ids || []).map(String),
+                }
+            }));
+
             return json;
         } finally {
             els.mcaComputeBtn.textContent = 'Compute MCA';
@@ -1863,6 +1872,62 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         updateWorkspaceActionUi();
     });
 
+    function getViewerIndicatorDefs() {
+        const list = resultsCache?.viewer_indicators;
+        return Array.isArray(list) ? list.map(x => ({
+            ...x,
+            id: x.code || x.id,
+            isMca: true,
+        })) : [];
+    }
+
+    function getViewerRows(datasetId, indicatorCode) {
+        const did = String(datasetId);
+        const code = String(indicatorCode);
+
+        const blk = resultsCache?.results?.raw_spatial?.by_dataset?.[did]?.[code];
+        if (!blk) return [];
+
+        const grain = String(blk.grain || 'sub');
+        const rows = [];
+
+        if (grain === 'sub') {
+            const bySub = blk.by_sub || {};
+            for (const [sub, yearMap] of Object.entries(bySub)) {
+                for (const [year, value] of Object.entries(yearMap || {})) {
+                    rows.push({
+                        year: Number(year),
+                        sub: Number(sub),
+                        crop: null,
+                        value: value == null ? null : Number(value),
+                    });
+                }
+            }
+        } else {
+            const bySubCrop = blk.by_sub_crop || {};
+            for (const [sub, cropMap] of Object.entries(bySubCrop)) {
+                for (const [crop, yearMap] of Object.entries(cropMap || {})) {
+                    for (const [year, value] of Object.entries(yearMap || {})) {
+                        rows.push({
+                            year: Number(year),
+                            sub: Number(sub),
+                            crop: String(crop),
+                            value: value == null ? null : Number(value),
+                        });
+                    }
+                }
+            }
+        }
+
+        rows.sort((a, b) => {
+            if (a.year !== b.year) return a.year - b.year;
+            if (a.sub !== b.sub) return a.sub - b.sub;
+            return String(a.crop || '').localeCompare(String(b.crop || ''));
+        });
+
+        return rows;
+    }
+
     return {
         loadActivePreset,
         refreshWorkspaceList,
@@ -1878,6 +1943,8 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         getRunVarNum,
         getCropGlobalNum,
         getGlobalVarNum,
+        getViewerIndicatorDefs,
+        getViewerRows,
     };
 }
 

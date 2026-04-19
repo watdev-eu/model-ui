@@ -10,6 +10,8 @@ require_once __DIR__ . '/McaSwatInputsRepository.php';
 require_once __DIR__ . '/McaWaterRightsRepository.php';
 require_once __DIR__ . '/DashboardDatasetKey.php';
 require_once __DIR__ . '/CustomScenarioRepository.php';
+require_once __DIR__ . '/McaIndicatorRegistry.php';
+require_once __DIR__ . '/McaSpatialResultsBuilder.php';
 
 final class McaComputeService
 {
@@ -919,6 +921,8 @@ final class McaComputeService
         $globalVars = $payload['variables'] ?? [];
         $globalIdx = self::indexVarsByKey($globalVars);
 
+        $viewerIndicators = McaIndicatorRegistry::listForCodes($enabledMcaCodes);
+
         // ---- Results: BCR (per run, per crop) ----
         $results = [];
         $warnings = [];
@@ -998,6 +1002,19 @@ final class McaComputeService
                     'series' => $bcrAgg['series'],
                     'debug' => $bcrAgg['debug'],
                 ];
+                $results['raw_spatial'] = McaSpatialResultsBuilder::build([
+                    'dataset_contexts'       => $datasetContexts,
+                    'enabled_codes'          => $enabledMcaCodes,
+                    'swat_series_by_dataset' => $swatSeriesByDataset,
+                    'swat_series_by_run'     => $swatSeriesByRun,
+                    'crop_vars_idx'          => $cropVarsIdx,
+                    'baseline_factors_idx'   => $baselineFactorsIdx,
+                    'run_var_idx_by_id'      => $runVarIdxById,
+                    'run_factors_by_id'      => $runFactorsById,
+                    'global_idx'             => $globalIdx,
+                    'baseline_run_id'        => $baselineRunId,
+                    'crop_filter'            => $cropFilter,
+                ]);
             }
         }
 
@@ -1668,6 +1685,8 @@ final class McaComputeService
             'enabled_mca_meta' => $enabledMeta,
             'swat_required'    => $requiredSwat,
             'swat_series'      => $swatSeriesByRun,
+
+            'viewer_indicators' => $viewerIndicators,
 
             'results'          => $results,
             'totals'           => $results['totals'] ?? [],

@@ -368,23 +368,6 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                                 </div>
                             </div>
                         </div>
-
-                        <div class="card mt-3">
-                            <div class="card-body">
-                                <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-                                    <div class="small text-muted">Raw indicator time series (unweighted)</div>
-
-                                    <select id="mcaIndicatorSelect" class="form-select form-select-sm" style="max-width:360px;">
-                                        <!-- options populated after compute -->
-                                    </select>
-                                </div>
-
-                                <div id="mcaRawTsChart" style="height:420px;"></div>
-                                <div class="form-text small">
-                                    This chart plots <span class="mono">results.raw.by_run[run_id][indicator].series</span> (no weighting, no normalization).
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 </div> <!-- /#mcaEnabledWrap -->
                 </div>
@@ -474,8 +457,6 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                     mcaVizWrap: document.getElementById('mcaVizWrap'),
                     mcaRadarChart: document.getElementById('mcaRadarChart'),
                     mcaTotalsChart: document.getElementById('mcaTotalsChart'),
-                    mcaIndicatorSelect: document.getElementById('mcaIndicatorSelect'),
-                    mcaRawTsChart: document.getElementById('mcaRawTsChart'),
 
                     loadingAlert: document.getElementById('loadingAlert'),
                     loadingTitle: document.getElementById('loadingTitle'),
