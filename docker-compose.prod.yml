@@ -172,9 +172,10 @@ volumes:
   pgadmin_data:
 
 networks:
-  # Shared with Traefik – all internet-facing services join this
+  # Shared with Traefik – pre-created external network
   proxy:
+    external: true
     name: proxy
-  # DB + backend only – never exposed to Traefik
+  # DB + backend only – private project network
   internal:
     internal: true
