@@ -34,6 +34,72 @@ export function initMcaController({ apiBase, els }) {
     let includedRunIds = new Set();   // dataset ids: "12", "custom:5"
     const runInputs = new Map();      // datasetId -> { ok, loading, error, ... }
 
+    let swatIndicatorDefs = [];
+    let swatIndicatorDefsLoaded = false;
+
+    async function ensureSwatIndicatorDefsLoaded() {
+        if (swatIndicatorDefsLoaded) return;
+
+        const res = await fetch(`${apiBase}/swat_indicators_list.php`);
+        const json = await res.json();
+        if (!res.ok) {
+            throw new Error(json?.error || `Failed to load swat indicators (${res.status})`);
+        }
+
+        swatIndicatorDefs = Array.isArray(json?.indicators) ? json.indicators.map(x => ({
+            ...x,
+            indicator_calc_key: String(x.code),
+            indicator_code: String(x.code),
+            indicator_name: String(x.name || x.code),
+            category: String(x.sector || 'Other'),
+            source: 'swat',
+            is_enabled: false,
+            weight: 0,
+            direction: 'pos',
+        })) : [];
+
+        swatIndicatorDefsLoaded = true;
+    }
+
+    function mergePresetItemsWithSwatIndicators(presetItems, swatDefs) {
+        const out = [];
+        const seen = new Set();
+
+        for (const it of (presetItems || [])) {
+            const key = String(it.indicator_calc_key || it.indicator_code || '');
+            if (!key) continue;
+            seen.add(key);
+
+            out.push({
+                ...it,
+                indicator_calc_key: key,
+                indicator_code: String(it.indicator_code || key),
+                indicator_name: String(it.indicator_name || key),
+                category: 'Socioeconomic',
+                source: 'mca',
+            });
+        }
+
+        for (const sw of (swatDefs || [])) {
+            const key = String(sw.indicator_calc_key || sw.indicator_code || '');
+            if (!key || seen.has(key)) continue;
+
+            out.push({
+                ...sw,
+                indicator_calc_key: key,
+                indicator_code: String(sw.indicator_code || key),
+                indicator_name: String(sw.indicator_name || key),
+                category: String(sw.category || sw.sector || 'Other'),
+                source: 'swat',
+                is_enabled: false,
+                weight: 0,
+                direction: 'pos',
+            });
+        }
+
+        return out;
+    }
+
     function datasetIdString(id) {
         return String(id ?? '').trim();
     }
@@ -131,8 +197,16 @@ export function initMcaController({ apiBase, els }) {
         });
 
         Plotly.newPlot(els.mcaRadarChart, traces, {
-            margin: { t: 10, r: 10, b: 10, l: 10 },
-            polar: { radialaxis: { range: [0, 1], tickformat: '.1f' } },
+            margin: { t: 30, r: 200, b: 40, l: 200 },
+            polar: {
+                radialaxis: {
+                    range: [0, 1],
+                    tickformat: '.1f',
+                },
+                angularaxis: {
+                    tickfont: { size: 11 },
+                },
+            },
             showlegend: true,
         }, { displayModeBar: false, responsive: true });
     }
@@ -528,27 +602,47 @@ export function initMcaController({ apiBase, els }) {
             return;
         }
 
+        const groups = new Map();
+
+        for (const it of items) {
+            const category = String(it.category || it.sector || 'Other');
+            if (!groups.has(category)) groups.set(category, []);
+            groups.get(category).push(it);
+        }
+
+        const preferredOrder = ['Socioeconomic', 'Crop', 'Groundwater', 'Soil', 'Surface water'];
+        const orderedCategories = [
+            ...preferredOrder.filter(cat => groups.has(cat)),
+            ...[...groups.keys()].filter(cat => !preferredOrder.includes(cat)).sort((a, b) => a.localeCompare(b))
+        ];
+
         const sumW = enabledWeightSum(items);
 
         els.mcaIndicatorsTableWrap.innerHTML = `
-          <div class="table-responsive">
-            <table class="table table-sm align-middle mb-2 w-100">
-              <thead>
-                <tr>
-                  <th style="width:70px">Use</th>
-                  <th>Indicator</th>
-                  <th style="width:170px">Direction</th>
-                  <th style="width:140px">Weight</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${items.map((it, idx) => {
-                const code = String(it.indicator_code ?? '');
-                const name = String(it.indicator_name ?? code);
+      ${orderedCategories.map(category => {
+            const rows = groups.get(category) || [];
+            return `
+          <div class="mb-3">
+            <div class="fw-semibold mb-2">${escapeHtml(category)}</div>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0 w-100">
+                <thead>
+                  <tr>
+                    <th style="width:70px">Use</th>
+                    <th>Indicator</th>
+                    <th style="width:170px">Direction</th>
+                    <th style="width:140px">Weight</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows.map((it) => {
+                const idx = items.indexOf(it);
+                const code = String(it.indicator_code ?? it.indicator_calc_key ?? '');
+                const name = String(it.indicator_name ?? it.name ?? code);
                 const dir  = (it.direction === 'neg' || it.direction === 'pos') ? it.direction : 'pos';
                 const wNum = Number(it.weight);
                 const w    = Number.isFinite(wNum) ? Math.max(0, wNum) : 0;
-    
+
                 return `
                       <tr data-idx="${idx}">
                         <td>
@@ -556,9 +650,10 @@ export function initMcaController({ apiBase, els }) {
                         </td>
                         <td>
                           <div class="fw-semibold">${escapeHtml(name)}</div>
+                          <div class="text-muted small mono">${escapeHtml(code)}</div>
                         </td>
                         <td>
-                          <div class="btn-group btn-group-sm w-100 mca-dir-group" role="group" aria-label="Direction">
+                          <div class="btn-group btn-group-sm w-100 mca-dir-group" role="group">
                             <input type="radio"
                                    class="btn-check mca-dir"
                                    name="mca-dir-${idx}"
@@ -568,7 +663,7 @@ export function initMcaController({ apiBase, els }) {
                             <label class="btn btn-outline-success" for="mca-dir-pos-${idx}">
                               Higher better
                             </label>
-                        
+
                             <input type="radio"
                                    class="btn-check mca-dir"
                                    name="mca-dir-${idx}"
@@ -584,22 +679,23 @@ export function initMcaController({ apiBase, els }) {
                           <input class="form-control form-control-sm mono mca-w"
                                  type="number" step="0.1" min="0"
                                  value="${w}">
-                          <div class="form-text small">
-                            Normalized on compute
-                          </div>
+                          <div class="form-text small">Normalized on compute</div>
                         </td>
                       </tr>
                     `;
             }).join('')}
-              </tbody>
-            </table>
-          </div>
-          <div class="small text-muted">
-            Enabled weight sum: <span class="mono">${sumW.toFixed(1)}</span>
+                </tbody>
+              </table>
+            </div>
           </div>
         `;
+        }).join('')}
 
-        // Wire live edits
+      <div class="small text-muted mt-2">
+        Enabled weight sum: <span class="mono">${sumW.toFixed(1)}</span>
+      </div>
+    `;
+
         els.mcaIndicatorsTableWrap.querySelectorAll('tr[data-idx]').forEach(tr => {
             const idx = parseInt(tr.dataset.idx, 10);
             const en  = tr.querySelector('.mca-en');
@@ -1623,8 +1719,15 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
             console.error('Preset id missing from mca_preset_active response:', json);
         }
 
-        defaultPresetItems = (json.items || []).map(x => ({ ...x }));
-        currentPresetItems = (json.items || []).map(x => ({ ...x }));
+        await ensureSwatIndicatorDefsLoaded();
+
+        const mergedPresetItems = mergePresetItemsWithSwatIndicators(
+            (json.items || []).map(x => ({ ...x })),
+            swatIndicatorDefs
+        );
+
+        defaultPresetItems = mergedPresetItems.map(x => ({ ...x }));
+        currentPresetItems = mergedPresetItems.map(x => ({ ...x }));
 
         defaultCropVars = (json.crop_variables || []).map(x => ({ ...x }));
         currentCropVars = (json.crop_variables || []).map(x => ({ ...x }));

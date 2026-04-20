@@ -1,10 +1,11 @@
 <?php
-// src/classes/McaIndicatorRegistry.php
 declare(strict_types=1);
+
+require_once __DIR__ . '/SwatIndicatorRegistry.php';
 
 final class McaIndicatorRegistry
 {
-    public const MAP = [
+    public const MCA_MAP = [
         'bcr' => [
             'sector' => 'Socioeconomic',
             'name' => 'Benefit-cost ratio of BMP',
@@ -113,19 +114,21 @@ final class McaIndicatorRegistry
 
     public static function meta(string $code): array
     {
-        if (!isset(self::MAP[$code])) {
-            throw new InvalidArgumentException("Unknown MCA indicator: {$code}");
+        if (isset(self::MCA_MAP[$code])) {
+            return array_merge(['code' => $code], self::MCA_MAP[$code]);
         }
-        return array_merge(['code' => $code], self::MAP[$code]);
-    }
 
-    public static function list(): array
-    {
-        $out = [];
-        foreach (array_keys(self::MAP) as $code) {
-            $out[] = self::meta($code);
-        }
-        return $out;
+        $sw = SwatIndicatorRegistry::meta($code);
+
+        return [
+            'code' => $code,
+            'sector' => $sw['sector'] ?? 'Other',
+            'name' => $sw['name'] ?? $code,
+            'unit' => $sw['unit'] ?? null,
+            'description' => $sw['description'] ?? '',
+            'source' => 'swat',
+            'grain' => $sw['grain'] ?? 'sub',
+        ];
     }
 
     public static function listForCodes(array $codes): array
@@ -133,8 +136,10 @@ final class McaIndicatorRegistry
         $out = [];
         foreach ($codes as $code) {
             $code = (string)$code;
-            if (isset(self::MAP[$code])) {
+            try {
                 $out[] = self::meta($code);
+            } catch (\Throwable $e) {
+                // ignore unknown code
             }
         }
         return $out;

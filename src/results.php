@@ -350,20 +350,20 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                         <h3 class="h6 mb-2">MCA visualisations</h3>
 
                         <div class="row g-3">
-                            <div class="col-12 col-lg-6">
+                            <div class="col-12">
                                 <div class="card">
                                     <div class="card-body">
                                         <div class="small text-muted mb-2">Spider chart (normalized 0–1)</div>
-                                        <div id="mcaRadarChart" style="height:380px;"></div>
+                                        <div id="mcaRadarChart" style="height:420px;"></div>
                                     </div>
                                 </div>
                             </div>
 
-                            <div class="col-12 col-lg-6">
+                            <div class="col-12">
                                 <div class="card">
                                     <div class="card-body">
                                         <div class="small text-muted mb-2">Overall MCA score (weighted total)</div>
-                                        <div id="mcaTotalsChart" style="height:380px;"></div>
+                                        <div id="mcaTotalsChart" style="height:320px;"></div>
                                     </div>
                                 </div>
                             </div>

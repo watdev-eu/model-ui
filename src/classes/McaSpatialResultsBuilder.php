@@ -46,7 +46,9 @@ final class McaSpatialResultsBuilder
 
         foreach ($datasetContexts as $ds) {
             $datasetId = (string)($ds['dataset_id'] ?? '');
-            if ($datasetId === '') continue;
+            if ($datasetId === '') {
+                continue;
+            }
 
             $runVarIdx = $runVarIdxById[$datasetId] ?? [];
             $runFactorsIdx = $runFactorsById[$datasetId] ?? [];
@@ -61,7 +63,13 @@ final class McaSpatialResultsBuilder
             $nuePBySub = $swatDataset['nue_p_pct']['by_sub'] ?? [];
             $subCropAreaHa = $swatDataset['crop_yield_t_ha']['sub_crop_area_ha'] ?? [];
 
-            $datasetYears = self::yearsFromNestedSeries($yieldBySub);
+            $datasetYears = self::seriesYearsUnion(
+                self::yearsFromNestedSeries($yieldBySub),
+                self::yearsFromNestedSeries($irrBySub),
+                self::yearsFromNestedSeries($cSeqBySub),
+                self::yearsFromNestedSeries($nueNBySub),
+                self::yearsFromNestedSeries($nuePBySub)
+            );
 
             $discountPct = self::getNumFromVarIdx($runVarIdx, 'discount_rate') ?? 0.0;
             $life = (int)round(self::getNumFromVarIdx($runVarIdx, 'economic_life_years') ?? 0);
@@ -105,11 +113,47 @@ final class McaSpatialResultsBuilder
             }
 
             foreach ($enabledCodes as $code) {
-                if (!isset(McaIndicatorRegistry::MAP[$code])) continue;
+                try {
+                    $meta = McaIndicatorRegistry::meta($code);
+                } catch (\Throwable $e) {
+                    continue;
+                }
 
-                $meta = McaIndicatorRegistry::meta($code);
-                $grain = (string)$meta['grain'];
+                $grain  = (string)($meta['grain'] ?? 'sub');
+                $source = (string)($meta['source'] ?? 'mca');
 
+                // ----------------------------------------------------
+                // Direct SWAT indicators: expose existing SWAT blocks
+                // ----------------------------------------------------
+                if ($source === 'swat') {
+                    $swatBlock = $swatDataset[$code] ?? null;
+                    if (!is_array($swatBlock)) {
+                        $out['by_dataset'][$datasetId][$code] = ($grain === 'sub_crop')
+                            ? ['grain' => 'sub_crop', 'by_sub_crop' => [], 'by_sub' => []]
+                            : ['grain' => 'sub', 'by_sub' => []];
+                        continue;
+                    }
+
+                    if ($grain === 'sub_crop') {
+                        $bySubCrop = self::normalizeSubCropSeries($swatBlock['by_sub'] ?? [], $cropFilter);
+                        $out['by_dataset'][$datasetId][$code] = [
+                            'grain' => 'sub_crop',
+                            'by_sub_crop' => $bySubCrop,
+                            'by_sub' => self::aggregateBySubCropWeightedMean($bySubCrop, $swatBlock['sub_crop_area_ha'] ?? [], $cropFilter),
+                        ];
+                    } else {
+                        $out['by_dataset'][$datasetId][$code] = [
+                            'grain' => 'sub',
+                            'by_sub' => self::normalizeSubSeries($swatBlock['by_sub'] ?? []),
+                        ];
+                    }
+
+                    continue;
+                }
+
+                // ---------------------------------------------
+                // Special sub-grain MCA indicator
+                // ---------------------------------------------
                 if ($code === 'water_rights_access') {
                     $out['by_dataset'][$datasetId][$code] = self::buildWaterRightsAccessSpatial(
                         $ds,
@@ -118,6 +162,7 @@ final class McaSpatialResultsBuilder
                     continue;
                 }
 
+                // initialize MCA blocks
                 if ($grain === 'sub') {
                     $out['by_dataset'][$datasetId][$code] = [
                         'grain' => 'sub',
@@ -139,20 +184,32 @@ final class McaSpatialResultsBuilder
                 }
 
                 if ($code === 'carbon_sequestration') {
-                    $out['by_dataset'][$datasetId][$code]['by_sub_crop'] = $cSeqBySub;
-                    $out['by_dataset'][$datasetId][$code]['by_sub'] = self::aggregateBySubCropWeightedMean($cSeqBySub, $subCropAreaHa, $cropFilter);
+                    $out['by_dataset'][$datasetId][$code]['by_sub_crop'] = self::normalizeSubCropSeries($cSeqBySub, $cropFilter);
+                    $out['by_dataset'][$datasetId][$code]['by_sub'] = self::aggregateBySubCropWeightedMean(
+                        $out['by_dataset'][$datasetId][$code]['by_sub_crop'],
+                        $subCropAreaHa,
+                        $cropFilter
+                    );
                     continue;
                 }
 
                 if ($code === 'fertiliser_use_eff_n') {
-                    $out['by_dataset'][$datasetId][$code]['by_sub_crop'] = $nueNBySub;
-                    $out['by_dataset'][$datasetId][$code]['by_sub'] = self::aggregateBySubCropWeightedMean($nueNBySub, $subCropAreaHa, $cropFilter);
+                    $out['by_dataset'][$datasetId][$code]['by_sub_crop'] = self::normalizeSubCropSeries($nueNBySub, $cropFilter);
+                    $out['by_dataset'][$datasetId][$code]['by_sub'] = self::aggregateBySubCropWeightedMean(
+                        $out['by_dataset'][$datasetId][$code]['by_sub_crop'],
+                        $subCropAreaHa,
+                        $cropFilter
+                    );
                     continue;
                 }
 
                 if ($code === 'fertiliser_use_eff_p') {
-                    $out['by_dataset'][$datasetId][$code]['by_sub_crop'] = $nuePBySub;
-                    $out['by_dataset'][$datasetId][$code]['by_sub'] = self::aggregateBySubCropWeightedMean($nuePBySub, $subCropAreaHa, $cropFilter);
+                    $out['by_dataset'][$datasetId][$code]['by_sub_crop'] = self::normalizeSubCropSeries($nuePBySub, $cropFilter);
+                    $out['by_dataset'][$datasetId][$code]['by_sub'] = self::aggregateBySubCropWeightedMean(
+                        $out['by_dataset'][$datasetId][$code]['by_sub_crop'],
+                        $subCropAreaHa,
+                        $cropFilter
+                    );
                     continue;
                 }
 
@@ -257,6 +314,7 @@ final class McaSpatialResultsBuilder
                             if ($code === 'income_increase_pct') {
                                 $afterRev = ($yieldScn !== null && $price !== null) ? ($yieldScn * $price) : null;
                                 $beforeRev = ($yieldRef !== null && $price !== null) ? ($yieldRef * $price) : null;
+
                                 $after = ($afterRev === null) ? null : ($afterRev - ($bmpProd + $om + $landRent + $waterFeeHa + $waterCostHa));
                                 $before = ($beforeRev === null) ? null : ($beforeRev - ($baseProd + $landRent + $waterFeeHa + $waterCostHa));
 
@@ -298,7 +356,11 @@ final class McaSpatialResultsBuilder
                     }
 
                     if (in_array($code, ['cost_saving_usd', 'net_farm_income_usd_ha'], true)) {
-                        $bySub[$sub] = self::aggregateSingleSubWeightedMean($bySubCrop[$sub] ?? [], $subCropAreaHa[$sub] ?? [], $cropFilter);
+                        $bySub[$sub] = self::aggregateSingleSubWeightedMean(
+                            $bySubCrop[$sub] ?? [],
+                            $subCropAreaHa[$sub] ?? [],
+                            $cropFilter
+                        );
                     } elseif ($code === 'income_increase_pct') {
                         foreach ($aggAfter as $year => $after) {
                             $before = $aggBefore[$year] ?? null;
@@ -425,6 +487,47 @@ final class McaSpatialResultsBuilder
         ];
     }
 
+    private static function normalizeSubSeries(array $bySub): array
+    {
+        $out = [];
+        foreach ($bySub as $sub => $yearMap) {
+            foreach (($yearMap ?? []) as $year => $val) {
+                $out[(int)$sub][(int)$year] = self::numOrNull($val);
+            }
+            if (isset($out[(int)$sub])) {
+                ksort($out[(int)$sub]);
+            }
+        }
+        ksort($out);
+        return $out;
+    }
+
+    private static function normalizeSubCropSeries(array $bySubCrop, ?string $cropFilter = null): array
+    {
+        $out = [];
+        foreach ($bySubCrop as $sub => $cropMap) {
+            foreach (($cropMap ?? []) as $crop => $yearMap) {
+                $crop = (string)$crop;
+                if ($cropFilter !== null && $crop !== $cropFilter) continue;
+
+                foreach (($yearMap ?? []) as $year => $val) {
+                    $out[(int)$sub][$crop][(int)$year] = self::numOrNull($val);
+                }
+
+                if (isset($out[(int)$sub][$crop])) {
+                    ksort($out[(int)$sub][$crop]);
+                }
+            }
+
+            if (isset($out[(int)$sub])) {
+                ksort($out[(int)$sub]);
+            }
+        }
+
+        ksort($out);
+        return $out;
+    }
+
     private static function aggregateBySubCropWeightedMean(array $bySubCrop, array $subCropAreaHa, ?string $cropFilter = null): array
     {
         $out = [];
@@ -442,12 +545,14 @@ final class McaSpatialResultsBuilder
     {
         $weights = [];
         $sum = 0.0;
+
         foreach ($cropAreas as $crop => $area) {
             if ($cropFilter !== null && $crop !== $cropFilter) continue;
             if (!is_numeric($area) || (float)$area <= 0) continue;
             $weights[(string)$crop] = (float)$area;
             $sum += (float)$area;
         }
+
         if ($sum <= 0) return [];
 
         foreach ($weights as $crop => $w) {
@@ -513,6 +618,7 @@ final class McaSpatialResultsBuilder
         $years = [];
         $scan = function ($node) use (&$years, &$scan) {
             if (!is_array($node)) return;
+
             $allLeaf = true;
             foreach ($node as $v) {
                 if (is_array($v)) {
@@ -520,16 +626,19 @@ final class McaSpatialResultsBuilder
                     break;
                 }
             }
+
             if ($allLeaf) {
                 foreach (array_keys($node) as $k) {
                     if (is_numeric($k)) $years[(int)$k] = true;
                 }
                 return;
             }
+
             foreach ($node as $v) {
                 $scan($v);
             }
         };
+
         $scan($series);
         $out = array_keys($years);
         sort($out);
@@ -606,5 +715,18 @@ final class McaSpatialResultsBuilder
     private static function numOrNull($v): ?float
     {
         return is_numeric($v) ? (float)$v : null;
+    }
+
+    private static function seriesYearsUnion(array ...$yearLists): array
+    {
+        $years = [];
+        foreach ($yearLists as $list) {
+            foreach ($list as $y) {
+                $years[(int)$y] = true;
+            }
+        }
+        $out = array_keys($years);
+        sort($out);
+        return $out;
     }
 }
