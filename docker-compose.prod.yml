@@ -165,6 +165,22 @@ services:
       PGADMIN_CONFIG_PROXY_X_PORT_COUNT: "1"
       PGADMIN_CONFIG_PROXY_X_PREFIX_COUNT: "1"
 
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+    networks:
+      - proxy
+      - internal
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.pgadmin.rule=Host(`${DOMAIN}`) && PathPrefix(`/pgadmin`)"
+      - "traefik.http.routers.pgadmin.entrypoints=websecure"
+      - "traefik.http.routers.pgadmin.tls=true"
+      - "traefik.http.routers.pgadmin.tls.certresolver=letsencrypt"
+      - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
+
 volumes:
   uploads:
   dbdata:
