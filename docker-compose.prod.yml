@@ -70,9 +70,6 @@ services:
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
     volumes:
-      - ./src:/var/www/html
-      - ./db:/var/www/db:ro
-      - ./.env:/var/www/.env:ro
       - uploads:/shared/uploads
     depends_on:
       - db
@@ -127,68 +124,46 @@ services:
     depends_on:
       - db
     environment:
-      # ── Bootstrap admin (used for the first login / emergency access) ──────
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
 
-      # ── DB connection (used by entrypoint to render servers.json + pgpass) ──
       DB_HOST: ${DB_HOST}
       DB_PORT: ${DB_PORT}
       DB_NAME: ${DB_NAME}
       DB_USER: ${DB_USER}
       DB_PASS: ${DB_PASS}
 
-      # ── Sub-path hosting ────────────────────────────────────────────────────
       SCRIPT_NAME: /pgadmin
 
-      # ── OAuth2 / Keycloak ───────────────────────────────────────────────────
-      # Enable OAuth2 authentication
       PGADMIN_CONFIG_AUTHENTICATION_SOURCES: "['oauth2', 'internal']"
       PGADMIN_CONFIG_OAUTH2_AUTO_CREATE_USER: "True"
 
-      # Only users whose Keycloak token contains the role "admin" get in.
-      # pgAdmin reads OAUTH2_ADDITIONAL_CLAIMS to enforce this.
-      PGADMIN_CONFIG_OAUTH2_ADDITIONAL_CLAIMS: >-
-        {"resource_access": {"${KEYCLOAK_CLIENT_ID}": {"roles": ["admin"]}}}
-
       PGADMIN_CONFIG_OAUTH2_CONFIG: >-
         [{
-          "OAUTH2_NAME"          : "Keycloak",
-          "OAUTH2_DISPLAY_NAME"  : "Login with Keycloak",
-          "OAUTH2_CLIENT_ID"     : "${KEYCLOAK_CLIENT_ID}",
-          "OAUTH2_CLIENT_SECRET" : "${KEYCLOAK_CLIENT_SECRET}",
-          "OAUTH2_TOKEN_URL"     : "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token",
-          "OAUTH2_AUTHORIZATION_URL" : "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/auth",
-          "OAUTH2_API_BASE_URL"  : "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/",
-          "OAUTH2_USERINFO_ENDPOINT" : "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/userinfo",
-          "OAUTH2_SERVER_METADATA_URL" : "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/.well-known/openid-configuration",
-          "OAUTH2_SCOPE"         : "openid email profile",
+          "OAUTH2_NAME": "Keycloak",
+          "OAUTH2_DISPLAY_NAME": "Login with Keycloak",
+          "OAUTH2_CLIENT_ID": "${KEYCLOAK_CLIENT_ID}",
+          "OAUTH2_CLIENT_SECRET": "${KEYCLOAK_CLIENT_SECRET}",
+          "OAUTH2_TOKEN_URL": "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token",
+          "OAUTH2_AUTHORIZATION_URL": "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/auth",
+          "OAUTH2_API_BASE_URL": "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/",
+          "OAUTH2_USERINFO_ENDPOINT": "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/userinfo",
+          "OAUTH2_SERVER_METADATA_URL": "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/.well-known/openid-configuration",
+          "OAUTH2_SCOPE": "openid email profile",
           "OAUTH2_USERNAME_CLAIM": "preferred_username",
-          "OAUTH2_ICON"          : "fa-key",
-          "OAUTH2_BUTTON_COLOR"  : "#006ead"
+          "OAUTH2_ADDITIONAL_CLAIMS": {
+            "roles": ["admin"]
+          }
         }]
 
-    volumes:
-      # Persistent pgAdmin data (user prefs, query history, etc.)
-      - pgadmin_data:/var/lib/pgadmin
+      PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
+      PGADMIN_REPLACE_SERVERS_ON_STARTUP: "True"
 
-    networks:
-      - proxy
-      - internal
-
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=proxy"
-
-      # Strip /pgadmin prefix before forwarding to pgAdmin
-      - "traefik.http.middlewares.pgadmin-strip.stripprefix.prefixes=/pgadmin"
-
-      - "traefik.http.routers.pgadmin.rule=Host(`${DOMAIN}`) && PathPrefix(`/pgadmin`)"
-      - "traefik.http.routers.pgadmin.entrypoints=websecure"
-      - "traefik.http.routers.pgadmin.tls=true"
-      - "traefik.http.routers.pgadmin.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.pgadmin.middlewares=pgadmin-strip"
-      - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
+      PGADMIN_CONFIG_PROXY_X_FOR_COUNT: "1"
+      PGADMIN_CONFIG_PROXY_X_PROTO_COUNT: "1"
+      PGADMIN_CONFIG_PROXY_X_HOST_COUNT: "1"
+      PGADMIN_CONFIG_PROXY_X_PORT_COUNT: "1"
+      PGADMIN_CONFIG_PROXY_X_PREFIX_COUNT: "1"
 
 volumes:
   uploads:
