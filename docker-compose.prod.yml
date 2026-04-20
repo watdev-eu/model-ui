@@ -1,0 +1,205 @@
+services:
+
+  # ─────────────────────────────────────────────
+  # Traefik – reverse proxy + Let's Encrypt
+  # ─────────────────────────────────────────────
+  traefik:
+    image: traefik:v3.3
+    restart: unless-stopped
+    command:
+      # API / dashboard (internal only – not exposed publicly)
+      - "--api.dashboard=true"
+      - "--api.insecure=false"
+
+      # Docker provider
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=proxy"
+
+      # Entrypoints
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+
+      # Global HTTP → HTTPS redirect
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
+
+      # Let's Encrypt (ACME)
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+
+      # For testing
+      - "--certificatesresolvers.letsencrypt.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+
+      - "--log.level=INFO"
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "letsencrypt:/letsencrypt"
+
+    networks:
+      - proxy
+
+  # ─────────────────────────────────────────────
+  # Web (PHP/Apache) – your main application
+  # ─────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV}
+      APP_URL: ${APP_URL}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASS}
+      UPLOAD_DIR: ${UPLOAD_DIR}
+      KEYCLOAK_URL: ${KEYCLOAK_URL}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
+    volumes:
+      - ./src:/var/www/html
+      - ./db:/var/www/db:ro
+      - ./.env:/var/www/.env:ro
+      - uploads:/shared/uploads
+    depends_on:
+      - db
+    networks:
+      - proxy
+      - internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+
+      # Router: catch everything on the domain EXCEPT /pgadmin
+      - "traefik.http.routers.web.rule=Host(`${DOMAIN}`) && !PathPrefix(`/pgadmin`)"
+      - "traefik.http.routers.web.entrypoints=websecure"
+      - "traefik.http.routers.web.tls=true"
+      - "traefik.http.routers.web.tls.certresolver=letsencrypt"
+      - "traefik.http.services.web.loadbalancer.server.port=80"
+
+  # ─────────────────────────────────────────────
+  # PostgreSQL + PostGIS
+  # ─────────────────────────────────────────────
+  db:
+    build: ./db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+    # No public port exposure in production – only reachable inside Docker networks
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - uploads:/shared/uploads
+    networks:
+      - internal
+    command:
+      - "postgres"
+      - "-c"
+      - "max_wal_size=2GB"
+      - "-c"
+      - "min_wal_size=80MB"
+      - "-c"
+      - "checkpoint_timeout=15min"
+      - "-c"
+      - "shared_buffers=1GB"
+
+  # ─────────────────────────────────────────────
+  # pgAdmin – served at /pgadmin
+  # ─────────────────────────────────────────────
+  pgadmin:
+    build: ./pgadmin
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      # ── Bootstrap admin (used for the first login / emergency access) ──────
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+
+      # ── DB connection (used by entrypoint to render servers.json + pgpass) ──
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASS}
+
+      # ── Sub-path hosting ────────────────────────────────────────────────────
+      SCRIPT_NAME: /pgadmin
+
+      # ── OAuth2 / Keycloak ───────────────────────────────────────────────────
+      # Enable OAuth2 authentication
+      PGADMIN_CONFIG_AUTHENTICATION_SOURCES: "['oauth2', 'internal']"
+      PGADMIN_CONFIG_OAUTH2_AUTO_CREATE_USER: "True"
+
+      # Only users whose Keycloak token contains the role "admin" get in.
+      # pgAdmin reads OAUTH2_ADDITIONAL_CLAIMS to enforce this.
+      PGADMIN_CONFIG_OAUTH2_ADDITIONAL_CLAIMS: >-
+        {"resource_access": {"${KEYCLOAK_CLIENT_ID}": {"roles": ["admin"]}}}
+
+      PGADMIN_CONFIG_OAUTH2_CONFIG: >-
+        [{
+          "OAUTH2_NAME"          : "Keycloak",
+          "OAUTH2_DISPLAY_NAME"  : "Login with Keycloak",
+          "OAUTH2_CLIENT_ID"     : "${KEYCLOAK_CLIENT_ID}",
+          "OAUTH2_CLIENT_SECRET" : "${KEYCLOAK_CLIENT_SECRET}",
+          "OAUTH2_TOKEN_URL"     : "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token",
+          "OAUTH2_AUTHORIZATION_URL" : "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/auth",
+          "OAUTH2_API_BASE_URL"  : "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/",
+          "OAUTH2_USERINFO_ENDPOINT" : "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/userinfo",
+          "OAUTH2_SERVER_METADATA_URL" : "${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/.well-known/openid-configuration",
+          "OAUTH2_SCOPE"         : "openid email profile",
+          "OAUTH2_USERNAME_CLAIM": "preferred_username",
+          "OAUTH2_ICON"          : "fa-key",
+          "OAUTH2_BUTTON_COLOR"  : "#006ead"
+        }]
+
+    volumes:
+      # Persistent pgAdmin data (user prefs, query history, etc.)
+      - pgadmin_data:/var/lib/pgadmin
+
+    networks:
+      - proxy
+      - internal
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+
+      # Strip /pgadmin prefix before forwarding to pgAdmin
+      - "traefik.http.middlewares.pgadmin-strip.stripprefix.prefixes=/pgadmin"
+
+      - "traefik.http.routers.pgadmin.rule=Host(`${DOMAIN}`) && PathPrefix(`/pgadmin`)"
+      - "traefik.http.routers.pgadmin.entrypoints=websecure"
+      - "traefik.http.routers.pgadmin.tls=true"
+      - "traefik.http.routers.pgadmin.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.pgadmin.middlewares=pgadmin-strip"
+      - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
+
+volumes:
+  uploads:
+  dbdata:
+  letsencrypt:
+  pgadmin_data:
+
+networks:
+  # Shared with Traefik – all internet-facing services join this
+  proxy:
+    name: proxy
+  # DB + backend only – never exposed to Traefik
+  internal:
+    internal: true
