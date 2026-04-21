@@ -152,7 +152,11 @@ services:
           "OAUTH2_SCOPE": "openid email profile",
           "OAUTH2_USERNAME_CLAIM": "preferred_username",
           "OAUTH2_ADDITIONAL_CLAIMS": {
-            "roles": ["admin"]
+            "resource_access": {
+              "${KEYCLOAK_CLIENT_ID}": {
+                "roles": ["admin"]
+              }
+            }
           }
         }]
 
