@@ -28,6 +28,48 @@
     let map, vectorSource, selectionLayer;
     let inspectRequestEpoch = 0;
 
+    function setButtonBusy(button, busy, busyText, idleText) {
+        if (!button) return;
+        if (!button.dataset.idleText) {
+            button.dataset.idleText = idleText || button.textContent.trim();
+        }
+
+        if (busy) {
+            button.disabled = true;
+            button.dataset.wasBusy = '1';
+            button.innerHTML = `<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>${escapeHtml(busyText)}`;
+        } else {
+            button.disabled = false;
+            button.innerHTML = escapeHtml(button.dataset.idleText);
+            delete button.dataset.wasBusy;
+        }
+    }
+
+    function ensureStatusBox() {
+        let el = document.getElementById('importStatusMessage');
+        if (el) return el;
+
+        el = document.createElement('div');
+        el.id = 'importStatusMessage';
+        el.className = 'alert alert-info d-none mt-3';
+        inspectForm.insertAdjacentElement('afterend', el);
+        return el;
+    }
+
+    function setStatusMessage(message, type = 'info') {
+        const el = ensureStatusBox();
+        el.className = `alert alert-${type} mt-3`;
+        el.textContent = message;
+        el.classList.remove('d-none');
+    }
+
+    function clearStatusMessage() {
+        const el = document.getElementById('importStatusMessage');
+        if (!el) return;
+        el.textContent = '';
+        el.classList.add('d-none');
+    }
+
     function resetInspectionState() {
         inspectData = null;
         detectedSubbasins = [];
@@ -35,6 +77,7 @@
 
         importTokenInput.value = '';
         inspectResult.classList.add('d-none');
+        clearStatusMessage();
 
         setPreview('preview-cio', '');
         setPreview('preview-period', '');
@@ -286,13 +329,16 @@
         const myEpoch = ++inspectRequestEpoch;
         const fd = new FormData(inspectForm);
 
-        btnInspect.disabled = true;
+        setButtonBusy(btnInspect, true, 'Inspecting files...', 'Inspect files');
+        setStatusMessage('Uploading and inspecting files. This can take a little while for large SWAT outputs.', 'info');
+
         try {
             const res = await fetch('/api/import_inspect.php', {
                 method: 'POST',
                 body: fd,
                 credentials: 'include'
             });
+
             const data = await res.json();
 
             if (myEpoch !== inspectRequestEpoch) {
@@ -300,6 +346,7 @@
             }
 
             if (!res.ok || !data.ok) {
+                setStatusMessage(data.error || 'Inspection failed.', 'danger');
                 showToast(data.error || 'Inspection failed.', true);
                 return;
             }
@@ -317,21 +364,23 @@
 
             renderUnknownCrops(data.unknown_crops || []);
             enableStep2And3();
+            setStatusMessage('Files inspected successfully. You can now complete the metadata and select subbasins.', 'success');
             showToast('Files inspected successfully.');
 
-            const runDateInput = finalizeForm.querySelector('input[name="run_date"]');
-            if (data.period_start_guess) {
-                runDateInput.value = data.period_start_guess;
-            }
+            // Keep model run date on today; do not overwrite it with detected period start.
         } catch (err) {
             if (myEpoch !== inspectRequestEpoch) {
                 return;
             }
             console.error(err);
+            setStatusMessage('Server error during inspection.', 'danger');
             showToast('Server error during inspection.', true);
         } finally {
             if (myEpoch === inspectRequestEpoch) {
-                btnInspect.disabled = currentSource() === 'github';
+                setButtonBusy(btnInspect, false, 'Inspecting files...', 'Inspect files');
+                if (currentSource() === 'github') {
+                    btnInspect.disabled = true;
+                }
             }
         }
     });
@@ -375,6 +424,7 @@
 
     btnSelectDetectedOnly.addEventListener('click', () => {
         const detectedSet = new Set(detectedSubbasins);
+        selectedSubbasins.clear();
         allSubbasins.forEach(sub => {
             if (detectedSet.has(sub)) {
                 selectedSubbasins.add(sub);
@@ -445,7 +495,9 @@
             }
         }
 
-        btnFinalize.disabled = true;
+        setButtonBusy(btnFinalize, true, 'Importing run...', 'Import run');
+        setStatusMessage('Importing run and writing normalized results to the database. Please wait.', 'info');
+
         try {
             const res = await fetch('/api/import_finalize.php', {
                 method: 'POST',
@@ -455,17 +507,20 @@
             const data = await res.json();
 
             if (!res.ok || !data.ok) {
+                setStatusMessage(data.error || 'Import failed.', 'danger');
                 showToast(data.error || 'Import failed.', true);
                 return;
             }
 
+            setStatusMessage(`Run imported successfully. Run ID: ${data.run_id}`, 'success');
             showToast(`Run imported successfully. Run ID: ${data.run_id}`);
             window.location.reload();
         } catch (err) {
             console.error(err);
+            setStatusMessage('Server error during import.', 'danger');
             showToast('Server error during import.', true);
         } finally {
-            btnFinalize.disabled = false;
+            setButtonBusy(btnFinalize, false, 'Importing run...', 'Import run');
         }
     });
 
