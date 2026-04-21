@@ -1,7 +1,6 @@
 #!/bin/sh
 set -e
 
-# 1. Render servers.json directly from env vars
 cat > /pgadmin4/servers.json <<EOF
 {
   "Servers": {
@@ -12,6 +11,7 @@ cat > /pgadmin4/servers.json <<EOF
       "Port": ${DB_PORT},
       "MaintenanceDB": "${DB_NAME}",
       "Username": "${DB_USER}",
+      "SharedUsername": "${DB_USER}",
       "PassFile": "/var/lib/pgadmin/pgpass",
       "SavePassword": true,
       "SSLMode": "prefer",
@@ -22,7 +22,6 @@ cat > /pgadmin4/servers.json <<EOF
 }
 EOF
 
-# 2. Write pgpass from env vars
 PGPASS_FILE="/var/lib/pgadmin/pgpass"
 mkdir -p /var/lib/pgadmin
 printf '%s:%s:%s:%s:%s\n' \
@@ -30,5 +29,4 @@ printf '%s:%s:%s:%s:%s\n' \
   > "${PGPASS_FILE}"
 chmod 0600 "${PGPASS_FILE}"
 
-# 3. Hand off to the official pgAdmin entrypoint
 exec /entrypoint.sh
