@@ -378,11 +378,30 @@ $runs       = SwatRunRepository::all();
             </div>
 
             <div class="row g-3 align-items-end mb-3">
-                <div class="col-12 col-md-6">
+                <div class="col-12 col-md-4">
                     <label class="form-label mb-1">Scenario (optional override)</label>
                     <select class="form-select form-select-sm" id="mcaDefaultsRunSelect" disabled>
                         <option value="">Use study-area defaults</option>
                     </select>
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label mb-1">Clone values from scenario</label>
+                    <select class="form-select form-select-sm" id="mcaDefaultsCloneSourceSelect" disabled>
+                        <option value="">Select source scenario…</option>
+                    </select>
+                    <div class="form-text small">
+                        Only matching variables and crops present in the selected scenario are copied.
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <button type="button"
+                            class="btn btn-sm btn-outline-secondary"
+                            id="mcaDefaultsCloneBtn"
+                            disabled>
+                        Clone into selected scenario
+                    </button>
                 </div>
             </div>
 

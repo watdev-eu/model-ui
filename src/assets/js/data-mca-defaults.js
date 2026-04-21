@@ -21,6 +21,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const runCropBlock  = document.getElementById('mcaDefaultsRunCropBlock');
     const runCropWrap   = document.getElementById('mcaDefaultsRunCropTableWrap');
 
+    const selRun        = document.getElementById('mcaDefaultsRunSelect');
+    const selCloneSource = document.getElementById('mcaDefaultsCloneSourceSelect');
+    const btnClone      = document.getElementById('mcaDefaultsCloneBtn');
+
     let state = {
         study_area_id: null,
         variable_set: null,
@@ -28,6 +32,8 @@ document.addEventListener('DOMContentLoaded', () => {
         globals: [],       // [{key,name,unit,data_type,value_*}]
         cropVars: [],      // rows from API
         cropsInRuns: [],   // ["CORN", ...]
+
+        availableRuns: [],
 
         run_id: null,
         runGlobals: [],
@@ -90,6 +96,122 @@ document.addEventListener('DOMContentLoaded', () => {
         selRun.disabled = false;
 
         if (selectedRunId) selRun.value = String(selectedRunId);
+    }
+
+    function renderCloneRuns(runs, selectedRunId = null) {
+        if (!selCloneSource) return;
+
+        if (!runs.length) {
+            selCloneSource.innerHTML = `<option value="">No scenarios for this area</option>`;
+            selCloneSource.disabled = true;
+            updateCloneButtonState();
+            return;
+        }
+
+        selCloneSource.innerHTML =
+            `<option value="">Select source scenario…</option>` +
+            runs.map(r => `<option value="${r.id}">${escHtml(r.run_label)}</option>`).join('');
+
+        selCloneSource.disabled = false;
+
+        if (selectedRunId) selCloneSource.value = String(selectedRunId);
+
+        updateCloneButtonState();
+    }
+
+    function updateCloneButtonState() {
+        const targetRunId = Number(selRun?.value || 0);
+        const sourceRunId = Number(selCloneSource?.value || 0);
+
+        if (!btnClone) return;
+        btnClone.disabled = !(targetRunId && sourceRunId && targetRunId !== sourceRunId);
+    }
+
+    async function fetchRunData(runId) {
+        if (!state.study_area_id || !runId) {
+            throw new Error('No study area or run selected');
+        }
+
+        const json = await getJson(
+            `${apiUrl}?study_area_id=${encodeURIComponent(state.study_area_id)}&run_id=${encodeURIComponent(runId)}`
+        );
+
+        return {
+            run_id: runId,
+            runGlobals: (json.run_variables || []).map(x => ({ ...x })),
+            runCropVars: (json.run_crop_variables || []).map(x => ({ ...x })),
+            runCropsInRun: (json.run_crops_in_run || []).map(String),
+        };
+    }
+
+    function cloneScenarioValuesIntoCurrent(sourceData) {
+        if (!state.run_id) return;
+
+        // 1) clone run-level values by key
+        const sourceGlobalsByKey = new Map(
+            (sourceData.runGlobals || []).map(v => [String(v.key), v])
+        );
+
+        for (const targetVar of state.runGlobals) {
+            const src = sourceGlobalsByKey.get(String(targetVar.key));
+            if (!src) continue;
+
+            targetVar.value_num  = src.value_num  ?? null;
+            targetVar.value_text = src.value_text ?? null;
+            targetVar.value_bool = src.value_bool ?? null;
+        }
+
+        // 2) clone crop-level values only where crop exists in target run
+        const targetCropSet = new Set((state.runCropsInRun || []).map(String));
+        const sourceCropVars = sourceData.runCropVars || [];
+
+        const sourceByCropKey = new Map();
+        for (const row of sourceCropVars) {
+            const crop = String(row.crop_code || '');
+            const key  = String(row.key || '');
+            if (!crop || !key) continue;
+            if (!targetCropSet.has(crop)) continue; // only copy matching crops present in target
+            sourceByCropKey.set(`${crop}::${key}`, row);
+        }
+
+        for (const targetRow of state.runCropVars) {
+            const k = `${String(targetRow.crop_code)}::${String(targetRow.key)}`;
+            const src = sourceByCropKey.get(k);
+            if (!src) continue;
+
+            targetRow.value_num  = src.value_num  ?? null;
+            targetRow.value_text = src.value_text ?? null;
+            targetRow.value_bool = src.value_bool ?? null;
+        }
+
+        // 3) ensure any target crop/key combination missing from current state but present in source is added
+        const existingTargetPairs = new Set(
+            state.runCropVars.map(r => `${String(r.crop_code)}::${String(r.key)}`)
+        );
+
+        for (const src of sourceCropVars) {
+            const crop = String(src.crop_code || '');
+            const key  = String(src.key || '');
+            const pair = `${crop}::${key}`;
+
+            if (!crop || !key) continue;
+            if (!targetCropSet.has(crop)) continue;
+            if (existingTargetPairs.has(pair)) continue;
+
+            state.runCropVars.push({
+                ...src,
+                crop_code: crop,
+                key,
+                crop_name: src.crop_name || crop,
+                value_num: src.value_num ?? null,
+                value_text: src.value_text ?? null,
+                value_bool: src.value_bool ?? null,
+            });
+        }
+
+        renderRunGlobals(state.runGlobals);
+        renderRunCropTable(state.runCropVars, state.runCropsInRun);
+        setDirty(true);
     }
 
     function renderRunGlobals(vars) {
@@ -408,8 +530,10 @@ document.addEventListener('DOMContentLoaded', () => {
         state.globals = (json.variables_global || []).map(x => ({ ...x }));
         state.cropVars = (json.crop_variables || []).map(x => ({ ...x }));
         state.cropsInRuns = json.crops_in_runs || [];
+        state.availableRuns = (json.runs || []).map(x => ({ ...x }));
 
-        renderRuns(json.runs || []);
+        renderRuns(state.availableRuns || []);
+        renderCloneRuns(state.availableRuns || []);
 
         state.run_id = null;
         state.runGlobals = [];
@@ -423,9 +547,14 @@ document.addEventListener('DOMContentLoaded', () => {
         state.runCropVars = [];
         state.runCropsInRun = [];
 
+        if (selRun) selRun.value = '';
+        if (selCloneSource) selCloneSource.value = '';
+
         runFormWrap?.replaceChildren();
         runCropWrap?.replaceChildren();
         if (runCropBlock) runCropBlock.style.display = 'none';
+
+        updateCloneButtonState();
 
         if (!state.variable_set) {
             setStatus(json.note || 'No default MCA variable set for this area.', true);
@@ -457,6 +586,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderRunGlobals(state.runGlobals);
         renderRunCropTable(state.runCropVars, state.runCropsInRun);
 
+        updateCloneButtonState();
         setStatus('');
     }
 
@@ -513,8 +643,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     btnSave?.addEventListener('click', save);
 
-    const selRun = document.getElementById('mcaDefaultsRunSelect');
-
     selRun?.addEventListener('change', () => {
         const runId = Number(selRun.value || 0);
 
@@ -527,11 +655,40 @@ document.addEventListener('DOMContentLoaded', () => {
         runCropWrap?.replaceChildren();
         if (runCropBlock) runCropBlock.style.display = 'none';
 
+        updateCloneButtonState();
+
         if (!runId) {
             setDirty(false);
             return;
         }
+
         loadForRun(runId);
+    });
+
+    selCloneSource?.addEventListener('change', () => {
+        updateCloneButtonState();
+    });
+
+    btnClone?.addEventListener('click', async () => {
+        const targetRunId = Number(selRun?.value || 0);
+        const sourceRunId = Number(selCloneSource?.value || 0);
+
+        if (!targetRunId || !sourceRunId || targetRunId === sourceRunId) {
+            updateCloneButtonState();
+            return;
+        }
+
+        try {
+            setStatus('Loading source scenario values…');
+
+            const sourceData = await fetchRunData(sourceRunId);
+            cloneScenarioValuesIntoCurrent(sourceData);
+
+            setStatus('Scenario values cloned locally. Save to persist changes.');
+        } catch (e) {
+            console.error(e);
+            setStatus(`Failed to clone scenario values: ${e.message}`, true);
+        }
     });
 
     // boot

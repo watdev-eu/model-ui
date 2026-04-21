@@ -89,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 
     // 2) find default variable set for this study area (global/default)
     $stmt = $pdo->prepare("
-        SELECT id, study_area_id, name, user_id, is_default, preset_set_id
+        SELECT id, study_area_id, name, user_id, is_default
         FROM mca_variable_sets
         WHERE study_area_id = :sa
           AND is_default = TRUE
@@ -153,12 +153,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 
         // crops in THIS run (scenario)
         $stmt = $pdo->prepare("
-            SELECT DISTINCT TRIM(lulc) AS crop_code
-            FROM swat_hru_kpi
+            SELECT DISTINCT TRIM(crop) AS crop_code
+            FROM swat_crop_area_context
             WHERE run_id = :run_id
-              AND lulc IS NOT NULL
-              AND TRIM(lulc) <> ''
-            ORDER BY TRIM(lulc) ASC
+              AND crop IS NOT NULL
+              AND TRIM(crop) <> ''
+            ORDER BY TRIM(crop) ASC
         ");
         $stmt->execute([':run_id' => $runId]);
         $runCropCodes = array_values(array_filter(array_map(
@@ -229,7 +229,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                 'id' => (int)$varSet['id'],
                 'name' => $varSet['name'],
                 'is_default' => (bool)$varSet['is_default'],
-                'preset_set_id' => (int)$varSet['preset_set_id'],
             ],
             'run_variables' => $runVars,
             'run_crops_in_run' => $runCropCodes,
@@ -263,13 +262,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 
     // 4) crops occurring in runs for this study area
     $stmt = $pdo->prepare("
-        SELECT DISTINCT TRIM(hk.lulc) AS crop_code
-        FROM swat_hru_kpi hk
-        JOIN swat_runs r ON r.id = hk.run_id
+        SELECT DISTINCT TRIM(cac.crop) AS crop_code
+        FROM swat_crop_area_context cac
+        JOIN swat_runs r ON r.id = cac.run_id
         WHERE r.study_area = :sa
-          AND hk.lulc IS NOT NULL
-          AND TRIM(hk.lulc) <> ''
-        ORDER BY TRIM(hk.lulc) ASC
+          AND cac.crop IS NOT NULL
+          AND TRIM(cac.crop) <> ''
+        ORDER BY TRIM(cac.crop) ASC
     ");
     $stmt->execute([':sa' => $studyAreaId]);
     $cropCodes = array_values(array_filter(array_map(
@@ -328,7 +327,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
             'id' => (int)$varSet['id'],
             'name' => $varSet['name'],
             'is_default' => (bool)$varSet['is_default'],
-            'preset_set_id' => (int)$varSet['preset_set_id'],
         ],
 
         'variables_global' => $globals,

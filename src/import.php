@@ -281,7 +281,7 @@ $defaultAuthor = trim((string)($user['display_name'] ?? ''));
                             <label class="form-label">Selected subbasins</label>
                             <div class="d-flex gap-2 mb-2">
                                 <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSelectDetected" disabled>Select detected</button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSelectDetectedOnly" disabled>Select detected</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSelectDetectedOnly" disabled>Select detected only</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" id="btnClearSubs" disabled>Clear</button>
                             </div>
                             <div id="subbasinChecklist" class="border rounded p-2" style="max-height: 420px; overflow:auto;"></div>
