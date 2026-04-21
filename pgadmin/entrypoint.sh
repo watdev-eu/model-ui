@@ -13,6 +13,7 @@ cat > /pgadmin4/servers.json <<EOF
       "MaintenanceDB": "${DB_NAME}",
       "Username": "${DB_USER}",
       "PassFile": "/var/lib/pgadmin/pgpass",
+      "SavePassword": true,
       "SSLMode": "prefer",
       "Shared": true,
       "Comment": "Auto-configured production database"
