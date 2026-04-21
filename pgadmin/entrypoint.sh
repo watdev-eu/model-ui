@@ -14,6 +14,7 @@ cat > /pgadmin4/servers.json <<EOF
       "Username": "${DB_USER}",
       "PassFile": "/var/lib/pgadmin/pgpass",
       "SSLMode": "prefer",
+      "Shared": true,
       "Comment": "Auto-configured production database"
     }
   }
