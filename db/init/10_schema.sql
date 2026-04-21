@@ -436,7 +436,7 @@ CREATE TABLE IF NOT EXISTS public.swat_run_subbasins
     CONSTRAINT swat_run_subbasins_pkey PRIMARY KEY (run_id, sub)
 );
 
-CREATE TABLE IF NOT EXISTS public.swat_runsCREATE TABLE IF NOT EXISTS public.swat_runs
+CREATE TABLE IF NOT EXISTS public.swat_runs
 (
     id bigint NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 MAXVALUE 9223372036854775807 CACHE 1 ),
     run_label character varying(160) COLLATE pg_catalog."default" NOT NULL,
@@ -459,7 +459,7 @@ CREATE TABLE IF NOT EXISTS public.swat_runsCREATE TABLE IF NOT EXISTS public.swa
     CONSTRAINT swat_runs_pkey PRIMARY KEY (id),
     CONSTRAINT swat_runs_area_runlabel_uniq UNIQUE (study_area, run_label),
     CONSTRAINT swat_runs_id_study_area_key UNIQUE (id, study_area)
-    );
+);
 
 COMMENT ON COLUMN public.swat_runs.created_by
     IS 'Keycloak subject (sub) of the creator';
