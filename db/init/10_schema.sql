@@ -477,6 +477,12 @@ CREATE TABLE IF NOT EXISTS public.swat_snu_kpi
     CONSTRAINT swat_snu_kpi_pkey PRIMARY KEY (run_id, gisnum, period_date)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS ux_custom_scenarios_id_study_area
+    ON public.custom_scenarios (id, study_area_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_swat_runs_id_study_area
+    ON public.swat_runs (id, study_area);
+
 ALTER TABLE IF EXISTS public.custom_scenario_subbasin_runs
     ADD CONSTRAINT fk_custom_assignment_run_same_area FOREIGN KEY (source_run_id, study_area_id)
         REFERENCES public.swat_runs (id, study_area) MATCH SIMPLE
