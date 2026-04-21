@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS public.custom_scenarios
     description text COLLATE pg_catalog."default",
     created_at timestamp with time zone NOT NULL DEFAULT now(),
     updated_at timestamp with time zone NOT NULL DEFAULT now(),
-    CONSTRAINT custom_scenarios_pkey PRIMARY KEY (id)
+    CONSTRAINT custom_scenarios_pkey PRIMARY KEY (id),
+    CONSTRAINT custom_scenarios_id_study_area_key UNIQUE (id, study_area_id)
 );
 
 CREATE TABLE IF NOT EXISTS public.mca_indicators
@@ -435,7 +436,7 @@ CREATE TABLE IF NOT EXISTS public.swat_run_subbasins
     CONSTRAINT swat_run_subbasins_pkey PRIMARY KEY (run_id, sub)
 );
 
-CREATE TABLE IF NOT EXISTS public.swat_runs
+CREATE TABLE IF NOT EXISTS public.swat_runsCREATE TABLE IF NOT EXISTS public.swat_runs
 (
     id bigint NOT NULL GENERATED ALWAYS AS IDENTITY ( INCREMENT 1 START 1 MINVALUE 1 MAXVALUE 9223372036854775807 CACHE 1 ),
     run_label character varying(160) COLLATE pg_catalog."default" NOT NULL,
@@ -456,8 +457,9 @@ CREATE TABLE IF NOT EXISTS public.swat_runs
     is_downloadable boolean NOT NULL DEFAULT false,
     downloadable_from_date date,
     CONSTRAINT swat_runs_pkey PRIMARY KEY (id),
-    CONSTRAINT swat_runs_area_runlabel_uniq UNIQUE (study_area, run_label)
-);
+    CONSTRAINT swat_runs_area_runlabel_uniq UNIQUE (study_area, run_label),
+    CONSTRAINT swat_runs_id_study_area_key UNIQUE (id, study_area)
+    );
 
 COMMENT ON COLUMN public.swat_runs.created_by
     IS 'Keycloak subject (sub) of the creator';
@@ -476,12 +478,6 @@ CREATE TABLE IF NOT EXISTS public.swat_snu_kpi
     sol_rsd double precision,
     CONSTRAINT swat_snu_kpi_pkey PRIMARY KEY (run_id, gisnum, period_date)
 );
-
-CREATE UNIQUE INDEX IF NOT EXISTS ux_custom_scenarios_id_study_area
-    ON public.custom_scenarios (id, study_area_id);
-
-CREATE UNIQUE INDEX IF NOT EXISTS ux_swat_runs_id_study_area
-    ON public.swat_runs (id, study_area);
 
 ALTER TABLE IF EXISTS public.custom_scenario_subbasin_runs
     ADD CONSTRAINT fk_custom_assignment_run_same_area FOREIGN KEY (source_run_id, study_area_id)
