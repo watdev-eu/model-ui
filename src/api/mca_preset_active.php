@@ -9,6 +9,19 @@ require_once __DIR__ . '/../classes/McaWorkspaceRepository.php';
 
 header('Content-Type: application/json');
 
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+if (!Auth::isLoggedIn()) {
+    http_response_code(401);
+    echo json_encode([
+        'ok' => false,
+        'error' => 'You must be logged in.',
+    ]);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     http_response_code(405);
     echo json_encode(['ok' => false, 'error' => 'Method not allowed']);

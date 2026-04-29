@@ -3,11 +3,25 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../classes/Auth.php';
 require_once __DIR__ . '/../config/database.php';
 
 header('Content-Type: application/json');
 
-// require_admin();
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+if (!Auth::canAdmin()) {
+    http_response_code(Auth::isLoggedIn() ? 403 : 401);
+    echo json_encode([
+        'ok' => false,
+        'error' => Auth::isLoggedIn()
+            ? 'You are not authorised to perform this action.'
+            : 'You must be logged in.',
+    ]);
+    exit;
+}
 
 // -------------------- helpers --------------------
 function fail(int $code, string $msg): void {
@@ -343,7 +357,6 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 // CSRF check
-if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 $csrf = $_POST['csrf'] ?? '';
 if (!$csrf || !hash_equals($_SESSION['csrf_token'] ?? '', $csrf)) {
     fail(403, 'Invalid CSRF token');

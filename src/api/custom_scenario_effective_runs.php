@@ -9,7 +9,18 @@ require_once __DIR__ . '/../classes/CustomScenarioRepository.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-Auth::requireLogin();
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+if (!Auth::isLoggedIn()) {
+    http_response_code(401);
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'You must be logged in.',
+    ]);
+    exit;
+}
 
 $userId = Auth::userId();
 if ($userId === null) {
@@ -54,9 +65,11 @@ try {
         'effective_run_by_sub' => $effectiveRunBySub,
     ]);
 } catch (Throwable $e) {
+    error_log('[custom_scenario_effective_runs] ' . $e->getMessage());
+
     http_response_code(500);
     echo json_encode([
         'status' => 'error',
-        'message' => $e->getMessage(),
+        'message' => 'Server error',
     ]);
 }

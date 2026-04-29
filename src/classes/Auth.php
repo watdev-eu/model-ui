@@ -42,6 +42,16 @@ final class Auth
         return self::hasRole('basic') || self::isAdvanced() || self::isAdmin();
     }
 
+    public static function canAdvanced(): bool
+    {
+        return self::isLoggedIn() && self::isAdvanced();
+    }
+
+    public static function canAdmin(): bool
+    {
+        return self::isLoggedIn() && self::isAdmin();
+    }
+
     public static function effectiveRole(): ?string
     {
         if (self::isAdmin()) return 'admin';

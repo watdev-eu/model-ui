@@ -3,24 +3,26 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../classes/Auth.php';
 require_once __DIR__ . '/../classes/SwatRunRepository.php';
 
 header('Content-Type: application/json');
 
-// Only admins
-//require_admin();
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
 
-// Only POST
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode(['error' => 'Method not allowed']);
+if (!Auth::canAdmin()) {
+    http_response_code(Auth::isLoggedIn() ? 403 : 401);
+    echo json_encode([
+        'error' => Auth::isLoggedIn()
+            ? 'You are not authorised to perform this action.'
+            : 'You must be logged in.',
+    ]);
     exit;
 }
 
 // CSRF check
-if (session_status() !== PHP_SESSION_ACTIVE) {
-    session_start();
-}
 $csrf = $_POST['csrf'] ?? '';
 if (!$csrf || !hash_equals($_SESSION['csrf_token'] ?? '', $csrf)) {
     http_response_code(403);

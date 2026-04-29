@@ -15,7 +15,17 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 }
 
 $studyAreaId = (int)($_GET['study_area_id'] ?? 0);
-Auth::requireLogin();
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+if (!Auth::isLoggedIn()) {
+    http_response_code(401);
+    echo json_encode(['error' => 'You must be logged in.']);
+    exit;
+}
+
 $userId = Auth::userId();
 if ($userId === null) {
     http_response_code(401);

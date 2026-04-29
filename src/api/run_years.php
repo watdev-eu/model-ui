@@ -25,10 +25,21 @@ try {
     if ($parsed['type'] === 'run') {
         $runIds = [(int)$parsed['id']];
     } else {
-        Auth::requireLogin();
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            session_start();
+        }
+
+        if (!Auth::isLoggedIn()) {
+            http_response_code(401);
+            echo json_encode(['error' => 'You must be logged in.']);
+            exit;
+        }
+
         $userId = Auth::userId();
         if ($userId === null) {
-            throw new RuntimeException('Unauthorized');
+            http_response_code(401);
+            echo json_encode(['error' => 'Unauthorized']);
+            exit;
         }
         $runIds = CustomScenarioRepository::collectEffectiveRunIdsForUser((int)$parsed['id'], $userId);
     }
@@ -63,6 +74,8 @@ try {
         'years'  => array_map('intval', $years),
     ]);
 } catch (Throwable $e) {
+    error_log('[run_years] ' . $e->getMessage());
+
     http_response_code(500);
-    echo json_encode(['error' => $e->getMessage()]);
+    echo json_encode(['error' => 'Server error']);
 }

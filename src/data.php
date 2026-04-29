@@ -22,18 +22,21 @@ require_once __DIR__ . '/classes/CropRepository.php';
 require_once __DIR__ . '/classes/SwatRunRepository.php';
 require_once __DIR__ . '/classes/StudyAreaRepository.php';
 
-// Protect this page
-//require_admin();
+$canViewData = Auth::canAdmin();
 
-$crops = CropRepository::all();
+$crops = [];
+$studyAreas = [];
+$runs = [];
+
+if ($canViewData) {
+    $crops = CropRepository::all();
+    $studyAreas = StudyAreaRepository::all();
+    $runs = SwatRunRepository::all();
+}
 
 // helper to split crops into N roughly equal columns
 $columns = 2; // (or 3 if you kept that)
 $perCol  = (int)ceil(max(1, count($crops)) / $columns);
-
-// Placeholder arrays – later we’ll load these from repositories / DB
-$studyAreas = StudyAreaRepository::all();
-$runs       = SwatRunRepository::all();
 ?>
 
     <div class="card mb-3">
@@ -44,6 +47,25 @@ $runs       = SwatRunRepository::all();
             </p>
         </div>
     </div>
+
+    <?php if (!$canViewData): ?>
+        <div class="card-body">
+            <div class="alert alert-warning d-flex align-items-start gap-3 mb-0" role="alert">
+                <i class="bi bi-shield-lock fs-4"></i>
+                <div>
+                    <h1 class="h5 mb-1">You are not authorised to view this page</h1>
+                    <p class="mb-0">
+                        Data management requires an administrator account.
+                        Please contact an administrator if you believe you should have access.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <?php else: ?>
+
+    <div class="card mb-3">
 
     <!-- Study areas -->
     <div class="card mb-4" id="study-areas-card">
@@ -524,9 +546,12 @@ $runs       = SwatRunRepository::all();
     }
 </style>
 
+<?php endif; ?>
 <?php include __DIR__ . '/includes/footer.php'; ?>
 
-<script src="/assets/js/data-crops.js"></script>
-<script src="/assets/js/data-runs.js"></script>
-<script src="/assets/js/data-mca-defaults.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/ol@latest/dist/ol.js"></script>
+<?php if ($canViewData): ?>
+    <script src="/assets/js/data-crops.js"></script>
+    <script src="/assets/js/data-runs.js"></script>
+    <script src="/assets/js/data-mca-defaults.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ol@latest/dist/ol.js"></script>
+<?php endif; ?>

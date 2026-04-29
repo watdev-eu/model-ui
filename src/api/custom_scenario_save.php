@@ -9,7 +9,18 @@ require_once __DIR__ . '/../classes/CustomScenarioRepository.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-Auth::requireLogin();
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+if (!Auth::isLoggedIn()) {
+    http_response_code(401);
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'You must be logged in.',
+    ]);
+    exit;
+}
 
 $userId = Auth::userId();
 if ($userId === null) {
@@ -165,6 +176,8 @@ try {
         'message' => 'Scenario created successfully',
     ]);
 } catch (PDOException $e) {
+    error_log('[custom_scenario_save] PDO ' . $e->getMessage());
+
     if ($e->getCode() === '23505') {
         http_response_code(409);
         echo json_encode([
@@ -180,9 +193,11 @@ try {
         'message' => 'Database error',
     ]);
 } catch (Throwable $e) {
+    error_log('[custom_scenario_save] ' . $e->getMessage());
+
     http_response_code(500);
     echo json_encode([
         'status' => 'error',
-        'message' => $e->getMessage(),
+        'message' => 'Server error',
     ]);
 }

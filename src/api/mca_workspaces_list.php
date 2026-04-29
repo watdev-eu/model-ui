@@ -15,7 +15,19 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     exit;
 }
 
-Auth::requireLogin();
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+if (!Auth::isLoggedIn()) {
+    http_response_code(401);
+    echo json_encode([
+        'ok' => false,
+        'error' => 'You must be logged in.',
+    ]);
+    exit;
+}
+
 $userId = Auth::userId();
 if ($userId === null) {
     http_response_code(401);

@@ -6,23 +6,39 @@ declare(strict_types=1);
 $pageTitle   = 'Import model outputs';
 $pageButtons = [];
 
-require_once __DIR__ . '/config/app.php';
-require_once __DIR__ . '/classes/Auth.php';
 require_once __DIR__ . '/includes/layout.php';
 require_once __DIR__ . '/classes/StudyAreaRepository.php';
 require_once __DIR__ . '/classes/RunLicenseRepository.php';
 
-Auth::requireAdvanced();
+$canViewImport = Auth::canAdvanced();
 
-$allAreas      = StudyAreaRepository::all();
-$studyAreas    = array_filter($allAreas, fn($row) => !empty($row['enabled']));
-$licenses      = RunLicenseRepository::all();
-$user          = Auth::user();
-$defaultAuthor = trim((string)($user['display_name'] ?? ''));
+$studyAreas = [];
+$licenses = [];
+$defaultAuthor = '';
+
+if ($canViewImport) {
+    $allAreas      = StudyAreaRepository::all();
+    $studyAreas    = array_filter($allAreas, fn($row) => !empty($row['enabled']));
+    $licenses      = RunLicenseRepository::all();
+    $user          = Auth::user();
+    $defaultAuthor = trim((string)($user['display_name'] ?? ''));
+}
 ?>
 
     <div class="card mb-3">
         <div class="card-body">
+            <?php if (!$canViewImport): ?>
+                <div class="alert alert-warning d-flex align-items-start gap-3 mb-0" role="alert">
+                    <i class="bi bi-shield-lock fs-4"></i>
+                    <div>
+                        <h1 class="h5 mb-1">You are not authorised to view this page</h1>
+                        <p class="mb-0">
+                            Importing model runs requires an advanced user account.
+                            Please contact an administrator if you believe you should have access.
+                        </p>
+                    </div>
+                </div>
+            <?php else: ?>
             <h1 class="title">Import model run</h1>
             <p class="text-muted mb-4">
                 Import a SWAT run from original output files, CSV exports, or later from GitHub.
@@ -294,16 +310,19 @@ $defaultAuthor = trim((string)($user['display_name'] ?? ''));
                 </section>
             </div>
         </div>
+        <?php endif; ?>
     </div>
 
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v9.2.4/ol.css">
-    <script src="https://cdn.jsdelivr.net/npm/ol@v9.2.4/dist/ol.js"></script>
-    <script>
-        window.WATDEV_IMPORT_BOOTSTRAP = {
-            csrfToken: <?= json_encode($csrfToken ?? '') ?>,
-            defaultAuthor: <?= json_encode($defaultAuthor) ?>
-        };
-    </script>
-    <script src="/assets/js/import-run.js"></script>
+    <?php if ($canViewImport): ?>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v9.2.4/ol.css">
+        <script src="https://cdn.jsdelivr.net/npm/ol@v9.2.4/dist/ol.js"></script>
+        <script>
+            window.WATDEV_IMPORT_BOOTSTRAP = {
+                csrfToken: <?= json_encode($csrfToken ?? '') ?>,
+                defaultAuthor: <?= json_encode($defaultAuthor) ?>
+            };
+        </script>
+        <script src="/assets/js/import-run.js"></script>
+    <?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

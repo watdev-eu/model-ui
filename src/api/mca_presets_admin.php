@@ -13,8 +13,25 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-// CSRF
+// CSRF + Auth
 if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+if (!Auth::canAdmin()) {
+    http_response_code(Auth::isLoggedIn() ? 403 : 401);
+    echo json_encode([
+        'error' => Auth::isLoggedIn()
+            ? 'You are not authorised to perform this action.'
+            : 'You must be logged in.',
+    ]);
+    exit;
+}
+
+$userId = Auth::userId();
+if ($userId === null) {
+    http_response_code(401);
+    echo json_encode(['error' => 'Unauthorized']);
+    exit;
+}
+
 $csrf = $_POST['csrf'] ?? '';
 if (!$csrf || !hash_equals($_SESSION['csrf_token'] ?? '', $csrf)) {
     http_response_code(403);
@@ -22,13 +39,6 @@ if (!$csrf || !hash_equals($_SESSION['csrf_token'] ?? '', $csrf)) {
     exit;
 }
 
-Auth::requireLogin();
-$userId = Auth::userId();
-if ($userId === null) {
-    http_response_code(401);
-    echo json_encode(['error' => 'Unauthorized']);
-    exit;
-}
 $action = $_POST['action'] ?? '';
 
 try {

@@ -14,18 +14,26 @@ require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../classes/Auth.php';
 require_once __DIR__ . '/../classes/SwatRawRunImportService.php';
 
-Auth::requireAdvanced();
-
 header('Content-Type: application/json');
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+if (!Auth::canAdvanced()) {
+    http_response_code(Auth::isLoggedIn() ? 403 : 401);
+    echo json_encode([
+        'error' => Auth::isLoggedIn()
+            ? 'You are not authorised to perform this action.'
+            : 'You must be logged in.',
+    ]);
+    exit;
+}
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     echo json_encode(['error' => 'Method not allowed']);
     exit;
-}
-
-if (session_status() !== PHP_SESSION_ACTIVE) {
-    session_start();
 }
 
 $csrf = $_POST['csrf'] ?? '';
@@ -91,7 +99,12 @@ try {
     }
 
     $message = $e->getMessage();
-    http_response_code(importFinalizeStatusForMessage($message));
-    echo json_encode(['error' => $message]);
+    $status = importFinalizeStatusForMessage($message);
+
+    http_response_code($status);
+
+    echo json_encode([
+        'error' => $status === 422 ? $message : 'Server error'
+    ]);
     exit;
 }

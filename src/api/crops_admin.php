@@ -3,12 +3,24 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../classes/Auth.php';
 require_once __DIR__ . '/../classes/CropRepository.php';
 
 header('Content-Type: application/json');
 
-// Only admins
-//require_admin();
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+if (!Auth::isAdmin()) {
+    http_response_code(Auth::isLoggedIn() ? 403 : 401);
+    echo json_encode([
+        'error' => Auth::isLoggedIn()
+            ? 'You are not authorised to perform this action.'
+            : 'You must be logged in to perform this action.',
+    ]);
+    exit;
+}
 
 // Only POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {

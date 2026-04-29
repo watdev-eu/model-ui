@@ -34,10 +34,21 @@ try {
         exit;
     }
 
-    Auth::requireLogin();
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        session_start();
+    }
+
+    if (!Auth::isLoggedIn()) {
+        http_response_code(401);
+        echo json_encode(['error' => 'You must be logged in.']);
+        exit;
+    }
+
     $userId = Auth::userId();
     if ($userId === null) {
-        throw new RuntimeException('Unauthorized');
+        http_response_code(401);
+        echo json_encode(['error' => 'Unauthorized']);
+        exit;
     }
 
     $effectiveRunMap = CustomScenarioRepository::getEffectiveRunMapForUser((int)$parsed['id'], $userId);
@@ -88,6 +99,8 @@ try {
         'rows'   => $mergedRows,
     ]);
 } catch (Throwable $e) {
+    error_log('[swat_indicator_yearly] ' . $e->getMessage());
+
     http_response_code(500);
-    echo json_encode(['error' => $e->getMessage()]);
+    echo json_encode(['error' => 'Server error']);
 }

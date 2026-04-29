@@ -9,7 +9,18 @@ require_once __DIR__ . '/../classes/CustomScenarioRepository.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-Auth::requireLogin();
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+if (!Auth::isLoggedIn()) {
+    http_response_code(401);
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'You must be logged in.',
+    ]);
+    exit;
+}
 
 $userId = Auth::userId();
 if ($userId === null) {
@@ -26,6 +37,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $raw = file_get_contents('php://input');
 $data = json_decode((string)$raw, true);
+if (!is_array($data)) {
+    http_response_code(400);
+    echo json_encode(['status' => 'error', 'message' => 'Invalid JSON']);
+    exit;
+}
 
 $scenarioId = (int)($data['id'] ?? 0);
 if ($scenarioId <= 0) {
@@ -48,9 +64,10 @@ try {
         'message' => 'Scenario deleted successfully',
     ]);
 } catch (Throwable $e) {
+    error_log('[custom_scenario_delete] ' . $e->getMessage());
     http_response_code(500);
     echo json_encode([
         'status' => 'error',
-        'message' => $e->getMessage(),
+        'message' => 'Server error',
     ]);
 }

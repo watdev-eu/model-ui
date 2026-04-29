@@ -16,6 +16,15 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+if (!Auth::isLoggedIn()) {
+    http_response_code(401);
+    echo json_encode([
+        'ok' => false,
+        'error' => 'You must be logged in.',
+    ]);
+    exit;
+}
+
 $csrf = (string)($_POST['csrf'] ?? '');
 if (!$csrf || !hash_equals((string)($_SESSION['csrf_token'] ?? ''), $csrf)) {
     http_response_code(403);
@@ -23,7 +32,6 @@ if (!$csrf || !hash_equals((string)($_SESSION['csrf_token'] ?? ''), $csrf)) {
     exit;
 }
 
-Auth::requireLogin();
 $userId = Auth::userId();
 if ($userId === null) {
     http_response_code(401);
@@ -161,6 +169,6 @@ try {
     http_response_code(500);
     echo json_encode([
         'ok' => false,
-        'error' => $e->getMessage(),
+        'error' => 'Server error',
     ]);
 }
