@@ -17,7 +17,6 @@ RUN apt-get update && apt-get install -y \
 # Apache request timeout for large uploads/imports
 RUN { \
       echo "Timeout 1200"; \
-      echo "ProxyTimeout 1200"; \
    } > /etc/apache2/conf-available/watdev-timeouts.conf \
  && a2enconf watdev-timeouts
 
