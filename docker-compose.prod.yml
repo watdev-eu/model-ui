@@ -30,6 +30,14 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
 
+      # Long-running uploads/imports
+      - "--entrypoints.websecure.transport.respondingtimeouts.readtimeout=1200s"
+      - "--entrypoints.websecure.transport.respondingtimeouts.writetimeout=1200s"
+      - "--entrypoints.websecure.transport.respondingtimeouts.idletimeout=1200s"
+      - "--entrypoints.web.transport.respondingtimeouts.readtimeout=1200s"
+      - "--entrypoints.web.transport.respondingtimeouts.writetimeout=1200s"
+      - "--entrypoints.web.transport.respondingtimeouts.idletimeout=1200s"
+
       # For testing
       # - "--certificatesresolvers.letsencrypt.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
 

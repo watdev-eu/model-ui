@@ -14,14 +14,22 @@ RUN apt-get update && apt-get install -y \
   && docker-php-ext-install pdo_pgsql pgsql zip \
   && rm -rf /var/lib/apt/lists/*
 
+# Apache request timeout for large uploads/imports
+RUN { \
+      echo "Timeout 1200"; \
+      echo "ProxyTimeout 1200"; \
+   } > /etc/apache2/conf-available/watdev-timeouts.conf \
+ && a2enconf watdev-timeouts
+
 # Increase upload / post limits
 RUN { \
       echo "file_uploads=On"; \
-      echo "upload_max_filesize=1024M"; \
-      echo "post_max_size=1024M"; \
+      echo "upload_max_filesize=4096M"; \
+      echo "post_max_size=4096M"; \
       echo "max_file_uploads=20"; \
-      echo "memory_limit=1G"; \
-      echo "max_execution_time=600"; \
+      echo "memory_limit=5G"; \
+      echo "max_execution_time=1200"; \
+      echo "max_input_time=1200"; \
    } > /usr/local/etc/php/conf.d/uploads.ini
 
 RUN a2enmod rewrite
