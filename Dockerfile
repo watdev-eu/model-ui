@@ -23,12 +23,12 @@ RUN { \
 # Increase upload / post limits
 RUN { \
       echo "file_uploads=On"; \
-      echo "upload_max_filesize=4096M"; \
-      echo "post_max_size=4096M"; \
+      echo "upload_max_filesize=8192M"; \
+      echo "post_max_size=8192M"; \
       echo "max_file_uploads=20"; \
-      echo "memory_limit=5G"; \
-      echo "max_execution_time=1200"; \
-      echo "max_input_time=1200"; \
+      echo "memory_limit=10G"; \
+      echo "max_execution_time=2400"; \
+      echo "max_input_time=2400"; \
    } > /usr/local/etc/php/conf.d/uploads.ini
 
 RUN a2enmod rewrite
