@@ -1599,8 +1599,14 @@ final class McaComputeService
             return max($lo, min($hi, $x));
         };
 
+        $baselineDerivedMcaCodes = [
+            'bcr',
+            'cost_saving_usd',
+            'income_increase_pct',
+        ];
+
         foreach ($enabledIndicatorCodes as $code) {
-            if ($code === 'bcr') {
+            if (in_array($code, $baselineDerivedMcaCodes, true)) {
                 $vals = [];
 
                 foreach ($datasetContexts as $ds) {
