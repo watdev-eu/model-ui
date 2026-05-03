@@ -316,6 +316,67 @@
         });
     }
 
+    function postFormWithProgress(url, fd, onProgress) {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+
+            xhr.open('POST', url, true);
+            xhr.withCredentials = true;
+            xhr.timeout = 0;
+
+            xhr.upload.onprogress = event => {
+                if (!event.lengthComputable) {
+                    onProgress?.('Uploading files...');
+                    return;
+                }
+
+                const pct = Math.round((event.loaded / event.total) * 100);
+                onProgress?.(`Uploading files... ${pct}%`);
+            };
+
+            xhr.onload = () => {
+                let data;
+
+                try {
+                    data = JSON.parse(xhr.responseText || '{}');
+                } catch (_) {
+                    data = {
+                        ok: false,
+                        error: `Server returned HTTP ${xhr.status}, but not valid JSON.`
+                    };
+                }
+
+                resolve({
+                    ok: xhr.status >= 200 && xhr.status < 300,
+                    status: xhr.status,
+                    statusText: xhr.statusText,
+                    data
+                });
+            };
+
+            xhr.onerror = () => reject(new Error('Network error during upload.'));
+            xhr.ontimeout = () => reject(new Error('Upload timed out.'));
+
+            xhr.send(fd);
+        });
+    }
+
+    function buildInspectionErrorMessage(data, status) {
+        const parts = [];
+
+        parts.push(data?.error || `Inspection failed with HTTP ${status}.`);
+
+        if (data?.detail) {
+            parts.push(data.detail);
+        }
+
+        if (data?.request_id) {
+            parts.push(`Reference: ${data.request_id}`);
+        }
+
+        return parts.join(' ');
+    }
+
     btnInspect.addEventListener('click', async () => {
         if (currentSource() === 'github') {
             showToast('GitHub import is not implemented yet.', true);
@@ -333,20 +394,23 @@
         setStatusMessage('Uploading and inspecting files. This can take a little while for large SWAT outputs.', 'info');
 
         try {
-            const res = await fetch('/api/import_inspect.php', {
-                method: 'POST',
-                body: fd,
-                credentials: 'include'
+            const result = await postFormWithProgress('/api/import_inspect.php', fd, message => {
+                if (myEpoch === inspectRequestEpoch) {
+                    setStatusMessage(message, 'info');
+                }
             });
-
-            const data = await res.json();
 
             if (myEpoch !== inspectRequestEpoch) {
                 return;
             }
 
-            if (!res.ok || !data.ok) {
-                setStatusMessage(data.error || 'Inspection failed.', 'danger');
+            const data = result.data;
+
+            setStatusMessage('Upload complete. Server is inspecting files...', 'info');
+
+            if (!result.ok || !data.ok) {
+                const message = buildInspectionErrorMessage(data, result.status);
+                setStatusMessage(message, result.status >= 500 ? 'danger' : 'warning');
                 showToast(data.error || 'Inspection failed.', true);
                 return;
             }
@@ -373,8 +437,9 @@
                 return;
             }
             console.error(err);
-            setStatusMessage('Server error during inspection.', 'danger');
-            showToast('Server error during inspection.', true);
+            const message = err?.message || 'Server error during inspection.';
+            setStatusMessage(message, 'danger');
+            showToast(message, true);
         } finally {
             if (myEpoch === inspectRequestEpoch) {
                 setButtonBusy(btnInspect, false, 'Inspecting files...', 'Inspect files');

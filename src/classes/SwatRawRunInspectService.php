@@ -20,8 +20,25 @@ final class SwatRawRunInspectService
         $token   = bin2hex(random_bytes(16));
         $baseDir = rtrim(UPLOAD_DIR, '/\\') . '/import_sessions/' . $token;
 
+        $parentDir = dirname($baseDir);
+        if (!is_dir($parentDir) && !mkdir($parentDir, 0775, true) && !is_dir($parentDir)) {
+            $err = error_get_last();
+            throw new RuntimeException(
+                'Failed to create import_sessions directory: ' . $parentDir .
+                ($err && isset($err['message']) ? ' — ' . $err['message'] : '')
+            );
+        }
+
+        if (!is_writable($parentDir)) {
+            throw new RuntimeException('Import sessions directory is not writable: ' . $parentDir);
+        }
+
         if (!is_dir($baseDir) && !mkdir($baseDir, 0775, true) && !is_dir($baseDir)) {
-            throw new RuntimeException('Failed to create temporary import directory.');
+            $err = error_get_last();
+            throw new RuntimeException(
+                'Failed to create temporary import directory: ' . $baseDir .
+                ($err && isset($err['message']) ? ' — ' . $err['message'] : '')
+            );
         }
 
         if ($sourceType === 'original') {

@@ -19,6 +19,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 if (!Auth::canAdvanced()) {
     http_response_code(Auth::isLoggedIn() ? 403 : 401);
     echo json_encode([
+        'ok' => false,
         'error' => Auth::isLoggedIn()
             ? 'You are not authorised to perform this action.'
             : 'You must be logged in.',
@@ -28,14 +29,19 @@ if (!Auth::canAdvanced()) {
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
-    echo json_encode(['error' => 'Method not allowed']);
+    echo json_encode([
+        'ok' => false,
+        'error' => 'Method not allowed']);
     exit;
 }
 
 $csrf = $_POST['csrf'] ?? '';
 if (!$csrf || !hash_equals($_SESSION['csrf_token'] ?? '', $csrf)) {
     http_response_code(403);
-    echo json_encode(['error' => 'Invalid CSRF token']);
+    echo json_encode([
+        'ok' => false,
+        'error' => 'Invalid CSRF token',
+    ]);
     exit;
 }
 
@@ -44,20 +50,38 @@ try {
     echo json_encode($result);
     exit;
 } catch (Throwable $e) {
-    error_log('[import_inspect] ' . $e->getMessage());
+    $requestId = bin2hex(random_bytes(6));
+
+    error_log(sprintf(
+        '[import_inspect:%s] %s in %s:%d%s%s',
+        $requestId,
+        $e->getMessage(),
+        $e->getFile(),
+        $e->getLine(),
+        PHP_EOL,
+        $e->getTraceAsString()
+    ));
 
     $message = $e->getMessage();
 
-    $status = (
+    $isClientError = (
         str_starts_with($message, 'Missing required file:') ||
         str_contains($message, 'no valid HRU rows could be parsed') ||
         str_contains($message, 'no valid SNU rows could be parsed') ||
         str_starts_with($message, 'Unsupported import source.')
-    ) ? 422 : 500;
+    );
 
-    http_response_code($status);
+    $isDebug = (($_ENV['APP_ENV'] ?? getenv('APP_ENV') ?: '') !== 'production');
+
+    http_response_code($isClientError ? 422 : 500);
+
     echo json_encode([
-        'error' => $status === 422 ? $message : 'Server error',
+        'ok' => false,
+        'error' => $isClientError
+            ? $message
+            : 'Server error during inspection.',
+        'detail' => $isDebug ? $message : null,
+        'request_id' => $requestId,
     ]);
     exit;
 }
