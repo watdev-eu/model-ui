@@ -885,7 +885,17 @@ export function initSubbasinDashboard({
             map = new ol.Map({
                 target: 'map',
                 layers: [
-                    new ol.layer.Tile({ source: new ol.source.OSM(), zIndex: 0 }),
+                    new ol.layer.Tile({
+                        zIndex: 0,
+                        source: new ol.source.XYZ({
+                            url: 'https://{a-c}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+                            attributions: [
+                                '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                                '&copy; <a href="https://carto.com/attributions">CARTO</a>'
+                            ],
+                            maxZoom: 19
+                        })
+                    }),
                     subLayer,
                     vectorLayer,
                     rivLayer
