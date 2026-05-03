@@ -16,9 +16,11 @@ final class SwatRunRepository
             SELECT
                 r.*,
                 sa.name AS study_area_name,
-                sa.id   AS study_area_id
+                sa.id   AS study_area_id,
+                rl.name AS license_name
             FROM swat_runs r
             JOIN study_areas sa ON sa.id = r.study_area
+            LEFT JOIN run_licenses rl ON rl.id = r.license_id
             ORDER BY sa.name, r.run_label
         ";
         return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
@@ -34,9 +36,11 @@ final class SwatRunRepository
             SELECT
                 r.*,
                 sa.name AS study_area_name,
-                sa.id   AS study_area_id
+                sa.id   AS study_area_id,
+                rl.name AS license_name
             FROM swat_runs r
             JOIN study_areas sa ON sa.id = r.study_area
+            LEFT JOIN run_licenses rl ON rl.id = r.license_id
             WHERE r.id = :id
         ");
         $stmt->execute([':id' => $id]);
@@ -222,5 +226,75 @@ final class SwatRunRepository
         ]);
 
         return (bool)$stmt->fetchColumn();
+    }
+
+    public static function updateMetadata(int $id, array $data): array
+    {
+        $pdo = Database::pdo();
+
+        $stmt = $pdo->prepare("SELECT * FROM swat_runs WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        $run = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$run) {
+            throw new InvalidArgumentException('Run not found');
+        }
+
+        $runLabel = trim((string)($data['run_label'] ?? ''));
+        if ($runLabel === '') {
+            throw new InvalidArgumentException('Run name is required');
+        }
+
+        $visibility = (string)($data['visibility'] ?? 'private');
+        if (!in_array($visibility, ['private', 'public'], true)) {
+            throw new InvalidArgumentException('Invalid visibility');
+        }
+
+        $isDefault = !empty($data['is_default']);
+
+        if ($isDefault) {
+            $visibility = 'public';
+        }
+
+        $runDate = trim((string)($data['run_date'] ?? ''));
+        $runDate = $runDate !== '' ? $runDate : null;
+
+        $downloadableFromDate = trim((string)($data['downloadable_from_date'] ?? ''));
+        $downloadableFromDate = $downloadableFromDate !== '' ? $downloadableFromDate : null;
+
+        $licenseId = (int)($data['license_id'] ?? 0);
+        $licenseId = $licenseId > 0 ? $licenseId : null;
+
+        $stmt = $pdo->prepare("
+            UPDATE swat_runs
+            SET
+                run_label = :run_label,
+                run_date = :run_date,
+                model_run_author = :model_run_author,
+                publication_url = :publication_url,
+                license_id = :license_id,
+                visibility = :visibility,
+                is_default = :is_default,
+                is_downloadable = :is_downloadable,
+                downloadable_from_date = :downloadable_from_date,
+                description = :description
+            WHERE id = :id
+        ");
+
+        $stmt->execute([
+            ':id' => $id,
+            ':run_label' => $runLabel,
+            ':run_date' => $runDate,
+            ':model_run_author' => trim((string)($data['model_run_author'] ?? '')),
+            ':publication_url' => trim((string)($data['publication_url'] ?? '')) ?: null,
+            ':license_id' => $licenseId,
+            ':visibility' => $visibility,
+            ':is_default' => $isDefault ? 1 : 0,
+            ':is_downloadable' => !empty($data['is_downloadable']) ? 1 : 0,
+            ':downloadable_from_date' => $downloadableFromDate,
+            ':description' => trim((string)($data['description'] ?? '')),
+        ]);
+
+        return self::find($id) ?? [];
     }
 }

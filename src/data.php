@@ -21,6 +21,7 @@ require_once __DIR__ . '/includes/layout.php';
 require_once __DIR__ . '/classes/CropRepository.php';
 require_once __DIR__ . '/classes/SwatRunRepository.php';
 require_once __DIR__ . '/classes/StudyAreaRepository.php';
+require_once __DIR__ . '/classes/RunLicenseRepository.php';
 
 $canViewData = Auth::canAdmin();
 
@@ -32,6 +33,7 @@ if ($canViewData) {
     $crops = CropRepository::all();
     $studyAreas = StudyAreaRepository::all();
     $runs = SwatRunRepository::all();
+    $licenses = RunLicenseRepository::all();
 }
 
 // helper to split crops into N roughly equal columns
@@ -328,6 +330,14 @@ $perCol  = (int)ceil(max(1, count($crops)) / $columns);
                                         </li>
                                         <li>
                                             <button type="button"
+                                                    class="dropdown-item"
+                                                    data-url="/modals/run_edit.php?id=<?= (int)$r['id'] ?>">
+                                                <i class="bi bi-pencil-square me-2"></i>
+                                                Edit settings / metadata
+                                            </button>
+                                        </li>
+                                        <li>
+                                            <button type="button"
                                                     class="dropdown-item js-run-toggle-visibility"
                                                     data-id="<?= (int)$r['id'] ?>"
                                                     data-current="<?= htmlspecialchars($r['visibility']) ?>">
@@ -553,5 +563,6 @@ $perCol  = (int)ceil(max(1, count($crops)) / $columns);
     <script src="/assets/js/data-crops.js"></script>
     <script src="/assets/js/data-runs.js"></script>
     <script src="/assets/js/data-mca-defaults.js"></script>
+    <script src="/assets/js/data-run-edit.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/ol@latest/dist/ol.js"></script>
 <?php endif; ?>

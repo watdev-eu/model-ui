@@ -66,6 +66,33 @@ try {
             echo json_encode(['ok' => true]);
             break;
 
+        case 'update_metadata':
+            $id = (int)($_POST['id'] ?? 0);
+            if ($id <= 0) {
+                http_response_code(422);
+                echo json_encode(['error' => 'Invalid run id']);
+                exit;
+            }
+
+            $run = SwatRunRepository::updateMetadata($id, [
+                'run_label' => $_POST['run_label'] ?? '',
+                'run_date' => $_POST['run_date'] ?? '',
+                'model_run_author' => $_POST['model_run_author'] ?? '',
+                'publication_url' => $_POST['publication_url'] ?? '',
+                'license_id' => $_POST['license_id'] ?? '',
+                'visibility' => $_POST['visibility'] ?? 'private',
+                'is_default' => ($_POST['is_default'] ?? '0') === '1',
+                'is_downloadable' => isset($_POST['is_downloadable']),
+                'downloadable_from_date' => $_POST['downloadable_from_date'] ?? '',
+                'description' => $_POST['description'] ?? '',
+            ]);
+
+            echo json_encode([
+                'ok' => true,
+                'run' => $run,
+            ]);
+            break;
+
         default:
             http_response_code(400);
             echo json_encode(['error' => 'Unknown action']);
@@ -76,5 +103,8 @@ try {
 } catch (Throwable $e) {
     error_log('[runs_admin] ' . $e->getMessage());
     http_response_code(500);
-    echo json_encode(['error' => 'Server error']);
+    echo json_encode([
+        'error' => 'Server error',
+        'detail' => $e->getMessage(), // temporary during development
+    ]);
 }
