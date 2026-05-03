@@ -417,4 +417,52 @@ final class CustomScenarioRepository
         $map = self::getEffectiveRunMapForUser($scenarioId, $userId);
         return array_values(array_unique(array_map('intval', array_values($map))));
     }
+
+    public static function runSubbasinsByRunIds(array $runIds): array
+    {
+        if (!$runIds) return [];
+
+        $runIds = array_values(array_unique(array_map('intval', $runIds)));
+        $runIds = array_values(array_filter($runIds, fn(int $v) => $v > 0));
+        if (!$runIds) return [];
+
+        $pdo = Database::pdo();
+        $placeholders = implode(',', array_fill(0, count($runIds), '?'));
+
+        $stmt = $pdo->prepare("
+        SELECT run_id, sub
+        FROM swat_run_subbasins
+        WHERE run_id IN ($placeholders)
+        ORDER BY run_id, sub
+    ");
+        $stmt->execute($runIds);
+
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $runId = (int)$row['run_id'];
+            $sub = (int)$row['sub'];
+            $out[$runId][] = $sub;
+        }
+
+        return $out;
+    }
+
+    public static function validateAssignmentsAgainstRunSubbasins(array $assignments): bool
+    {
+        if (!$assignments) return true;
+
+        $runIds = array_values(array_unique(array_map('intval', array_values($assignments))));
+        $subbasinsByRun = self::runSubbasinsByRunIds($runIds);
+
+        foreach ($assignments as $sub => $runId) {
+            $sub = (int)$sub;
+            $runId = (int)$runId;
+
+            if (!in_array($sub, $subbasinsByRun[$runId] ?? [], true)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
 }

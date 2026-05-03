@@ -136,6 +136,15 @@ try {
         exit;
     }
 
+    if (!CustomScenarioRepository::validateAssignmentsAgainstRunSubbasins($normalizedAssignments)) {
+        http_response_code(422);
+        echo json_encode([
+            'status' => 'error',
+            'message' => 'One or more selected subbasins are not enabled for the assigned scenario',
+        ]);
+        exit;
+    }
+
     $totalSubbasins = CustomScenarioRepository::countSubbasins($studyAreaId);
     if (count($normalizedAssignments) < $totalSubbasins && !$confirmedUseBaselineForMissing) {
         echo json_encode([

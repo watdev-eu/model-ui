@@ -102,7 +102,7 @@ if ($view === 'create') {
                         <div>
                             <div class="fw-semibold">Subbasin assignments</div>
                             <div class="small text-muted">
-                                Select a source scenario and click a subbasin to assign it.
+                                Select a source scenario and click an enabled subbasin to assign it. Grey subbasins are not available for the selected scenario.
                             </div>
                             <div class="small mt-2">
                                 <span class="fw-semibold">Assignment progress:</span>

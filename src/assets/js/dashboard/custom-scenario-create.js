@@ -124,6 +124,7 @@ function initCustomScenarioCreate() {
 
     const colorByRunId = new Map();
     const runMetaById = new Map();
+    const enabledSubsByRunId = new Map();
     const palette = [
         [99, 110, 250, 0.65],
         [239, 85, 59, 0.65],
@@ -186,6 +187,16 @@ function initCustomScenarioCreate() {
 
     function escapeAttr(value) {
         return escapeHtml(value).replace(/"/g, '&quot;');
+    }
+
+    function selectedRunAllowsSubbasin(subId) {
+        const runId = selectedRunId();
+        if (!runId) return true;
+
+        const enabledSet = enabledSubsByRunId.get(runId);
+        if (!enabledSet || enabledSet.size === 0) return false;
+
+        return enabledSet.has(Number(subId));
     }
 
     function renderAssignments() {
@@ -254,13 +265,20 @@ function initCustomScenarioCreate() {
         });
 
         usableRuns.forEach((run, idx) => {
-            const id = Number(run.id);
+            const id = Number(run.source_id || run.id);
             const label = String(run.run_label || `Run ${id}`);
+
+            const enabledSubbasins = Array.isArray(run.enabled_subbasins)
+                ? run.enabled_subbasins.map(v => Number(v)).filter(v => Number.isFinite(v) && v > 0)
+                : [];
+
+            enabledSubsByRunId.set(id, new Set(enabledSubbasins));
 
             runMetaById.set(id, {
                 id,
                 label,
                 is_default: !!run.is_default,
+                enabled_subbasins: enabledSubbasins,
             });
 
             colorByRunId.set(id, palette[idx % palette.length]);
@@ -326,25 +344,49 @@ function initCustomScenarioCreate() {
 
     function styleFn(feature) {
         const subId = String(getProp(feature, 'Subbasin'));
+        const subNum = Number(subId);
         const assignedRunId = assignments.get(subId);
+        const activeRunId = selectedRunId();
 
-        let fillColor = [230, 230, 230, 0.45];
+        let fillColor = [230, 230, 230, 0.35];
+        let strokeColor = '#777';
+        let strokeWidth = 1.2;
+        let labelColor = '#333';
+
         if (assignedRunId && colorByRunId.has(Number(assignedRunId))) {
             fillColor = colorByRunId.get(Number(assignedRunId));
         }
 
+        if (activeRunId) {
+            const enabledSet = enabledSubsByRunId.get(activeRunId);
+            const isEnabledForActiveRun = enabledSet?.has(subNum) === true;
+
+            if (!isEnabledForActiveRun) {
+                fillColor = [180, 180, 180, 0.18];
+                strokeColor = '#aaa';
+                strokeWidth = 0.8;
+                labelColor = '#999';
+            } else if (!assignedRunId) {
+                fillColor = [13, 110, 253, 0.18];
+                strokeColor = '#0d6efd';
+                strokeWidth = 1.6;
+            }
+        }
+
         return new ol.style.Style({
             stroke: new ol.style.Stroke({
-                color: '#555',
-                width: 1.2,
+                color: strokeColor,
+                width: strokeWidth,
             }),
             fill: new ol.style.Fill({
                 color: fillColor,
             }),
             text: new ol.style.Text({
                 text: subId,
-                font: '12px sans-serif',
-                fill: new ol.style.Fill({ color: '#222' }),
+                font: activeRunId && !selectedRunAllowsSubbasin(subId)
+                    ? '11px sans-serif'
+                    : '12px sans-serif',
+                fill: new ol.style.Fill({ color: labelColor }),
                 stroke: new ol.style.Stroke({ color: '#fff', width: 3 }),
             }),
         });
@@ -405,6 +447,13 @@ function initCustomScenarioCreate() {
 
             if (!runId) {
                 setHint(`Subbasin ${subId} clicked. Select a scenario first.`);
+                return;
+            }
+
+            if (!selectedRunAllowsSubbasin(subId)) {
+                const label = runMetaById.get(runId)?.label || `Run ${runId}`;
+                setHint(`Subbasin ${subId} is not enabled for "${label}" and cannot be assigned.`);
+                showToast(`Subbasin ${subId} is not enabled for this scenario.`, true, null, 'OK', 3500);
                 return;
             }
 
@@ -491,6 +540,21 @@ function initCustomScenarioCreate() {
         } finally {
             saveBtn.disabled = false;
         }
+    });
+
+    runSelectEl.addEventListener('change', () => {
+        vectorLayer?.changed();
+
+        const runId = selectedRunId();
+        if (!runId) {
+            setHint('Select a scenario and click a subbasin to assign it.');
+            return;
+        }
+
+        const label = runMetaById.get(runId)?.label || `Run ${runId}`;
+        const enabledCount = enabledSubsByRunId.get(runId)?.size || 0;
+
+        setHint(`"${label}" can be assigned to ${enabledCount} enabled subbasins. Grey subbasins are not available for this scenario.`);
     });
 
     Promise.all([
