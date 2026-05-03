@@ -161,6 +161,7 @@ final class SwatRawRunImportService
             self::pgExec($pg, "COMMIT");
             $txStarted = false;
             @pg_close($pg);
+            self::deleteDirectory($baseDir);
 
             return ['ok' => true, 'run_id' => $runId];
         } catch (Throwable $e) {
@@ -484,5 +485,34 @@ final class SwatRawRunImportService
                 throw new RuntimeException('Postgres error: ' . pg_last_error($pg));
             }
         }
+    }
+
+    private static function deleteDirectory(string $dir): void
+    {
+        if ($dir === '' || !is_dir($dir)) {
+            return;
+        }
+
+        $baseUploads = realpath(rtrim(UPLOAD_DIR, '/\\') . '/import_sessions');
+        $realDir = realpath($dir);
+
+        if (!$baseUploads || !$realDir || !str_starts_with($realDir, $baseUploads . DIRECTORY_SEPARATOR)) {
+            return;
+        }
+
+        $items = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($realDir, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
+
+        foreach ($items as $item) {
+            if ($item->isDir()) {
+                @rmdir($item->getPathname());
+            } else {
+                @unlink($item->getPathname());
+            }
+        }
+
+        @rmdir($realDir);
     }
 }
