@@ -149,10 +149,6 @@ if ($canViewImport) {
                     </form>
 
                     <div id="inspectResult" class="mt-4 d-none">
-                        <div class="alert alert-success">
-                            Files were parsed successfully. Continue with metadata and assignment.
-                        </div>
-
                         <div class="row g-3 mb-3">
                             <div class="col-lg-6">
                                 <h6>Import summary</h6>
