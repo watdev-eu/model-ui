@@ -301,7 +301,7 @@ export function initSubbasinDashboard({
         let rafId = null;
         els.yearSlider.addEventListener('input', () => {
             current.yearIndex = +els.yearSlider.value;
-            els.yearLabel.textContent = years[current.yearIndex] ?? '—';
+            els.yearLabel.textContent = scenarioYearLabel(current.yearIndex);
             if (rafId) cancelAnimationFrame(rafId);
             rafId = requestAnimationFrame(() => { recomputeAndRedraw(true); rafId = null; });
         });
@@ -730,6 +730,15 @@ export function initSubbasinDashboard({
         return `Year ${years[current.yearIndex] ?? '—'}`;
     }
 
+    function scenarioYearLabel(index) {
+        const i = Number(index);
+        return Number.isFinite(i) ? `Year ${i}` : 'Year —';
+    }
+
+    function timeLabelText() {
+        return scenarioYearLabel(current.yearIndex);
+    }
+
     async function loadRuns() {
         const url = `${apiBase}/runs_list.php?study_area_id=${encodeURIComponent(currentStudyAreaId)}`;
         const res = await fetch(url);
@@ -1127,10 +1136,10 @@ export function initSubbasinDashboard({
         const rd = runsStore.get(runId);
         if (!rd) return NaN;
 
-        const baseYear = years[current.yearIndex];
         const year =
-            (yearOverride != null) ? yearOverride :
-                (rd.years.includes(baseYear) ? baseYear : rd.years[rd.years.length - 1]);
+            (yearOverride != null)
+                ? yearOverride
+                : (rd.years[current.yearIndex] ?? rd.years[rd.years.length - 1]);
 
         if (!Number.isFinite(+year)) return NaN;
 
@@ -1172,7 +1181,7 @@ export function initSubbasinDashboard({
             const meta = runsMeta.find(r => String(r.id) === String(runId));
             const runLabel = meta ? meta.run_label : `Run ${runId}`;
 
-            const xs = rd.years.slice();
+            const xs = rd.years.map((_, i) => i);
             const ys = rd.years.map(Y => {
                 const v = valueForSubRun(runId, current.selectedSub, Y);
                 return Number.isFinite(v) ? v : null;
@@ -1186,14 +1195,18 @@ export function initSubbasinDashboard({
                 x: xs,
                 y: ys,
                 name: runLabel,  // legend + hover
-                hovertemplate: `${runLabel}<br>%{x}<br>%{y:.3f}<extra></extra>`
+                hovertemplate: `${runLabel}<br>Year %{x}<br>%{y:.3f}<extra></extra>`
             });
         }
 
         Plotly.newPlot(els.seriesChart, traces, {
             margin: { t: 30, r: 10, b: 40, l: 55 },
             title: `Subbasin ${current.selectedSub}${cropSuffix()} — ${def.name}`,
-            xaxis: { title: 'Year' },
+            xaxis: {
+                title: 'Years after implementation',
+                tickmode: 'linear',
+                dtick: 1
+            },
             yaxis: {
                 title: `${def.name}${unitText() ? ` (${unitText()})` : ''}`
             },
@@ -1279,9 +1292,9 @@ export function initSubbasinDashboard({
         }
 
         els.yearSlider.value = current.yearIndex;
-        els.yearMin.textContent   = years[0] ?? '—';
-        els.yearMax.textContent   = years[years.length - 1] ?? '—';
-        els.yearLabel.textContent = years[current.yearIndex] ?? '—';
+        els.yearMin.textContent   = years.length ? scenarioYearLabel(0) : '—';
+        els.yearMax.textContent   = years.length ? scenarioYearLabel(years.length - 1) : '—';
+        els.yearLabel.textContent = years.length ? scenarioYearLabel(current.yearIndex) : '—';
 
         els.yearSlider.disabled = years.length <= 1; // enable unless trivial
     }
@@ -1833,7 +1846,7 @@ export function initSubbasinDashboard({
 
         Plotly.newPlot(els.cropChart, traces, {
             margin: { t: 30, r: 10, b: 80, l: 55 },
-            title: `Crop breakdown — Subbasin ${current.selectedSub} — ${def.name} — ${year}`,
+            title: `Crop breakdown — Subbasin ${current.selectedSub} — ${def.name} — ${scenarioYearLabel(current.yearIndex)}`,
             xaxis: { title: 'Crop', tickangle: -30, automargin: true },
             yaxis: { title: `${def.name}${unitText() ? ` (${unitText()})` : ''}` },
             barmode: 'group',

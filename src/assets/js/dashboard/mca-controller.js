@@ -315,15 +315,19 @@ export function initMcaController({ apiBase, els }) {
                 mode: 'lines',
                 connectgaps: true,
                 name: runLabel(rid),
-                x: years,
+                x: years.map((_, i) => i),
                 y,
-                hovertemplate: `${runLabel(rid)}<br>%{x}<br>%{y:.4f}<extra></extra>`,
+                hovertemplate: `${runLabel(rid)}<br>Year %{x}<br>%{y:.4f}<extra></extra>`,
             };
         });
 
         Plotly.newPlot(els.mcaRawTsChart, traces, {
             margin: { t: 20, r: 10, b: 40, l: 60 },
-            xaxis: { title: 'Year' },
+            xaxis: {
+                title: 'Years after implementation',
+                tickmode: 'linear',
+                dtick: 1
+            },
             yaxis: { title: yTitle },
             showlegend: true,
         }, { displayModeBar: false, responsive: true });
