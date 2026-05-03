@@ -1,5 +1,171 @@
 // assets/js/data-run-edit.js
 (function () {
+    let runEditMap = null;
+    let runEditVectorSource = null;
+    let runEditSelectionLayer = null;
+    let runEditAllSubbasins = [];
+    let runEditSelectedSubbasins = new Set();
+
+    function escapeHtml(v) {
+        return String(v ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function runEditSelectedStyle(feature) {
+        const sub = Number(feature.get('Subbasin'));
+        const selected = runEditSelectedSubbasins.has(sub);
+
+        return new ol.style.Style({
+            stroke: new ol.style.Stroke({
+                color: selected ? '#0d6efd' : '#666',
+                width: selected ? 2.5 : 1
+            }),
+            fill: new ol.style.Fill({
+                color: selected ? 'rgba(13,110,253,0.28)' : 'rgba(108,117,125,0.10)'
+            }),
+            text: new ol.style.Text({
+                text: String(sub || ''),
+                font: '12px sans-serif',
+                fill: new ol.style.Fill({ color: '#222' })
+            })
+        });
+    }
+
+    function renderRunEditSubbasinChecklist() {
+        const wrap = document.getElementById('runEditSubbasinChecklist');
+        if (!wrap) return;
+
+        if (!runEditAllSubbasins.length) {
+            wrap.innerHTML = '<div class="text-muted">No subbasins found.</div>';
+            return;
+        }
+
+        wrap.innerHTML = runEditAllSubbasins.map(sub => `
+        <div class="form-check">
+            <input class="form-check-input run-edit-subbasin-check"
+                   type="checkbox"
+                   value="${sub}"
+                   id="run_edit_sub_${sub}"
+                   ${runEditSelectedSubbasins.has(sub) ? 'checked' : ''}>
+            <label class="form-check-label" for="run_edit_sub_${sub}">
+                Subbasin ${sub}
+            </label>
+        </div>
+    `).join('');
+
+        wrap.querySelectorAll('.run-edit-subbasin-check').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const sub = parseInt(cb.value, 10);
+                if (cb.checked) runEditSelectedSubbasins.add(sub);
+                else runEditSelectedSubbasins.delete(sub);
+                refreshRunEditMapStyles();
+            });
+        });
+    }
+
+    function refreshRunEditMapStyles() {
+        if (runEditSelectionLayer) {
+            runEditSelectionLayer.setStyle(runEditSelectedStyle);
+        }
+        renderRunEditSubbasinChecklist();
+    }
+
+    async function loadRunEditSubbasins() {
+        const mapEl = document.getElementById('runEditSubbasinMap');
+        const studyAreaInput = document.getElementById('runEditStudyAreaId');
+        const initialInput = document.getElementById('runEditInitialSubbasins');
+
+        if (!mapEl || !studyAreaInput || !window.ol) return;
+
+        const studyAreaId = parseInt(studyAreaInput.value || '0', 10);
+        if (!studyAreaId) return;
+
+        try {
+            const initial = JSON.parse(initialInput?.value || '[]');
+            runEditSelectedSubbasins = new Set(
+                Array.isArray(initial)
+                    ? initial.map(v => parseInt(v, 10)).filter(v => v > 0)
+                    : []
+            );
+        } catch (_) {
+            runEditSelectedSubbasins = new Set();
+        }
+
+        if (!runEditMap) {
+            runEditVectorSource = new ol.source.Vector();
+
+            runEditSelectionLayer = new ol.layer.Vector({
+                source: runEditVectorSource,
+                style: runEditSelectedStyle
+            });
+
+            runEditMap = new ol.Map({
+                target: 'runEditSubbasinMap',
+                layers: [
+                    new ol.layer.Tile({ source: new ol.source.OSM() }),
+                    runEditSelectionLayer
+                ],
+                view: new ol.View({
+                    center: [0, 0],
+                    zoom: 2
+                })
+            });
+
+            runEditMap.on('singleclick', evt => {
+                runEditMap.forEachFeatureAtPixel(evt.pixel, feature => {
+                    const sub = parseInt(feature.get('Subbasin'), 10);
+                    if (!sub) return;
+
+                    if (runEditSelectedSubbasins.has(sub)) {
+                        runEditSelectedSubbasins.delete(sub);
+                    } else {
+                        runEditSelectedSubbasins.add(sub);
+                    }
+
+                    refreshRunEditMapStyles();
+                });
+            });
+        } else {
+            runEditMap.setTarget('runEditSubbasinMap');
+        }
+
+        const res = await fetch(`/api/study_area_subbasins_geo.php?study_area_id=${encodeURIComponent(studyAreaId)}`, {
+            credentials: 'include'
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+            throw new Error(data.error || 'Failed to load subbasins.');
+        }
+
+        const format = new ol.format.GeoJSON();
+        const features = format.readFeatures(data);
+
+        runEditVectorSource.clear();
+        runEditVectorSource.addFeatures(features);
+
+        runEditAllSubbasins = features
+            .map(f => parseInt(f.get('Subbasin'), 10))
+            .filter(v => Number.isInteger(v) && v > 0)
+            .sort((a, b) => a - b);
+
+        refreshRunEditMapStyles();
+
+        window.setTimeout(() => {
+            runEditMap.updateSize();
+            if (features.length) {
+                runEditMap.getView().fit(runEditVectorSource.getExtent(), {
+                    padding: [20, 20, 20, 20],
+                    duration: 250
+                });
+            }
+        }, 250);
+    }
+
     function setButtonBusy(button, busy, busyText) {
         if (!button) return;
 
@@ -64,6 +230,23 @@
     document.addEventListener('shown.bs.modal', () => {
         syncDownloadableDate();
         syncDefaultVisibility();
+
+        loadRunEditSubbasins().catch(err => {
+            console.error(err);
+            showToast(err.message || 'Failed to load subbasins.', true);
+        });
+    });
+
+    document.addEventListener('click', event => {
+        if (event.target.closest('#runEditSelectAllSubs')) {
+            runEditAllSubbasins.forEach(sub => runEditSelectedSubbasins.add(sub));
+            refreshRunEditMapStyles();
+        }
+
+        if (event.target.closest('#runEditClearSubs')) {
+            runEditSelectedSubbasins.clear();
+            refreshRunEditMapStyles();
+        }
     });
 
     document.addEventListener('click', async event => {
@@ -80,6 +263,17 @@
         }
 
         const fd = new FormData(form);
+
+        fd.set(
+            'selected_subbasins_json',
+            JSON.stringify(Array.from(runEditSelectedSubbasins).sort((a, b) => a - b))
+        );
+
+        if (runEditSelectedSubbasins.size === 0) {
+            showToast('Please select at least one subbasin.', true);
+            setStatus('Please select at least one subbasin.', 'warning');
+            return;
+        }
 
         // Disabled selects are not included in FormData.
         const visibility = document.getElementById('runEditVisibility');

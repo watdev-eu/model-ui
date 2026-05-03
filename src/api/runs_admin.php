@@ -74,6 +74,18 @@ try {
                 exit;
             }
 
+            $selectedSubbasins = null;
+
+            if (isset($_POST['selected_subbasins_json'])) {
+                $decoded = json_decode((string)$_POST['selected_subbasins_json'], true);
+                if (!is_array($decoded)) {
+                    http_response_code(422);
+                    echo json_encode(['error' => 'Selected subbasins are invalid']);
+                    exit;
+                }
+                $selectedSubbasins = $decoded;
+            }
+
             $run = SwatRunRepository::updateMetadata($id, [
                 'run_label' => $_POST['run_label'] ?? '',
                 'run_date' => $_POST['run_date'] ?? '',
@@ -85,6 +97,7 @@ try {
                 'is_downloadable' => isset($_POST['is_downloadable']),
                 'downloadable_from_date' => $_POST['downloadable_from_date'] ?? '',
                 'description' => $_POST['description'] ?? '',
+                'selected_subbasins' => $selectedSubbasins,
             ]);
 
             echo json_encode([

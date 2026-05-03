@@ -20,6 +20,8 @@ Auth::requireAdmin();
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $run = $id > 0 ? SwatRunRepository::find($id) : null;
 
+$selectedSubbasins = $run ? SwatRunRepository::selectedSubbasins((int)$run['id']) : [];
+
 if (!$run) {
     echo "<div class='p-3 text-danger'>Run not found.</div>";
     return;
@@ -124,6 +126,49 @@ $csrf = $_SESSION['csrf_token'] ?? '';
         <div class="col-12">
             <label class="form-label">Description</label>
             <textarea name="description" class="form-control" rows="4"><?= h($run['description'] ?? '') ?></textarea>
+        </div>
+
+        <div class="col-12">
+            <hr>
+            <h5 class="mb-2">Subbasins</h5>
+            <p class="text-muted small mb-3">
+                Select the subbasins where this scenario is available.
+            </p>
+
+            <input type="hidden"
+                   id="runEditStudyAreaId"
+                   value="<?= (int)($run['study_area_id'] ?? $run['study_area'] ?? 0) ?>">
+
+            <input type="hidden"
+                   id="runEditInitialSubbasins"
+                   value="<?= h(json_encode($selectedSubbasins)) ?>">
+
+            <div class="row g-3">
+                <div class="col-lg-7">
+                    <label class="form-label">Subbasin map</label>
+                    <div id="runEditSubbasinMap" class="border rounded" style="height: 420px;"></div>
+                    <div class="form-text">Click subbasins to select or deselect them.</div>
+                </div>
+
+                <div class="col-lg-5">
+                    <label class="form-label">Selected subbasins</label>
+
+                    <div class="d-flex flex-wrap gap-2 mb-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="runEditSelectAllSubs">
+                            Select all
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="runEditClearSubs">
+                            Clear selection
+                        </button>
+                    </div>
+
+                    <div id="runEditSubbasinChecklist"
+                         class="border rounded p-2"
+                         style="max-height: 380px; overflow:auto;">
+                        <div class="text-muted">Loading subbasins…</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="col-12">

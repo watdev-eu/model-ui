@@ -295,6 +295,92 @@ final class SwatRunRepository
             ':description' => trim((string)($data['description'] ?? '')),
         ]);
 
+        if (isset($data['selected_subbasins'])) {
+            self::updateRunSubbasins($id, $data['selected_subbasins']);
+        }
+
         return self::find($id) ?? [];
+    }
+
+    public static function selectedSubbasins(int $runId): array
+    {
+        $pdo = Database::pdo();
+
+        $stmt = $pdo->prepare("
+        SELECT sub
+        FROM swat_run_subbasins
+        WHERE run_id = :run_id
+        ORDER BY sub
+    ");
+        $stmt->execute([':run_id' => $runId]);
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    public static function updateRunSubbasins(int $runId, array $selectedSubbasins): void
+    {
+        $pdo = Database::pdo();
+
+        $stmt = $pdo->prepare("
+        SELECT id, study_area
+        FROM swat_runs
+        WHERE id = :id
+    ");
+        $stmt->execute([':id' => $runId]);
+        $run = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$run) {
+            throw new InvalidArgumentException('Run not found');
+        }
+
+        $studyAreaId = (int)$run['study_area'];
+
+        $selectedSubbasins = array_values(array_unique(array_map('intval', $selectedSubbasins)));
+        $selectedSubbasins = array_values(array_filter($selectedSubbasins, fn(int $v) => $v > 0));
+
+        if (!$selectedSubbasins) {
+            throw new InvalidArgumentException('Please select at least one subbasin.');
+        }
+
+        $stmt = $pdo->prepare("
+        SELECT sub
+        FROM study_area_subbasins
+        WHERE study_area_id = :study_area_id
+    ");
+        $stmt->execute([':study_area_id' => $studyAreaId]);
+
+        $validSubs = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        $validSet = array_fill_keys($validSubs, true);
+
+        foreach ($selectedSubbasins as $sub) {
+            if (!isset($validSet[$sub])) {
+                throw new InvalidArgumentException("Subbasin {$sub} does not exist in this study area.");
+            }
+        }
+
+        $pdo->beginTransaction();
+
+        try {
+            $del = $pdo->prepare("DELETE FROM swat_run_subbasins WHERE run_id = :run_id");
+            $del->execute([':run_id' => $runId]);
+
+            $ins = $pdo->prepare("
+            INSERT INTO swat_run_subbasins (run_id, study_area_id, sub)
+            VALUES (:run_id, :study_area_id, :sub)
+        ");
+
+            foreach ($selectedSubbasins as $sub) {
+                $ins->execute([
+                    ':run_id' => $runId,
+                    ':study_area_id' => $studyAreaId,
+                    ':sub' => $sub,
+                ]);
+            }
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
     }
 }
