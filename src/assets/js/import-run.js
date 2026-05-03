@@ -70,6 +70,15 @@
         el.classList.add('d-none');
     }
 
+    function setFinalizeStatusMessage(message, type = 'info') {
+        const el = document.getElementById('finalizeStatusMessage');
+        if (!el) return;
+
+        el.className = `alert alert-${type} mt-3`;
+        el.textContent = message;
+        el.classList.remove('d-none');
+    }
+
     function resetInspectionState() {
         inspectData = null;
         detectedSubbasins = [];
@@ -561,7 +570,7 @@
         }
 
         setButtonBusy(btnFinalize, true, 'Importing run...', 'Import run');
-        setStatusMessage('Importing run and writing normalized results to the database. Please wait.', 'info');
+        setFinalizeStatusMessage('Importing run and writing normalized results to the database. Please wait.', 'info');
 
         try {
             const res = await fetch('/api/import_finalize.php', {
@@ -572,17 +581,17 @@
             const data = await res.json();
 
             if (!res.ok || !data.ok) {
-                setStatusMessage(data.error || 'Import failed.', 'danger');
+                setFinalizeStatusMessage(data.error || 'Import failed.', 'danger');
                 showToast(data.error || 'Import failed.', true);
                 return;
             }
 
-            setStatusMessage(`Run imported successfully. Run ID: ${data.run_id}`, 'success');
-            showToast(`Run imported successfully. Run ID: ${data.run_id}`);
-            window.location.reload();
+            setFinalizeStatusMessage(`Run imported successfully. Run ID: ${data.run_id}`, 'success');
+            //showToast(`Run imported successfully. Run ID: ${data.run_id}`);
+            //window.location.reload();
         } catch (err) {
             console.error(err);
-            setStatusMessage('Server error during import.', 'danger');
+            setFinalizeStatusMessage('Server error during import.', 'danger');
             showToast('Server error during import.', true);
         } finally {
             setButtonBusy(btnFinalize, false, 'Importing run...', 'Import run');

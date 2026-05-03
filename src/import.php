@@ -295,11 +295,29 @@ if ($canViewImport) {
 
                         <div class="col-lg-5">
                             <label class="form-label">Selected subbasins</label>
-                            <div class="d-flex gap-2 mb-2">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSelectDetected" disabled>Select detected</button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSelectDetectedOnly" disabled>Select detected only</button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnClearSubs" disabled>Clear</button>
+                            <p class="form-text mb-2">
+                                Select the subbasins for which this uploaded run contains valid results.
+                                These subbasins determine where the run is available in the dashboard and
+                                where it can be used when creating custom scenarios.
+                            </p>
+
+                            <div class="d-flex flex-wrap gap-2 mb-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSelectDetected" disabled>
+                                    Add detected subbasins
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSelectDetectedOnly" disabled>
+                                    Use only detected subbasins
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnClearSubs" disabled>
+                                    Clear selection
+                                </button>
                             </div>
+
+                            <div class="form-text mb-2">
+                                <strong>Add detected subbasins</strong> adds detected subbasins to your current selection.
+                                <strong>Use only detected subbasins</strong> replaces the current selection with only the detected subbasins.
+                            </div>
+
                             <div id="subbasinChecklist" class="border rounded p-2" style="max-height: 420px; overflow:auto;"></div>
                         </div>
                     </div>
@@ -307,6 +325,8 @@ if ($canViewImport) {
                     <div class="mt-4">
                         <button id="btnFinalize" type="button" class="btn btn-success" disabled>Import run</button>
                     </div>
+
+                    <div id="finalizeStatusMessage" class="alert d-none mt-3"></div>
                 </section>
             </div>
         </div>
