@@ -1600,6 +1600,61 @@ final class McaComputeService
         };
 
         foreach ($enabledIndicatorCodes as $code) {
+            if ($code === 'bcr') {
+                $vals = [];
+
+                foreach ($datasetContexts as $ds) {
+                    $datasetId = (string)$ds['dataset_id'];
+                    $raw = $results['raw']['by_dataset'][$datasetId][$code]['raw'] ?? null;
+
+                    if ($raw !== null && is_numeric($raw)) {
+                        $vals[$datasetId] = (float)$raw;
+                    }
+                }
+
+                if (!$vals) {
+                    foreach ($datasetContexts as $ds) {
+                        $datasetId = (string)$ds['dataset_id'];
+                        $normalized['by_dataset'][$datasetId][$code] = null;
+                        $weighted['by_dataset'][$datasetId][$code] = null;
+                    }
+                    continue;
+                }
+
+                $min = min($vals);
+                $max = max($vals);
+
+                foreach ($datasetContexts as $ds) {
+                    $datasetId = (string)$ds['dataset_id'];
+                    $raw = $results['raw']['by_dataset'][$datasetId][$code]['raw'] ?? null;
+
+                    if ($raw === null || !is_numeric($raw)) {
+                        $normalized['by_dataset'][$datasetId][$code] = null;
+                        $weighted['by_dataset'][$datasetId][$code] = null;
+                        continue;
+                    }
+
+                    if (abs($max - $min) < 1e-12) {
+                        $score = 0.5;
+                    } else {
+                        $score = ((float)$raw - $min) / ($max - $min);
+                    }
+
+                    if (($dirByCode[$code] ?? 'pos') === 'neg') {
+                        $score = 1.0 - $score;
+                    }
+
+                    $score = $clamp($score, 0.0, 1.0);
+
+                    $normalized['by_dataset'][$datasetId][$code] = $score;
+
+                    $w = $wByCode[$code] ?? 0.0;
+                    $weighted['by_dataset'][$datasetId][$code] = $score * $w;
+                }
+
+                continue;
+            }
+
             $baseRaw = $results['raw']['by_dataset'][$normBaselineId][$code]['raw'] ?? null;
             $baseRaw = is_numeric($baseRaw) ? (float)$baseRaw : null;
 
