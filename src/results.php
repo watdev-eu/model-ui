@@ -217,12 +217,16 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label" for="aggMode">Summarize by</label>
+                        <label class="form-label" for="aggMode">View results by</label>
                         <select id="aggMode" class="form-select">
-                            <option value="crop" selected>Crop within subbasin (default)</option>
-                            <option value="sub">Subbasin (all crops)</option>
+                            <option value="crop" selected>Crop (within subbasin)</option>
+                            <option value="sub">All crops (subbasin average)</option>
                         </select>
-                        <div class="form-text">Default shows KPI per crop type per subbasin. Switch to average across all crops per subbasin.</div>
+                        <div class="form-text">
+                            Controls how results are aggregated for the map and graphs.<br>
+                            • <strong>Crop</strong>: shows values for a selected crop only<br>
+                            • <strong>All crops</strong>: shows the average across all crops in each subbasin
+                        </div>
                     </div>
 
                 </div>

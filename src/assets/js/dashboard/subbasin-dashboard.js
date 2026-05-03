@@ -726,10 +726,6 @@ export function initSubbasinDashboard({
         }
     }
 
-    function timeLabelText() {
-        return `Year ${years[current.yearIndex] ?? '—'}`;
-    }
-
     function scenarioYearLabel(index) {
         const i = Number(index);
         return Number.isFinite(i) ? `Year ${i}` : 'Year —';
@@ -1049,7 +1045,11 @@ export function initSubbasinDashboard({
 
         // legend + map note
         updateLegend();
-        const base = `${currentIndicator()?.name || ''}${(current.aggMode === 'crop') ? cropSuffix() : ' — all crops'}`;
+        const modeLabel = current.aggMode === 'crop'
+            ? ` — ${current.crop ? displayCrop(current.crop) : 'selected crop'}`
+            : ' — average across all crops';
+
+        const base = `${currentIndicator()?.name || ''}${modeLabel}`;
         els.mapNote.textContent = `${base}${describeMapScenario()} — ${timeLabelText()}`;
 
         // restyle map
@@ -1199,9 +1199,13 @@ export function initSubbasinDashboard({
             });
         }
 
+        const modeLabel = current.aggMode === 'crop'
+            ? displayCrop(current.crop)
+            : 'All crops (average)';
+
         Plotly.newPlot(els.seriesChart, traces, {
             margin: { t: 30, r: 10, b: 40, l: 55 },
-            title: `Subbasin ${current.selectedSub}${cropSuffix()} — ${def.name}`,
+            title: `Subbasin ${current.selectedSub} — ${modeLabel} — ${def.name}`,
             xaxis: {
                 title: 'Years after implementation',
                 tickmode: 'linear',
@@ -1608,6 +1612,11 @@ export function initSubbasinDashboard({
             return;
         }
 
+        if (current.selectedSub && current.aggMode === 'sub') {
+            show('Showing averages across all crops. Switch to "Crop" to see individual crop results.');
+            return;
+        }
+
         // 6) everything ready -> hide the hint
         els.seriesHint.style.display = 'none';
     }
@@ -1791,6 +1800,11 @@ export function initSubbasinDashboard({
 
     function drawCropChart(def) {
         if (!current.selectedSub || !selectedRunIds.length) {
+            Plotly.purge(els.cropChart);
+            return;
+        }
+
+        if (current.aggMode === 'sub') {
             Plotly.purge(els.cropChart);
             return;
         }
