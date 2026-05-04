@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y \
 
 # Apache request timeout for large uploads/imports
 RUN { \
-      echo "Timeout 1200"; \
+      echo "Timeout 4800"; \
    } > /etc/apache2/conf-available/watdev-timeouts.conf \
  && a2enconf watdev-timeouts
 
@@ -27,8 +27,8 @@ RUN { \
       echo "post_max_size=8192M"; \
       echo "max_file_uploads=20"; \
       echo "memory_limit=10G"; \
-      echo "max_execution_time=2400"; \
-      echo "max_input_time=2400"; \
+      echo "max_execution_time=4800"; \
+      echo "max_input_time=4800"; \
    } > /usr/local/etc/php/conf.d/uploads.ini
 
 RUN a2enmod rewrite
