@@ -1,5 +1,5 @@
 <?php
-// classes/RinLicenseRepository.php
+// classes/RunLicenseRepository.php
 
 declare(strict_types=1);
 

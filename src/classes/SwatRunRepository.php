@@ -182,9 +182,11 @@ final class SwatRunRepository
             SELECT
                 r.*,
                 sa.name AS study_area_name,
-                sa.id   AS study_area_id
+                sa.id   AS study_area_id,
+                rl.name AS license_name
             FROM swat_runs r
             JOIN study_areas sa ON sa.id = r.study_area
+            LEFT JOIN run_licenses rl ON rl.id = r.license_id
             WHERE r.study_area = :study_area_id
               AND (
                     r.is_default = TRUE

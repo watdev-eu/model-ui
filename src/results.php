@@ -399,6 +399,9 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                 els: {
                     dataset: document.getElementById('datasetSelect'),
                     manageCustomScenariosBtn: document.getElementById('manageCustomScenariosBtn'),
+                    datasetMetadataModal: document.getElementById('datasetMetadataModal'),
+                    datasetMetadataTitle: document.getElementById('datasetMetadataTitle'),
+                    datasetMetadataBody: document.getElementById('datasetMetadataBody'),
                     metric: document.getElementById('metricSelect'),
                     indicatorHelp: document.getElementById('indicatorHelp'),
                     cropGroup: document.getElementById('cropGroup'),
@@ -527,6 +530,20 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
     </script>
 
 <?php endif; ?>
+
+    <div class="modal fade" id="datasetMetadataModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="datasetMetadataTitle">Model metadata</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="datasetMetadataBody">
+                    <div class="text-muted small">No metadata loaded.</div>
+                </div>
+            </div>
+        </div>
+    </div>
 
 <?php if ($canUseMcaWorkspaces): ?>
     <div class="modal fade" id="mcaWorkspaceLoadConfirmModal" tabindex="-1" aria-hidden="true">

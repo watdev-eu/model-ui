@@ -79,6 +79,8 @@ export function initSubbasinDashboard({
     let workspaceLoadConfirmBs = null;
     let pendingWorkspaceSelection = null;
 
+    let datasetMetadataBs = null;
+
     function initWorkspaceLoadConfirm() {
         if (!els.mcaWorkspaceLoadConfirmModal) return;
 
@@ -127,6 +129,46 @@ export function initSubbasinDashboard({
                 pendingWorkspaceSelection = null;
             }
         });
+    }
+
+    function initDatasetMetadataModal() {
+        if (!els.datasetMetadataModal) return;
+        datasetMetadataBs = new bootstrap.Modal(els.datasetMetadataModal);
+    }
+
+    function showDatasetMetadata(meta) {
+        if (!els.datasetMetadataTitle || !els.datasetMetadataBody) return;
+
+        els.datasetMetadataTitle.textContent = meta.run_label || 'Model metadata';
+
+        const publication = meta.publication_url
+            ? `<a href="${escAttr(meta.publication_url)}" target="_blank" rel="noopener">Open publication</a>`
+            : '—';
+
+        const downloadable = meta.is_downloadable
+            ? `Yes${meta.downloadable_from_date ? `, from ${escHtml(meta.downloadable_from_date)}` : ''}`
+            : 'No';
+
+        els.datasetMetadataBody.innerHTML = `
+        <dl class="row mb-0">
+            <dt class="col-sm-4">Author</dt>
+            <dd class="col-sm-8">${escHtml(meta.model_run_author || '—')}</dd>
+
+            <dt class="col-sm-4">License</dt>
+            <dd class="col-sm-8">${escHtml(meta.license_name || '—')}</dd>
+
+            <dt class="col-sm-4">Visibility</dt>
+            <dd class="col-sm-8">${escHtml(meta.visibility || '—')}</dd>
+
+            <dt class="col-sm-4">Publication</dt>
+            <dd class="col-sm-8">${publication}</dd>
+
+            <dt class="col-sm-4">Description</dt>
+            <dd class="col-sm-8">${escHtml(meta.description || '—')}</dd>
+        </dl>
+    `;
+
+        datasetMetadataBs?.show();
     }
 
     function setPreloadStatus(done, total) {
@@ -193,6 +235,7 @@ export function initSubbasinDashboard({
     let mca = null;
     wireUI();
     initWorkspaceLoadConfirm();
+    initDatasetMetadataModal();
     mca = initMcaController({
         apiBase,
         els: {
@@ -270,6 +313,24 @@ export function initSubbasinDashboard({
     function wireUI() {
         els.dataset.addEventListener('change', async () => {
             await handleDatasetSelectionChanged();
+        });
+
+        els.dataset.addEventListener('click', (ev) => {
+            const btn = ev.target.closest('.dataset-info-btn');
+            if (!btn) return;
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            const runId = String(btn.dataset.runId || '');
+            const meta = runsMeta.find(r => String(r.id) === runId);
+
+            if (!meta) {
+                showToast('Metadata not available for this model.', true, null, 'OK', 4000);
+                return;
+            }
+
+            showDatasetMetadata(meta);
         });
 
         els.metric.addEventListener('change', async () => {
@@ -771,6 +832,14 @@ export function initSubbasinDashboard({
                     <input class="form-check-input dataset-checkbox" type="checkbox"
                            id="${domId}" data-run-id="${escAttr(r.id)}">
                     <label class="form-check-label" for="${domId}">${label}</label>
+                    <button
+                        type="button"
+                        class="btn btn-link btn-sm p-0 ms-1 align-baseline dataset-info-btn"
+                        data-run-id="${escAttr(r.id)}"
+                        title="View model metadata"
+                        aria-label="View metadata for ${escAttr(r.run_label)}">
+                        <i class="bi bi-info-circle"></i>
+                    </button>
                 </div>`;
             }).join('');
             html += '</div>';
@@ -789,6 +858,14 @@ export function initSubbasinDashboard({
                     <input class="form-check-input dataset-checkbox" type="checkbox"
                            id="${domId}" data-run-id="${escAttr(r.id)}">
                     <label class="form-check-label" for="${domId}">${label}</label>
+                    <button
+                        type="button"
+                        class="btn btn-link btn-sm p-0 ms-1 align-baseline dataset-info-btn"
+                        data-run-id="${escAttr(r.id)}"
+                        title="View model metadata"
+                        aria-label="View metadata for ${escAttr(r.run_label)}">
+                        <i class="bi bi-info-circle"></i>
+                    </button>
                 </div>`;
             }).join('');
             html += '</div>';

@@ -58,6 +58,13 @@ try {
             'visibility'         => (string)($r['visibility'] ?? 'private'),
             'is_owner'           => $isOwner,
             'enabled_subbasins'  => $subbasinsByRun[$rawRunId] ?? [],
+
+            'description'              => $r['description'] ?? '',
+            'model_run_author'         => $r['model_run_author'] ?? '',
+            'publication_url'          => $r['publication_url'] ?? null,
+            'license_name'             => $r['license_name'] ?? null,
+            'is_downloadable'          => (bool)($r['is_downloadable'] ?? false),
+            'downloadable_from_date'   => $r['downloadable_from_date'] ?? null,
         ];
     }
 
