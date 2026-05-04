@@ -147,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function cloneScenarioValuesIntoCurrent(sourceData) {
         if (!state.run_id) return;
 
-        // 1) clone run-level values by key
+        // 1) Clone run-level values by key
         const sourceGlobalsByKey = new Map(
             (sourceData.runGlobals || []).map(v => [String(v.key), v])
         );
@@ -161,52 +161,61 @@ document.addEventListener('DOMContentLoaded', () => {
             targetVar.value_bool = src.value_bool ?? null;
         }
 
-        // 2) clone crop-level values only where crop exists in target run
+        // 2) Target scenario crops are authoritative
         const targetCropSet = new Set((state.runCropsInRun || []).map(String));
-        const sourceCropVars = sourceData.runCropVars || [];
 
+        // Source values indexed by crop + key
         const sourceByCropKey = new Map();
-        for (const row of sourceCropVars) {
+
+        for (const src of sourceData.runCropVars || []) {
+            const crop = String(src.crop_code || '');
+            const key  = String(src.key || '');
+
+            if (!crop || !key) continue;
+
+            // Important: ignore crops that do not exist in the TARGET scenario
+            if (!targetCropSet.has(crop)) continue;
+
+            sourceByCropKey.set(`${crop}::${key}`, src);
+        }
+
+        // Existing target rows indexed by crop + key
+        const targetByCropKey = new Map();
+
+        for (const row of state.runCropVars || []) {
             const crop = String(row.crop_code || '');
             const key  = String(row.key || '');
             if (!crop || !key) continue;
-            if (!targetCropSet.has(crop)) continue; // only copy matching crops present in target
-            sourceByCropKey.set(`${crop}::${key}`, row);
+
+            targetByCropKey.set(`${crop}::${key}`, row);
         }
 
-        for (const targetRow of state.runCropVars) {
-            const k = `${String(targetRow.crop_code)}::${String(targetRow.key)}`;
-            const src = sourceByCropKey.get(k);
-            if (!src) continue;
+        // 3) Copy values into existing target rows,
+        //    or create missing target rows only for crops that exist in the target scenario
+        for (const [pair, src] of sourceByCropKey.entries()) {
+            let targetRow = targetByCropKey.get(pair);
+
+            if (!targetRow) {
+                targetRow = {
+                    crop_code: src.crop_code,
+                    crop_name: src.crop_name || src.crop_code,
+                    key: src.key,
+                    name: src.name || src.key,
+                    unit: src.unit || null,
+                    description: src.description || null,
+                    data_type: src.data_type || 'number',
+                    value_num: null,
+                    value_text: null,
+                    value_bool: null,
+                };
+
+                state.runCropVars.push(targetRow);
+                targetByCropKey.set(pair, targetRow);
+            }
 
             targetRow.value_num  = src.value_num  ?? null;
             targetRow.value_text = src.value_text ?? null;
             targetRow.value_bool = src.value_bool ?? null;
-        }
-
-        // 3) ensure any target crop/key combination missing from current state but present in source is added
-        const existingTargetPairs = new Set(
-            state.runCropVars.map(r => `${String(r.crop_code)}::${String(r.key)}`)
-        );
-
-        for (const src of sourceCropVars) {
-            const crop = String(src.crop_code || '');
-            const key  = String(src.key || '');
-            const pair = `${crop}::${key}`;
-
-            if (!crop || !key) continue;
-            if (!targetCropSet.has(crop)) continue;
-            if (existingTargetPairs.has(pair)) continue;
-
-            state.runCropVars.push({
-                ...src,
-                crop_code: crop,
-                key,
-                crop_name: src.crop_name || crop,
-                value_num: src.value_num ?? null,
-                value_text: src.value_text ?? null,
-                value_bool: src.value_bool ?? null,
-            });
         }
 
         renderRunGlobals(state.runGlobals);

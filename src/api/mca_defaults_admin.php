@@ -139,6 +139,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 
     $runId = (int)($_GET['run_id'] ?? 0);
     if ($runId > 0) {
+        $stmt = $pdo->prepare("
+            SELECT 1
+            FROM swat_runs
+            WHERE id = :run_id
+              AND study_area = :study_area_id
+        ");
+        $stmt->execute([
+            ':run_id' => $runId,
+            ':study_area_id' => $studyAreaId,
+        ]);
+
+        if (!$stmt->fetchColumn()) {
+            throw new RuntimeException('Selected run does not belong to this study area');
+        }
+
         // run keys you want editable
         $runKeys = [
             'discount_rate',
@@ -471,6 +486,41 @@ try {
         $runId = (int)($_POST['run_id'] ?? 0);
         if ($runId <= 0) fail(422, 'run_id is required');
 
+        // Ensure the target run belongs to the selected study area
+        $stmt = $pdo->prepare("
+            SELECT 1
+            FROM swat_runs
+            WHERE id = :run_id
+              AND study_area = :study_area_id
+        ");
+        $stmt->execute([
+            ':run_id' => $runId,
+            ':study_area_id' => $studyAreaId,
+        ]);
+
+        if (!$stmt->fetchColumn()) {
+            throw new RuntimeException('Selected run does not belong to this study area');
+        }
+
+        // Target scenario crops are authoritative.
+        // Never allow crop-run defaults to be saved for crops absent from the target run.
+        $stmt = $pdo->prepare("
+            SELECT DISTINCT TRIM(crop) AS crop_code
+            FROM swat_crop_area_context
+            WHERE run_id = :run_id
+              AND crop IS NOT NULL
+              AND TRIM(crop) <> ''
+        ");
+        $stmt->execute([':run_id' => $runId]);
+
+        $allowedRunCropCodes = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $code = trim((string)$row['crop_code']);
+            if ($code !== '') {
+                $allowedRunCropCodes[$code] = true;
+            }
+        }
+
         $runGlobalsJson = $_POST['run_globals_json'] ?? '[]';
         $runCropsJson   = $_POST['run_crop_vars_json'] ?? '[]';
 
@@ -543,6 +593,9 @@ try {
 
             if (!in_array($key, $allowedRunCropKeys, true)) continue;
             if ($crop === '' || $key === '' || !isset($varByKey[$key])) continue;
+
+            // Critical guard: only save rows for crops that exist in the TARGET scenario
+            if (empty($allowedRunCropCodes[$crop])) continue;
 
             $vid = $varByKey[$key]['id'];
             $dt  = $varByKey[$key]['data_type'];
