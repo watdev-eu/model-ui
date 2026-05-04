@@ -458,7 +458,12 @@ export function initSubbasinDashboard({
                 if (mapScenarioIds.length) {
                     const baseRunId = mapScenarioIds[0];
                     current.runId = baseRunId;
-                    activateRun(baseRunId, { preserveCrop: true });
+                    const allCrops = [...cropSet].sort();
+
+                    activateRun(baseRunId, {
+                        preserveCrop: true,
+                        cropsOverride: getSelectedUnionCrops(),
+                    });
 
                     if (current.indicatorId && selectedRunIds.length) {
                         setBusy(true, 'Loading metric…');
@@ -1561,7 +1566,12 @@ export function initSubbasinDashboard({
             const baseRunId = mapScenarioIds[0];
             current.runId = baseRunId;
 
-            activateRun(baseRunId, { preserveCrop: true });
+            const allCrops = [...cropSet].sort();
+
+            activateRun(baseRunId, {
+                preserveCrop: true,
+                cropsOverride: getSelectedUnionCrops(),
+            });
 
             if (current.indicatorId) {
                 if (els.loadingDetail) els.loadingDetail.textContent = 'Loading selected metric…';
@@ -1870,14 +1880,18 @@ export function initSubbasinDashboard({
         els.mapScenario.innerHTML = html;
     }
 
-    function activateRun(runId, { preserveCrop = false } = {}) {
+    function activateRun(runId, {
+        preserveCrop = false,
+        cropsOverride = null,
+        yearsOverride = null,
+    } = {}) {
         const rd = runsStore.get(runId);
         if (!rd) return;
 
         const prevCrop = preserveCrop ? current.crop : null;
 
-        years = rd.years.slice();
-        crops = rd.crops.slice();
+        years = Array.isArray(yearsOverride) ? yearsOverride.slice() : rd.years.slice();
+        crops = Array.isArray(cropsOverride) ? cropsOverride.slice() : rd.crops.slice();
         current.runId = runId;
 
         populateCrops(prevCrop);
@@ -2193,6 +2207,17 @@ export function initSubbasinDashboard({
             const c = rampViridisRGB(t);
             return `rgb(${c[0]},${c[1]},${c[2]})`;
         };
+    }
+
+    function getSelectedUnionCrops() {
+        const cropSet = new Set();
+
+        for (const id of selectedRunIds) {
+            const rd = runsStore.get(id);
+            for (const c of (rd?.crops || [])) cropSet.add(c);
+        }
+
+        return [...cropSet].sort();
     }
 
     async function switchStudyArea(newStudyAreaId) {
