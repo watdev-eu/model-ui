@@ -304,15 +304,7 @@ try {
 
             $pdo->beginTransaction();
 
-            // Remove children first (in case there is no ON DELETE CASCADE)
-            $stmt = $pdo->prepare("DELETE FROM study_area_subbasins WHERE study_area_id = :id");
-            $stmt->execute([':id' => $id]);
-
-            $stmt = $pdo->prepare("DELETE FROM study_area_reaches WHERE study_area_id = :id");
-            $stmt->execute([':id' => $id]);
-
-            $stmt = $pdo->prepare("DELETE FROM study_areas WHERE id = :id");
-            $stmt->execute([':id' => $id]);
+            StudyAreaRepository::deleteWithChildren($id);
 
             $pdo->commit();
 
