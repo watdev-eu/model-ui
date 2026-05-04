@@ -117,11 +117,19 @@ services:
       - "-c"
       - "max_wal_size=8GB"
       - "-c"
-      - "min_wal_size=80MB"
+      - "min_wal_size=1GB"
       - "-c"
       - "checkpoint_timeout=30min"
       - "-c"
-      - "shared_buffers=4GB"
+      - "shared_buffers=8GB"
+      - "-c"
+      - "effective_cache_size=40GB"
+      - "-c"
+      - "maintenance_work_mem=1GB"
+      - "-c"
+      - "work_mem=32MB"
+      - "-c"
+      - "max_connections=100"
 
   # ─────────────────────────────────────────────
   # pgAdmin – served at /pgadmin
