@@ -250,11 +250,11 @@ final class SwatRunRepository
             throw new InvalidArgumentException('Invalid visibility');
         }
 
-        $isDefault = !empty($data['is_default']);
-
-        if ($isDefault) {
+        if (!empty($run['is_default'])) {
             $visibility = 'public';
         }
+
+        $isBaseline = !empty($data['is_baseline']);
 
         $runDate = trim((string)($data['run_date'] ?? ''));
         $runDate = $runDate !== '' ? $runDate : null;
@@ -274,7 +274,7 @@ final class SwatRunRepository
                 publication_url = :publication_url,
                 license_id = :license_id,
                 visibility = :visibility,
-                is_default = :is_default,
+                is_baseline = :is_baseline,
                 is_downloadable = :is_downloadable,
                 downloadable_from_date = :downloadable_from_date,
                 description = :description
@@ -289,7 +289,7 @@ final class SwatRunRepository
             ':publication_url' => trim((string)($data['publication_url'] ?? '')) ?: null,
             ':license_id' => $licenseId,
             ':visibility' => $visibility,
-            ':is_default' => $isDefault ? 1 : 0,
+            ':is_baseline' => $isBaseline ? 1 : 0,
             ':is_downloadable' => !empty($data['is_downloadable']) ? 1 : 0,
             ':downloadable_from_date' => $downloadableFromDate,
             ':description' => trim((string)($data['description'] ?? '')),

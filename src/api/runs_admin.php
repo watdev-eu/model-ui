@@ -93,7 +93,7 @@ try {
                 'publication_url' => $_POST['publication_url'] ?? '',
                 'license_id' => $_POST['license_id'] ?? '',
                 'visibility' => $_POST['visibility'] ?? 'private',
-                'is_default' => ($_POST['is_default'] ?? '0') === '1',
+                'is_baseline' => ($_POST['is_baseline'] ?? '0') === '1',
                 'is_downloadable' => isset($_POST['is_downloadable']),
                 'downloadable_from_date' => $_POST['downloadable_from_date'] ?? '',
                 'description' => $_POST['description'] ?? '',

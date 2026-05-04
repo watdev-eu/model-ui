@@ -93,11 +93,11 @@ $csrf = $_SESSION['csrf_token'] ?? '';
 
         <div class="col-md-3">
             <label class="form-label">Baseline run</label>
-            <select name="is_default" id="runEditIsDefault" class="form-select" required>
-                <option value="0" <?= empty($run['is_default']) ? 'selected' : '' ?>>No</option>
-                <option value="1" <?= !empty($run['is_default']) ? 'selected' : '' ?>>Yes</option>
+            <select name="is_baseline" id="runEditIsBaseline" class="form-select" required>
+                <option value="0" <?= empty($run['is_baseline']) ? 'selected' : '' ?>>No</option>
+                <option value="1" <?= !empty($run['is_baseline']) ? 'selected' : '' ?>>Yes</option>
             </select>
-            <div class="form-text">Baseline/default runs are forced public.</div>
+            <div class="form-text">Used as the baseline scenario. This does not affect default/public status.</div>
         </div>
 
         <div class="col-md-6 d-flex align-items-end">

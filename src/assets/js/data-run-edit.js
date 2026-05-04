@@ -203,33 +203,14 @@
         }
     }
 
-    function syncDefaultVisibility() {
-        const isDefault = document.getElementById('runEditIsDefault');
-        const visibility = document.getElementById('runEditVisibility');
-
-        if (!isDefault || !visibility) return;
-
-        if (isDefault.value === '1') {
-            visibility.value = 'public';
-            visibility.disabled = true;
-        } else {
-            visibility.disabled = false;
-        }
-    }
-
     document.addEventListener('change', event => {
         if (event.target?.id === 'runEditIsDownloadable') {
             syncDownloadableDate();
-        }
-
-        if (event.target?.id === 'runEditIsDefault') {
-            syncDefaultVisibility();
         }
     });
 
     document.addEventListener('shown.bs.modal', () => {
         syncDownloadableDate();
-        syncDefaultVisibility();
 
         loadRunEditSubbasins().catch(err => {
             console.error(err);
@@ -255,8 +236,6 @@
 
         const form = document.getElementById('runEditForm');
         if (!form) return;
-
-        syncDefaultVisibility();
 
         if (!form.reportValidity()) {
             return;
