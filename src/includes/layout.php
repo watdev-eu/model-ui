@@ -9,7 +9,6 @@ function h($v){ return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }
 $user = Auth::user();
 $displayName = $user['display_name'] ?? 'Guest';
 $avatarUrl = false;
-$disableAdminTools = !Auth::isAdmin();
 $userRoles = Auth::roles();
 $roleBadge = Auth::roleBadgeMeta();
 ?>
@@ -122,65 +121,72 @@ $roleBadge = Auth::roleBadgeMeta();
                             'href'  => '/index.php',
                             'icon'  => 'house',
                             'title' => 'Home',
+                            'access' => 'public',
                     ],
                     [
                             'label' => 'Model runs',
                             'href'  => '/model.php',
                             'icon'  => 'play-circle',
                             'title' => 'Inspect model runs',
+                            'access' => 'public',
                     ],
                     [
                             'label' => 'Results',
                             'href'  => '/results.php',
                             'icon'  => 'bar-chart-line',
                             'title' => 'Model results per study area',
+                            'access' => 'public',
                     ],
-
-                    // --- Data & admin tools ---
                     [
                             'label' => 'Import',
                             'href'  => '/import.php',
                             'icon'  => 'cloud-upload',
                             'title' => 'Import model runs from CSV',
+                            'access' => 'advanced',
                     ],
                     [
                             'label' => 'Data',
                             'href'  => '/data.php',
                             'icon'  => 'database',
                             'title' => 'Manage study areas, crops and runs',
+                            'access' => 'admin',
                     ],
                     [
                             'label' => 'Migrate',
                             'href'  => '/migrate.php',
                             'icon'  => 'arrow-repeat',
                             'title' => 'Apply database migrations',
+                            'access' => 'admin',
                     ],
             ];
 
             $currentPage = $_SERVER['PHP_SELF'];
 
             foreach ($navItems as $item) {
-                $isDisabled = $disableAdminTools && in_array($item['href'], ['/data.php', '/migrate.php'], true);
+                $access = $item['access'] ?? 'public';
 
-                $isActive = !$isDisabled && (strpos($currentPage, $item['href']) !== false) ? 'active' : 'text-white';
+                $canSee = match ($access) {
+                    'admin' => Auth::canAdmin(),
+                    'advanced' => Auth::canAdvanced(),
+                    default => true,
+                };
 
-                $disabledClass = $isDisabled ? 'disabled opacity-50' : '';
-                $ariaDisabled  = $isDisabled ? 'aria-disabled="true"' : '';
-                $tabIndex      = $isDisabled ? 'tabindex="-1"' : '';
-                $title         = $isDisabled ? 'Temporarily disabled' : $item['title'];
-                $href = $isDisabled ? '#' : $item['href'];
+                if (!$canSee) {
+                    continue;
+                }
+
+                $isActive = (strpos($currentPage, $item['href']) !== false) ? 'active' : 'text-white';
+
                 echo <<<HTML
-                    <li>
-                        <a href="{$href}"
-                            class="nav-link {$isActive} {$disabledClass}"
-                            {$ariaDisabled}
-                            {$tabIndex}
-                            data-bs-toggle="tooltip"
-                            title="{$title}">
-                            <i class="bi bi-{$item['icon']}"></i> <span>{$item['label']}</span>
-                        </a>
-                    </li>
-                    HTML;
+                <li>
+                    <a href="{$item['href']}"
+                        class="nav-link {$isActive}"
+                        data-bs-toggle="tooltip"
+                        title="{$item['title']}">
+                        <i class="bi bi-{$item['icon']}"></i> <span>{$item['label']}</span>
+                    </a>
+                </li>
+                HTML;
             }
             ?>
         </ul>
