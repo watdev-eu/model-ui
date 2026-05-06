@@ -954,6 +954,12 @@ final class McaComputeService
             $cropFilter = (string)$payload['crop_code'];
         }
 
+        $allowedCropCodes = [];
+        foreach (($payload['allowed_crop_codes'] ?? []) as $c) {
+            $c = trim((string)$c);
+            if ($c !== '') $allowedCropCodes[$c] = true;
+        }
+
         // include baseline in fetch
         $fetchRunIds = $runIds;
         if (!in_array($baselineRunId, $fetchRunIds, true)) {
@@ -963,10 +969,16 @@ final class McaComputeService
 
         // SWAT series by source run
         $swatSeriesByRun = [];
+
         foreach ($fetchRunIds as $rid) {
             $swatSeriesByRun[$rid] = $requiredSwat
                 ? McaSwatInputsRepository::getYearlyPerCropManyWithSub($rid, $requiredSwat, [], $cropFilter)
                 : [];
+
+            $swatSeriesByRun[$rid] = self::filterSwatSeriesCrops(
+                $swatSeriesByRun[$rid],
+                $allowedCropCodes
+            );
         }
 
         // SWAT series by dataset (run or merged custom)
@@ -1868,6 +1880,7 @@ final class McaComputeService
                 'crop_ref_factors'    => $payload['crop_ref_factors'] ?? [],
                 'preset_items'        => $presetItems,
                 'crop_code'           => $cropFilter,
+                'allowed_crop_codes'  => array_keys($allowedCropCodes),
             ],
         ];
     }
@@ -1908,6 +1921,51 @@ final class McaComputeService
         }
 
         return $out;
+    }
+
+    private static function filterSwatSeriesCrops(array $seriesByCode, array $allowed): array
+    {
+        if (!$allowed) return $seriesByCode;
+
+        foreach ($seriesByCode as $code => $block) {
+            if (!is_array($block)) continue;
+
+            if (isset($block['overall']) && is_array($block['overall'])) {
+                foreach (array_keys($block['overall']) as $crop) {
+                    if (!isset($allowed[(string)$crop])) {
+                        unset($block['overall'][$crop]);
+                    }
+                }
+            }
+
+            if (isset($block['sub_crop_area_ha']) && is_array($block['sub_crop_area_ha'])) {
+                foreach ($block['sub_crop_area_ha'] as $sub => $cropMap) {
+                    if (!is_array($cropMap)) continue;
+                    foreach (array_keys($cropMap) as $crop) {
+                        if (!isset($allowed[(string)$crop])) {
+                            unset($block['sub_crop_area_ha'][$sub][$crop]);
+                        }
+                    }
+                }
+            }
+
+            if (isset($block['by_sub']) && is_array($block['by_sub'])) {
+                foreach ($block['by_sub'] as $sub => $cropMap) {
+                    if (!is_array($cropMap)) continue;
+
+                    // sub_crop shape: by_sub[sub][crop][year]
+                    foreach (array_keys($cropMap) as $crop) {
+                        if (is_array($cropMap[$crop] ?? null) && !isset($allowed[(string)$crop])) {
+                            unset($block['by_sub'][$sub][$crop]);
+                        }
+                    }
+                }
+            }
+
+            $seriesByCode[$code] = $block;
+        }
+
+        return $seriesByCode;
     }
 
     private static function buildMergedCustomDatasetWaterRightsSeries(
@@ -2126,6 +2184,12 @@ final class McaComputeService
 
     private static function buildDirectSwatSeriesFromSub(array $bySub, array $subWeights = []): array
     {
+        if (!$subWeights) {
+            foreach (array_keys($bySub) as $sub) {
+                $subWeights[(int)$sub] = 1.0;
+            }
+        }
+
         $num = [];
         $den = [];
 

@@ -15,6 +15,10 @@ export function initSubbasinDashboard({
     let busyTimer = null;
     let busyShown = false;
 
+    let cropFilterInitialized = false;
+
+    let basemapLayer = null;
+
     // Track abort controllers for in-flight PRELOAD requests only
     const preloadAbortByRunId = new Map(); // runId -> AbortController
 
@@ -58,6 +62,9 @@ export function initSubbasinDashboard({
 
     let cropLookup = {};
 
+    let cropFilterBs = null;
+    let enabledCropCodes = new Set();
+
     const COLORWAY = [
         '#636EFA', '#EF553B', '#00CC96', '#AB63FA',
         '#FFA15A', '#19D3F3', '#FF6692', '#B6E880'
@@ -98,7 +105,7 @@ export function initSubbasinDashboard({
                     if (els.mcaEnableSwitch) {
                         els.mcaEnableSwitch.checked = true;
                     }
-                    await setMcaEnabled(true);
+                    await setMcaEnabled(true, { reloadPreset: false });
                 }
 
                 if (els.mcaWorkspaceStatus) {
@@ -136,6 +143,52 @@ export function initSubbasinDashboard({
         datasetMetadataBs = new bootstrap.Modal(els.datasetMetadataModal);
     }
 
+    function initCropFilterModal() {
+        if (!els.cropFilterModal) return;
+
+        cropFilterBs = new bootstrap.Modal(els.cropFilterModal);
+
+        els.cropFilterBtn?.addEventListener('click', () => {
+            renderCropFilterModal();
+            cropFilterBs?.show();
+        });
+
+        els.cropFilterSelectAllBtn?.addEventListener('click', () => {
+            crops.forEach(c => enabledCropCodes.add(c));
+            renderCropFilterModal();
+            populateCrops(current.crop);
+            updateCropVisibility();
+            syncMcaAllowedCrops();
+            recomputeAndRedraw();
+        });
+
+        els.cropFilterClearBtn?.addEventListener('click', () => {
+            crops.forEach(c => enabledCropCodes.delete(c));
+            renderCropFilterModal();
+            populateCrops(null);
+            updateCropVisibility();
+            syncMcaAllowedCrops();
+            recomputeAndRedraw();
+        });
+
+        els.cropFilterList?.addEventListener('change', (ev) => {
+            const box = ev.target.closest('input[data-crop-code]');
+            if (!box) return;
+
+            const code = String(box.dataset.cropCode || '');
+            if (!code) return;
+
+            if (box.checked) enabledCropCodes.add(code);
+            else enabledCropCodes.delete(code);
+
+            populateCrops(current.crop);
+            updateCropVisibility();
+            syncMcaAllowedCrops();
+            recomputeAndRedraw();
+            renderCropFilterModal();
+        });
+    }
+
     function showDatasetMetadata(meta) {
         if (!els.datasetMetadataTitle || !els.datasetMetadataBody) return;
 
@@ -169,6 +222,12 @@ export function initSubbasinDashboard({
     `;
 
         datasetMetadataBs?.show();
+    }
+
+    function syncMcaAllowedCrops() {
+        if (mcaEnabled && mca) {
+            mca.setAllowedCrops(getMcaAllowedCrops());
+        }
     }
 
     function setPreloadStatus(done, total) {
@@ -236,6 +295,7 @@ export function initSubbasinDashboard({
     wireUI();
     initWorkspaceLoadConfirm();
     initDatasetMetadataModal();
+    initCropFilterModal();
     mca = initMcaController({
         apiBase,
         els: {
@@ -264,8 +324,6 @@ export function initSubbasinDashboard({
             mcaVizWrap: els.mcaVizWrap,
             mcaRadarChart: els.mcaRadarChart,
             mcaTotalsChart: els.mcaTotalsChart,
-            mcaIndicatorSelect: els.mcaIndicatorSelect,
-            mcaRawTsChart: els.mcaRawTsChart,
         }
     });
 
@@ -331,6 +389,10 @@ export function initSubbasinDashboard({
             }
 
             showDatasetMetadata(meta);
+        });
+
+        els.basemapSelect?.addEventListener('change', () => {
+            setBasemap(els.basemapSelect.value || 'carto');
         });
 
         els.metric.addEventListener('change', async () => {
@@ -458,12 +520,13 @@ export function initSubbasinDashboard({
                 if (mapScenarioIds.length) {
                     const baseRunId = mapScenarioIds[0];
                     current.runId = baseRunId;
-                    const allCrops = [...cropSet].sort();
 
                     activateRun(baseRunId, {
                         preserveCrop: true,
                         cropsOverride: getSelectedUnionCrops(),
                     });
+
+                    syncMcaAllowedCrops();
 
                     if (current.indicatorId && selectedRunIds.length) {
                         setBusy(true, 'Loading metric…');
@@ -496,7 +559,7 @@ export function initSubbasinDashboard({
         }
     }
 
-    async function setMcaEnabled(on) {
+    async function setMcaEnabled(on, { reloadPreset = true } = {}) {
         mcaEnabled = !!on;
 
         // synchronous UI first
@@ -519,7 +582,7 @@ export function initSubbasinDashboard({
 
         try {
             if (els.mapNote) els.mapNote.textContent = 'Loading MCA preset…';
-            await rehydrateMcaFromCurrentRuns();
+            await rehydrateMcaFromCurrentRuns({ reloadPreset });
         } catch (e) {
             console.error('[MCA] enable failed:', e);
         } finally {
@@ -546,11 +609,10 @@ export function initSubbasinDashboard({
                 runsMeta,
                 runCropsById: {},
             });
-            mca.setAllowedCrops([]);
+            mca.setAllowedCrops(getMcaAllowedCrops());
             return;
         }
 
-        const cropSet = new Set();
         const runCropsById = {};
 
         for (const id of lastSelectedRunIds) {
@@ -559,8 +621,6 @@ export function initSubbasinDashboard({
 
             const runCrops = (rd.crops || []).slice();
             runCropsById[id] = runCrops;
-
-            for (const c of runCrops) cropSet.add(c);
         }
 
         const baselineRunId = mca.getBaselineRunId();
@@ -571,11 +631,31 @@ export function initSubbasinDashboard({
             if (!runsStore.has(baselineKey)) {
                 console.log(`[MCA] Loading baseline run ${baselineRunId} for crop data`);
                 await ensureRunLoaded(baselineKey);
+                if (epoch !== loadEpoch) return;
             }
 
             const baselineData = runsStore.get(baselineKey);
-            if (baselineData?.crops && !runCropsById[baselineKey]) {
-                runCropsById[baselineKey] = baselineData.crops.slice();
+
+            if (baselineData?.crops) {
+                const baselineCrops = baselineData.crops.slice();
+
+                // Key by actual SWAT run_id/source_id
+                if (!runCropsById[baselineKey]) {
+                    runCropsById[baselineKey] = baselineCrops;
+                }
+
+                // Also key by dashboard dataset id, because MCA uses baselineDatasetId
+                const baselineMeta = runsMeta.find(r =>
+                    r.dataset_type === 'run' &&
+                    parseInt(String(r.source_id ?? r.id), 10) === Number(baselineRunId)
+                );
+
+                if (baselineMeta) {
+                    const baselineDatasetKey = String(baselineMeta.id);
+                    if (!runCropsById[baselineDatasetKey]) {
+                        runCropsById[baselineDatasetKey] = baselineCrops;
+                    }
+                }
             }
         }
 
@@ -588,7 +668,7 @@ export function initSubbasinDashboard({
             runCropsById,
         });
 
-        mca.setAllowedCrops([...cropSet]);
+        mca.setAllowedCrops(getMcaAllowedCrops());
     }
 
     // ---------- Data load ----------
@@ -920,6 +1000,29 @@ export function initSubbasinDashboard({
         }
     }
 
+    function createBasemapSource(type = 'carto') {
+        if (type === 'satellite') {
+            return new ol.source.XYZ({
+                url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                attributions: 'Tiles &copy; Esri'
+            });
+        }
+
+        return new ol.source.XYZ({
+            url: 'https://{a-c}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+            attributions: [
+                '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                '&copy; <a href="https://carto.com/attributions">CARTO</a>'
+            ],
+            maxZoom: 19
+        });
+    }
+
+    function setBasemap(type = 'carto') {
+        if (!basemapLayer) return;
+        basemapLayer.setSource(createBasemapSource(type));
+    }
+
     function buildMap(subGJ, rivGJ) {
         registerEPSG32636(); // <-- make sure 32636 is known
 
@@ -967,16 +1070,9 @@ export function initSubbasinDashboard({
             map = new ol.Map({
                 target: 'map',
                 layers: [
-                    new ol.layer.Tile({
+                    basemapLayer = new ol.layer.Tile({
                         zIndex: 0,
-                        source: new ol.source.XYZ({
-                            url: 'https://{a-c}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-                            attributions: [
-                                '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-                                '&copy; <a href="https://carto.com/attributions">CARTO</a>'
-                            ],
-                            maxZoom: 19
-                        })
+                        source: createBasemapSource(els.basemapSelect?.value || 'carto')
                     }),
                     subLayer,
                     vectorLayer,
@@ -1245,8 +1341,20 @@ export function initSubbasinDashboard({
 
         // sub_crop
         if (current.aggMode === 'sub') {
-            const v = idx.mean.get(`${year}|${+sub}`);
-            return Number.isFinite(v) ? v : NaN;
+            let sum = 0;
+            let count = 0;
+
+            for (const c of crops) {
+                if (!enabledCropCodes.has(c)) continue;
+
+                const v = idx.m.get(`${year}|${+sub}|${c}`);
+                if (!Number.isFinite(v)) continue;
+
+                sum += v;
+                count++;
+            }
+
+            return count > 0 ? sum / count : NaN;
         }
 
         if (!current.crop) return NaN;
@@ -1359,22 +1467,82 @@ export function initSubbasinDashboard({
     function populateCrops(preferredCrop = null) {
         if (!els.crop) return;
 
-        if (!crops.length) {
+        if (!cropFilterInitialized) {
+            crops.forEach(c => enabledCropCodes.add(c));
+            cropFilterInitialized = true;
+        }
+
+        const visibleCrops = crops.filter(c => enabledCropCodes.has(c));
+
+        if (!visibleCrops.length) {
             els.crop.innerHTML = '';
             current.crop = null;
             return;
         }
 
-        els.crop.innerHTML = crops
+        els.crop.innerHTML = visibleCrops
             .map(c => `<option value="${escAttr(c)}">${escHtml(displayCrop(c))}</option>`)
             .join('');
 
-        let target = preferredCrop && crops.includes(preferredCrop)
+        const target = preferredCrop && visibleCrops.includes(preferredCrop)
             ? preferredCrop
-            : crops[0];
+            : visibleCrops[0];
 
         els.crop.value = target;
         current.crop = target;
+    }
+
+    function renderCropFilterModal() {
+        if (!els.cropFilterList) return;
+
+        if (!crops.length) {
+            els.cropFilterList.innerHTML = '<div class="text-muted small">No crops available.</div>';
+            if (els.cropFilterSummary) els.cropFilterSummary.textContent = '';
+            return;
+        }
+
+        const enabledCount = crops.filter(c => enabledCropCodes.has(c)).length;
+
+        if (els.cropFilterSummary) {
+            els.cropFilterSummary.textContent =
+                `${enabledCount}/${crops.length} crops enabled for visualisation.`;
+        }
+
+        els.cropFilterList.innerHTML = crops.map(c => {
+            const id = `crop-filter-${String(c).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+            const checked = enabledCropCodes.has(c) ? 'checked' : '';
+
+            return `
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox"
+                       id="${escAttr(id)}"
+                       data-crop-code="${escAttr(c)}"
+                       ${checked}>
+                <label class="form-check-label" for="${escAttr(id)}">
+                    ${escHtml(displayCrop(c))}
+                </label>
+            </div>
+        `;
+        }).join('');
+    }
+
+    function getMcaAllowedCrops() {
+        const selectedCropSet = new Set(getSelectedUnionCrops());
+        return [...enabledCropCodes]
+            .map(String)
+            .filter(c => selectedCropSet.has(c))
+            .sort();
+    }
+
+    function getSelectedUnionCrops() {
+        const cropSet = new Set();
+
+        for (const id of selectedRunIds) {
+            const rd = runsStore.get(id);
+            for (const c of (rd?.crops || [])) cropSet.add(String(c));
+        }
+
+        return [...cropSet].sort();
     }
 
     function initYearSlider() {
@@ -1412,7 +1580,8 @@ export function initSubbasinDashboard({
 
         // Guard: if crop required but we have no crops, disable crop selector + show message
         if (needsCrop && current.aggMode !== 'sub') {
-            const hasCrops = Array.isArray(crops) && crops.length > 0;
+            const hasCrops = Array.isArray(crops)
+                && crops.some(c => enabledCropCodes.has(c));
             if (els.crop) els.crop.disabled = !hasCrops;
             if (!hasCrops) {
                 current.crop = null;
@@ -1492,6 +1661,7 @@ export function initSubbasinDashboard({
     async function handleDatasetSelectionChanged() {
         selectedRunIds = getSelectedRunIdsFromSelect();
         lastSelectedRunIds = selectedRunIds.slice();
+        const epoch = loadEpoch;
 
         cancelPreloads();
 
@@ -1522,7 +1692,7 @@ export function initSubbasinDashboard({
                     runsMeta,
                     runCropsById: {},
                 });
-                mca.setAllowedCrops([]);
+                mca.setAllowedCrops(getMcaAllowedCrops());
             }
             return;
         }
@@ -1541,6 +1711,8 @@ export function initSubbasinDashboard({
             if (els.loadingDetail) els.loadingDetail.textContent = 'Loading scenario metrics…';
             await Promise.all(selectedRunIds.map(id => ensureRunLoaded(id)));
 
+            if (epoch !== loadEpoch) return;
+
             const remainingDefaultIds = (runsMeta || [])
                 .filter(r => !!r.is_default && !isCustomDatasetId(r.id))
                 .map(r => String(r.id))
@@ -1553,12 +1725,6 @@ export function initSubbasinDashboard({
 
             if (els.loadingDetail) els.loadingDetail.textContent = 'Rendering…';
 
-            const cropSet = new Set();
-            for (const id of selectedRunIds) {
-                const rd = runsStore.get(id);
-                for (const c of (rd?.crops || [])) cropSet.add(c);
-            }
-
             mapScenarioIds = mapScenarioIds.filter(id => selectedRunIds.includes(id));
             if (!mapScenarioIds.length) mapScenarioIds = [selectedRunIds[0]];
             if (mapScenarioIds.length > 2) mapScenarioIds = mapScenarioIds.slice(0, 2);
@@ -1566,17 +1732,19 @@ export function initSubbasinDashboard({
             const baseRunId = mapScenarioIds[0];
             current.runId = baseRunId;
 
-            const allCrops = [...cropSet].sort();
-
             activateRun(baseRunId, {
                 preserveCrop: true,
                 cropsOverride: getSelectedUnionCrops(),
             });
 
+            syncMcaAllowedCrops();
+
             if (current.indicatorId) {
                 if (els.loadingDetail) els.loadingDetail.textContent = 'Loading selected metric…';
                 await Promise.all(selectedRunIds.map(id => ensureIndicatorLoaded(id, current.indicatorId)));
             }
+
+            if (epoch !== loadEpoch) return;
 
             updateMapScenarioOptions();
             recomputeAndRedraw();
@@ -1584,6 +1752,8 @@ export function initSubbasinDashboard({
             if (selectedRunIds.every(id => runsStore.has(id))) {
                 showToast('Metrics loaded. Click a subbasin on the map to show graphs.', false, null, 'OK', 4000);
             }
+
+            if (epoch !== loadEpoch) return;
 
             if (mcaEnabled && mca) {
                 const runCropsById = {};
@@ -1603,9 +1773,27 @@ export function initSubbasinDashboard({
                     }
 
                     const baselineData = runsStore.get(baselineKey);
-                    if (baselineData?.crops && !runCropsById[baselineKey]) {
-                        runCropsById[baselineKey] = baselineData.crops.slice();
-                        console.log(`[MCA] Added baseline run ${baselineRunId} crops to runCropsById:`, baselineData.crops);
+
+                    if (baselineData?.crops) {
+                        const baselineCrops = baselineData.crops.slice();
+
+                        // Key by actual SWAT run_id/source_id
+                        if (!runCropsById[baselineKey]) {
+                            runCropsById[baselineKey] = baselineCrops;
+                        }
+
+                        // Also key by dashboard dataset id, because MCA uses baselineDatasetId
+                        const baselineMeta = runsMeta.find(r =>
+                            r.dataset_type === 'run' &&
+                            parseInt(String(r.source_id ?? r.id), 10) === Number(baselineRunId)
+                        );
+
+                        if (baselineMeta) {
+                            const baselineDatasetKey = String(baselineMeta.id);
+                            if (!runCropsById[baselineDatasetKey]) {
+                                runCropsById[baselineDatasetKey] = baselineCrops;
+                            }
+                        }
                     }
                 }
 
@@ -1618,7 +1806,7 @@ export function initSubbasinDashboard({
                     runCropsById,
                 });
 
-                mca.setAllowedCrops([...cropSet]);
+                mca.setAllowedCrops(getMcaAllowedCrops());
             }
         } catch (err) {
             console.error('[dataset change] failed', err);
@@ -1932,7 +2120,12 @@ export function initSubbasinDashboard({
             const runLabel = meta ? meta.run_label : `Run ${runId}`;
 
             const rows = rowsForIndicator(rd, def.id)
-                .filter(r => +r.sub === +current.selectedSub && +r.year === +year && r.crop);
+                .filter(r =>
+                    +r.sub === +current.selectedSub &&
+                    +r.year === +year &&
+                    r.crop &&
+                    enabledCropCodes.has(String(r.crop))
+                );
 
             if (!rows.length) continue;
 
@@ -2059,6 +2252,8 @@ export function initSubbasinDashboard({
             if (els.crop) els.crop.disabled = true;
             if (els.yearSlider) els.yearSlider.disabled = true;
 
+            if (els.cropFilterBtn) els.cropFilterBtn.disabled = true;
+
             // set texts now (even if alert appears later)
             if (els.loadingTitle)  els.loadingTitle.textContent = msg;
             if (els.loadingDetail) els.loadingDetail.textContent = 'Fetching indicators, crops, and scenario metrics…';
@@ -2091,7 +2286,11 @@ export function initSubbasinDashboard({
         if (els.dataset) els.dataset.querySelectorAll('input,button').forEach(el => el.disabled = false);
         if (els.metric) els.metric.disabled = false;
         if (els.crop) els.crop.disabled = false;
-        if (els.yearSlider) els.yearSlider.disabled = false;
+        if (els.yearSlider) {
+            els.yearSlider.disabled = !selectedRunIds.length || years.length <= 1;
+        }
+
+        if (els.cropFilterBtn) els.cropFilterBtn.disabled = false;
 
         // hide alert (whether it was shown or not)
         if (els.loadingAlert) {
@@ -2209,25 +2408,21 @@ export function initSubbasinDashboard({
         };
     }
 
-    function getSelectedUnionCrops() {
-        const cropSet = new Set();
-
-        for (const id of selectedRunIds) {
-            const rd = runsStore.get(id);
-            for (const c of (rd?.crops || [])) cropSet.add(c);
-        }
-
-        return [...cropSet].sort();
-    }
-
     async function switchStudyArea(newStudyAreaId) {
         loadEpoch++;
         preloadEpoch++;            // cancels any in-flight preload runner
+        for (const [, ctrl] of preloadAbortByRunId.entries()) {
+            try { ctrl.abort(); } catch (_) {}
+        }
+        preloadAbortByRunId.clear();
         preloadQueue = [];
         preloadTotal = preloadDone = preloadInFlight = 0;
         setPreloadStatus(0, 0);
         runLoadPromises.clear();   // optional; safe because new area will load different runs anyway
         const epoch = loadEpoch;
+
+        enabledCropCodes = new Set();
+        cropFilterInitialized = false;
 
         if (!Number.isFinite(+newStudyAreaId) || +newStudyAreaId <= 0) return;
 
@@ -2260,7 +2455,7 @@ export function initSubbasinDashboard({
                 runCropsById: {},
             });
 
-            mca.setAllowedCrops([]);
+            mca.setAllowedCrops(getMcaAllowedCrops());
         }
 
         if (els.dataset) {

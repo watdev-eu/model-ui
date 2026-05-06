@@ -23,8 +23,6 @@ export function initMcaController({ apiBase, els }) {
 
     let mcaRunCropsById = {}; // runId -> [crop codes]
 
-    let mcaSelectedIndicator = null;
-
     let baselineRunId = null;
     let baselineDatasetId = null;
     let cropRefFactorByCropKey = new Map(); // "CROP::key" -> number|null
@@ -236,103 +234,6 @@ export function initMcaController({ apiBase, els }) {
         }, { displayModeBar: false, responsive: true });
     }
 
-    function populateIndicatorSelect(json) {
-        if (!els.mcaIndicatorSelect) return;
-
-        const enabled = getEnabledIndicatorCodesFromResults(json); // calc_keys
-        const metaMap = getIndicatorMetaMap(json);                 // Map(calc_key -> {name, unit, code})
-
-        if (!enabled.length) {
-            els.mcaIndicatorSelect.innerHTML = '';
-            mcaSelectedIndicator = null;
-            return;
-        }
-
-        if (!mcaSelectedIndicator || !enabled.includes(mcaSelectedIndicator)) {
-            mcaSelectedIndicator = enabled[0];
-        }
-
-        els.mcaIndicatorSelect.innerHTML = enabled.map(calcKey => {
-            const meta = metaMap.get(String(calcKey));
-            const label = meta?.name || String(calcKey);
-            const shownCode = meta?.code || String(calcKey); // SDG-style code if present
-
-            return `<option value="${escapeHtml(calcKey)}">${escapeHtml(label)} (${escapeHtml(shownCode)})</option>`;
-        }).join('');
-
-        els.mcaIndicatorSelect.value = mcaSelectedIndicator;
-    }
-
-    function renderRawTimeseries(json) {
-        if (!els.mcaRawTsChart) return;
-
-        const code = mcaSelectedIndicator;
-        if (!code) {
-            Plotly.purge(els.mcaRawTsChart);
-            return;
-        }
-
-        const metaMap = getIndicatorMetaMap(json);
-        const meta = metaMap.get(String(code));
-        const yTitle = meta?.unit ? `${meta.name} (${meta.unit})` : (meta?.name || code);
-
-        const datasetIds = (json?.dataset_ids || []).map(String);
-        const rawRoot = json?.results?.raw || {};
-        const rawByDataset = rawRoot.by_dataset || rawRoot;
-
-        if (!rawByDataset || !Object.keys(rawByDataset).length) {
-            console.warn('[MCA raw TS] raw.by_dataset missing/empty', json?.results);
-        }
-
-        // union years across runs for this indicator
-        const yearSet = new Set();
-        for (const rid of datasetIds) {
-            const rBlock = rawByDataset?.[rid] || rawByDataset?.[String(rid)];
-            const series = rBlock?.[code]?.series || rBlock?.[code];
-            if (series && typeof series === 'object') {
-                Object.keys(series).forEach(y => yearSet.add(Number(y)));
-            }
-        }
-        const years = [...yearSet].filter(Number.isFinite).sort((a,b)=>a-b);
-
-        if (!years.length) {
-            Plotly.purge(els.mcaRawTsChart);
-            console.warn('[MCA raw TS] no years found for indicator', code, json?.results);
-            return;
-        }
-
-        const traces = datasetIds.map((rid) => {
-            const rBlock = rawByDataset?.[rid] || rawByDataset?.[String(rid)] || {};
-            const series = rBlock?.[code]?.series || rBlock?.[code] || {};
-
-            const y = years.map(yr => {
-                const v = series?.[yr];
-                return Number.isFinite(Number(v)) ? Number(v) : null;
-            });
-
-            return {
-                type: 'scatter',
-                mode: 'lines',
-                connectgaps: true,
-                name: runLabel(rid),
-                x: years.map((_, i) => i),
-                y,
-                hovertemplate: `${runLabel(rid)}<br>Year %{x}<br>%{y:.4f}<extra></extra>`,
-            };
-        });
-
-        Plotly.newPlot(els.mcaRawTsChart, traces, {
-            margin: { t: 20, r: 10, b: 40, l: 60 },
-            xaxis: {
-                title: 'Years after implementation',
-                tickmode: 'linear',
-                dtick: 1
-            },
-            yaxis: { title: yTitle },
-            showlegend: true,
-        }, { displayModeBar: false, responsive: true });
-    }
-
     function renderMcaViz(json) {
         const ok = !!json?.ok && !!json?.results;
         ensureVizVisible(ok);
@@ -342,10 +243,6 @@ export function initMcaController({ apiBase, els }) {
         // 1) radar + totals
         renderRadar(json);
         renderTotalsBar(json);
-
-        // 2) selector + raw ts
-        populateIndicatorSelect(json);
-        renderRawTimeseries(json);
     }
 
     function buildKeyIndex(list, keyField = 'key') {
@@ -483,7 +380,13 @@ export function initMcaController({ apiBase, els }) {
             ))
             : [];
 
-        return Array.from(new Set([...fromMeta, ...fromInputs])).sort();
+        let out = Array.from(new Set([...fromMeta, ...fromInputs])).sort();
+
+        if (allowedCropSet instanceof Set) {
+            out = out.filter(c => allowedCropSet.has(String(c)));
+        }
+
+        return out;
     }
 
     function getRunVarRow(runId, key) {
@@ -564,14 +467,15 @@ export function initMcaController({ apiBase, els }) {
     }
 
     function setAllowedCrops(cropCodes) {
-        if (!Array.isArray(cropCodes) || !cropCodes.length) {
-            allowedCropSet = null;
+        if (!Array.isArray(cropCodes)) {
+            allowedCropSet = null; // unknown / no scenario context
         } else {
             allowedCropSet = new Set(cropCodes.map(c => String(c)));
         }
 
         renderCropGlobalsAccordion();
         renderScenarioCards();
+        updateComputeEnabled();
     }
 
     function enabledWeightSum(items) {
@@ -734,17 +638,19 @@ export function initMcaController({ apiBase, els }) {
         if (!els.mcaCropGlobalsWrap) return;
 
         // If no scenarios selected, don't show "all crops"
-        if (!allowedCropSet || allowedCropSet.size === 0) {
+        if (allowedCropSet === null) {
             els.mcaCropGlobalsWrap.innerHTML =
                 `<div class="text-muted small">Select scenarios first to show crop inputs for those scenarios.</div>`;
             return;
         }
 
-        const rows = (currentCropVars || []).slice();
-        if (!rows.length) {
-            els.mcaCropGlobalsWrap.innerHTML = `<div class="text-muted small">No crop variables loaded.</div>`;
+        if (allowedCropSet.size === 0) {
+            els.mcaCropGlobalsWrap.innerHTML =
+                `<div class="text-muted small">No crops enabled.</div>`;
             return;
         }
+
+        const rows = (currentCropVars || []).slice();
 
         const KEYS = [
             { key: 'crop_price_usd_per_t', label: 'Crop price (USD/t)' },
@@ -761,8 +667,14 @@ export function initMcaController({ apiBase, els }) {
         // --- Baseline crops: ONLY from KPI data (mcaRunCropsById) ---
         // Don't use cropRefFactorByCropKey because it contains all 96 crops
         const baselineCropsFromKPI = new Set();
-        if (baselineDatasetId && mcaRunCropsById[baselineDatasetId]) {
-            for (const c of mcaRunCropsById[baselineDatasetId]) {
+
+        const baselineCropKeys = [
+            baselineDatasetId,
+            baselineRunId != null ? String(baselineRunId) : null,
+        ].filter(Boolean);
+
+        for (const key of baselineCropKeys) {
+            for (const c of (mcaRunCropsById[key] || [])) {
                 baselineCropsFromKPI.add(String(c));
             }
         }
@@ -790,15 +702,15 @@ export function initMcaController({ apiBase, els }) {
         let crops = Array.from(byCrop.values())
             .filter(c => allowedCropSet.has(String(c.crop_code)));
 
-        if (!crops.length) {
+        const baselineCrops = Array.from(byCrop.values())
+            .filter(c => baselineCropsFromKPI.has(String(c.crop_code)))
+            .filter(c => !allowedCropSet || allowedCropSet.has(String(c.crop_code)));
+
+        if (!crops.length && !baselineCrops.length) {
             els.mcaCropGlobalsWrap.innerHTML =
                 `<div class="text-muted small">No crops available for the selected scenarios.</div>`;
             return;
         }
-
-        // --- Baseline crops for the BOTTOM tables: only KPI baseline crops ---
-        let baselineCrops = Array.from(byCrop.values())
-            .filter(c => baselineCropsFromKPI.has(String(c.crop_code)));
 
         console.log('[MCA crop globals] Baseline crops for tables:', baselineCrops.length, baselineCrops.map(c => c.crop_code));
 
@@ -960,7 +872,7 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
             const key = datasetIdString(rid);
             for (const c of (mcaRunCropsById?.[key] || [])) cropSet.add(String(c));
         }
-        allowedCropSet = cropSet.size ? cropSet : null;
+        allowedCropSet = effectiveSelectedRunIds.length ? cropSet : null;
 
         const selectedSet = new Set(effectiveSelectedRunIds.map(datasetIdString));
 
@@ -1289,6 +1201,9 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
                 .filter(x => !x.st?.ok)
                 .map(x => `scenario ${x.rid}: ${x.st?.loading ? 'loading' : (x.st?.error ? x.st.error : 'not loaded')}`);
             reason = `Scenario inputs not ready: ${bad.join(' | ')}`;
+        }
+        else if (allowedCropSet instanceof Set && allowedCropSet.size === 0) {
+            reason = 'No crops enabled.';
         }
 
         els.mcaComputeBtn.disabled = !!reason;
@@ -1679,14 +1594,20 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
     }
 
     function updateWorkspaceActionUi() {
-        const isSystem = isSystemWorkspaceSelection() || !activeWorkspaceId;
+        const selectedValue = getSelectedWorkspaceValue();
+        const selectedWorkspaceId = /^\d+$/.test(selectedValue) ? Number(selectedValue) : null;
+
+        const canUpdate =
+            selectedWorkspaceId &&
+            activeWorkspaceId &&
+            Number(selectedWorkspaceId) === Number(activeWorkspaceId);
 
         if (els.mcaWorkspaceSaveBtn) {
-            els.mcaWorkspaceSaveBtn.classList.toggle('d-none', isSystem);
-            els.mcaWorkspaceSaveBtn.disabled = isSystem;
-            els.mcaWorkspaceSaveBtn.title = isSystem
-                ? 'System defaults cannot be updated directly'
-                : 'Update this workspace';
+            els.mcaWorkspaceSaveBtn.classList.toggle('d-none', !canUpdate);
+            els.mcaWorkspaceSaveBtn.disabled = !canUpdate;
+            els.mcaWorkspaceSaveBtn.title = canUpdate
+                ? 'Update this workspace'
+                : 'Load this workspace before updating it';
         }
     }
 
@@ -1735,7 +1656,6 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         includedRunIds = new Set();
         allowedCropSet = null;
         baselineDatasetId = null;
-        mcaSelectedIndicator = null;
 
         studyAreaId = saId;
         preferredWorkspaceDatasetIds = [];
@@ -1895,7 +1815,6 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         ensureVizVisible(false);
         if (els.mcaRadarChart) Plotly.purge(els.mcaRadarChart);
         if (els.mcaTotalsChart) Plotly.purge(els.mcaTotalsChart);
-        if (els.mcaRawTsChart) Plotly.purge(els.mcaRawTsChart);
     }
 
     async function compute(cropCode = null) {
@@ -1909,6 +1828,9 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
             fd.append('csrf', window.CSRF_TOKEN);
             fd.append('preset_set_id', presetId);
             fd.append('preset_id', presetId);
+            fd.append('allowed_crop_codes_json', JSON.stringify(
+                allowedCropSet ? Array.from(allowedCropSet).map(String) : []
+            ));
             if (cropCode) fd.append('crop_code', cropCode);
 
             // IMPORTANT: send included run ids
@@ -2019,15 +1941,10 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         return t ? t.total_weighted_score : null;
     }
 
-    initWorkspaceModal()
+    initWorkspaceModal();
 
     // ---- UI wiring ----
     els.mcaComputeBtn?.addEventListener('click', () => compute());
-
-    els.mcaIndicatorSelect?.addEventListener('change', () => {
-        mcaSelectedIndicator = String(els.mcaIndicatorSelect.value || '');
-        if (resultsCache) renderRawTimeseries(resultsCache);
-    });
 
     els.mcaWorkspaceSaveBtn?.addEventListener('click', () => {
         openWorkspaceModal({ saveAsNew: false });

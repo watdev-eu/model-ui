@@ -137,6 +137,12 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                                     <span class="mono small" id="opacityRiversVal">100%</span>
                                 </div>
                             </div>
+                            <hr class="my-2">
+                            <div class="small fw-semibold mb-1">Basemap</div>
+                            <select id="basemapSelect" class="form-select form-select-sm">
+                                <option value="carto" selected>Default</option>
+                                <option value="satellite">Satellite</option>
+                            </select>
                         </div>
                         <hr class="my-2">
                         <div class="small fw-semibold mb-1">Map scenario</div>
@@ -204,6 +210,11 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                     <div class="mb-3" id="cropGroup" style="display:none">
                         <label class="form-label" for="cropSelect">Crop</label>
                         <select id="cropSelect" class="form-select"></select>
+                        <div class="d-grid mt-2">
+                            <button type="button" id="cropFilterBtn" class="btn btn-sm btn-outline-secondary">
+                                Select crops for visualisation and analysis
+                            </button>
+                        </div>
                     </div>
 
                     <div class="mb-3">
@@ -427,6 +438,15 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                     opacityRiversVal: document.getElementById('opacityRiversVal'),
                     mapScenario: document.getElementById('mapScenarioSelect'),
 
+                    basemapSelect: document.getElementById('basemapSelect'),
+
+                    cropFilterBtn: document.getElementById('cropFilterBtn'),
+                    cropFilterModal: document.getElementById('cropFilterModal'),
+                    cropFilterList: document.getElementById('cropFilterList'),
+                    cropFilterSummary: document.getElementById('cropFilterSummary'),
+                    cropFilterSelectAllBtn: document.getElementById('cropFilterSelectAllBtn'),
+                    cropFilterClearBtn: document.getElementById('cropFilterClearBtn'),
+
                     mcaWorkspaceSelect: document.getElementById('mcaWorkspaceSelect'),
                     mcaWorkspaceSaveBtn: document.getElementById('mcaWorkspaceSaveBtn'),
                     mcaWorkspaceSaveAsBtn: document.getElementById('mcaWorkspaceSaveAsBtn'),
@@ -540,6 +560,26 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                 </div>
                 <div class="modal-body" id="datasetMetadataBody">
                     <div class="text-muted small">No metadata loaded.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="cropFilterModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Crops for visualisation and analysis</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="cropFilterSummary" class="small text-muted mb-2"></div>
+                    <div id="cropFilterList" class="d-flex flex-column gap-1"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" id="cropFilterSelectAllBtn" class="btn btn-sm btn-outline-secondary">Select all</button>
+                    <button type="button" id="cropFilterClearBtn" class="btn btn-sm btn-outline-secondary">Clear</button>
+                    <button type="button" class="btn btn-sm btn-primary" data-bs-dismiss="modal">Done</button>
                 </div>
             </div>
         </div>

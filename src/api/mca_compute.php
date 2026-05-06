@@ -24,6 +24,13 @@ if (empty($_SESSION['csrf_token']) || !hash_equals((string)$_SESSION['csrf_token
 }
 
 // --- Parse inputs ---
+$allowedCropCodes = [];
+$acj = (string)($_POST['allowed_crop_codes_json'] ?? '[]');
+$decoded = json_decode($acj, true);
+if (is_array($decoded)) {
+    $allowedCropCodes = array_values(array_filter(array_map('strval', $decoded)));
+}
+
 $presetSetId = isset($_POST['preset_set_id']) ? (int)$_POST['preset_set_id'] : 0;
 if ($presetSetId <= 0) bad(400, 'preset_set_id is required');
 
@@ -90,6 +97,8 @@ try {
         'crop_ref_factors'  => $refFactors,
 
         'run_inputs'        => $runInputs,
+
+        'allowed_crop_codes' => $allowedCropCodes,
     ];
 
     $out = McaComputeService::compute($payload);
