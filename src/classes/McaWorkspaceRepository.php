@@ -7,6 +7,40 @@ require_once __DIR__ . '/../config/database.php';
 
 final class McaWorkspaceRepository
 {
+    private static function nullableBool(mixed $value): ?bool
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value)) {
+            return $value !== 0;
+        }
+
+        if (is_float($value)) {
+            return $value != 0.0;
+        }
+
+        if (is_string($value)) {
+            $v = strtolower(trim($value));
+            if (in_array($v, ['1', 'true', 't', 'yes', 'y', 'on'], true)) return true;
+            if (in_array($v, ['0', 'false', 'f', 'no', 'n', 'off'], true)) return false;
+        }
+
+        return null;
+    }
+
+    private static function pgBool(mixed $value): ?string
+    {
+        $b = self::nullableBool($value);
+        if ($b === null) return null;
+        return $b ? 'true' : 'false';
+    }
+
     private static function assertPresetAccessible(PDO $pdo, int $studyAreaId, int $presetSetId, string $userId): void
     {
         $stmt = $pdo->prepare("
@@ -531,28 +565,40 @@ final class McaWorkspaceRepository
             ->execute([':id' => $workspaceId]);
 
         $ins = $pdo->prepare("
-        INSERT INTO mca_workspace_preset_items
-            (workspace_id, indicator_calc_key, indicator_code, indicator_name, weight, direction, is_enabled, sort_order)
-        VALUES
-            (:workspace_id, :indicator_calc_key, :indicator_code, :indicator_name, :weight, :direction, :is_enabled, :sort_order)
-    ");
+            INSERT INTO mca_workspace_preset_items
+                (workspace_id, indicator_calc_key, indicator_code, indicator_name, weight, direction, is_enabled, sort_order)
+            VALUES
+                (:workspace_id, :indicator_calc_key, :indicator_code, :indicator_name, :weight, :direction, :is_enabled, :sort_order)
+        ");
 
         foreach ($rows as $i => $r) {
             $calcKey = trim((string)($r['indicator_calc_key'] ?? ''));
             if ($calcKey === '') continue;
 
             $direction = ((string)($r['direction'] ?? 'pos') === 'neg') ? 'neg' : 'pos';
+            $isEnabled = self::nullableBool($r['is_enabled'] ?? null) ?? false;
 
-            $ins->execute([
-                ':workspace_id' => $workspaceId,
-                ':indicator_calc_key' => $calcKey,
-                ':indicator_code' => (($r['indicator_code'] ?? null) !== null ? (string)$r['indicator_code'] : null),
-                ':indicator_name' => (($r['indicator_name'] ?? null) !== null ? (string)$r['indicator_name'] : null),
-                ':weight' => (float)($r['weight'] ?? 0),
-                ':direction' => $direction,
-                ':is_enabled' => !empty($r['is_enabled']),
-                ':sort_order' => (int)($r['sort_order'] ?? $i),
-            ]);
+            $ins->bindValue(':workspace_id', $workspaceId, PDO::PARAM_INT);
+            $ins->bindValue(':indicator_calc_key', $calcKey, PDO::PARAM_STR);
+
+            if (($r['indicator_code'] ?? null) === null) {
+                $ins->bindValue(':indicator_code', null, PDO::PARAM_NULL);
+            } else {
+                $ins->bindValue(':indicator_code', (string)$r['indicator_code'], PDO::PARAM_STR);
+            }
+
+            if (($r['indicator_name'] ?? null) === null) {
+                $ins->bindValue(':indicator_name', null, PDO::PARAM_NULL);
+            } else {
+                $ins->bindValue(':indicator_name', (string)$r['indicator_name'], PDO::PARAM_STR);
+            }
+
+            $ins->bindValue(':weight', (string)((float)($r['weight'] ?? 0)), PDO::PARAM_STR);
+            $ins->bindValue(':direction', $direction, PDO::PARAM_STR);
+            $ins->bindValue(':is_enabled', $isEnabled, PDO::PARAM_BOOL);
+            $ins->bindValue(':sort_order', (int)($r['sort_order'] ?? $i), PDO::PARAM_INT);
+
+            $ins->execute();
         }
     }
 
@@ -586,7 +632,7 @@ final class McaWorkspaceRepository
                 ':data_type' => $dataType,
                 ':value_num' => $r['value_num'] ?? null,
                 ':value_text' => $r['value_text'] ?? null,
-                ':value_bool' => array_key_exists('value_bool', $r) ? $r['value_bool'] : null,
+                ':value_bool' => self::pgBool($r['value_bool'] ?? null),
                 ':sort_order' => (int)($r['sort_order'] ?? $i),
             ]);
         }
@@ -625,7 +671,7 @@ final class McaWorkspaceRepository
                 ':data_type' => $dataType,
                 ':value_num' => $r['value_num'] ?? null,
                 ':value_text' => $r['value_text'] ?? null,
-                ':value_bool' => array_key_exists('value_bool', $r) ? $r['value_bool'] : null,
+                ':value_bool' => self::pgBool($r['value_bool'] ?? null),
                 ':sort_order' => (int)($r['sort_order'] ?? $i),
             ]);
         }
@@ -664,7 +710,7 @@ final class McaWorkspaceRepository
                 ':data_type' => $dataType,
                 ':value_num' => $r['value_num'] ?? null,
                 ':value_text' => $r['value_text'] ?? null,
-                ':value_bool' => array_key_exists('value_bool', $r) ? $r['value_bool'] : null,
+                ':value_bool' => self::pgBool($r['value_bool'] ?? null),
                 ':sort_order' => (int)($r['sort_order'] ?? $i),
             ]);
         }
@@ -715,7 +761,7 @@ final class McaWorkspaceRepository
                     ':data_type' => $dataType,
                     ':value_num' => $r['value_num'] ?? null,
                     ':value_text' => $r['value_text'] ?? null,
-                    ':value_bool' => array_key_exists('value_bool', $r) ? $r['value_bool'] : null,
+                    ':value_bool' => self::pgBool($r['value_bool'] ?? null),
                     ':sort_order' => (int)($r['sort_order'] ?? $i),
                 ]);
             }
@@ -742,7 +788,7 @@ final class McaWorkspaceRepository
                     ':data_type' => $dataType,
                     ':value_num' => $r['value_num'] ?? null,
                     ':value_text' => $r['value_text'] ?? null,
-                    ':value_bool' => array_key_exists('value_bool', $r) ? $r['value_bool'] : null,
+                    ':value_bool' => self::pgBool($r['value_bool'] ?? null),
                     ':sort_order' => (int)($r['sort_order'] ?? $i),
                 ]);
             }
