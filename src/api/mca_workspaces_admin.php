@@ -166,9 +166,22 @@ try {
     error_log('[mca_workspaces_admin] ' . $e->getMessage());
     error_log($e->getTraceAsString());
 
+    // PostgreSQL unique violation: duplicate workspace name for user/study area
+    if ($e instanceof PDOException && $e->getCode() === '23505') {
+        http_response_code(409);
+        echo json_encode([
+            'ok' => false,
+            'error' => 'workspace_name_exists',
+            'message' => 'A workspace with this name already exists for this study area. Please choose a different name.',
+        ]);
+        exit;
+    }
+
     http_response_code(500);
     echo json_encode([
         'ok' => false,
-        'error' => 'Server error',
+        'error' => 'server_error',
+        'message' => 'The workspace could not be saved because of a server error. Please try again.',
     ]);
+    exit;
 }

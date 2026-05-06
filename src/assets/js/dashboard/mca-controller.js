@@ -1566,7 +1566,17 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         }
 
         if (!res.ok || !json?.ok) {
-            throw new Error(json?.error || `HTTP ${res.status}`);
+            const msg =
+                json?.message ||
+                (json?.error === 'workspace_name_exists'
+                    ? 'A workspace with this name already exists. Please choose a different name.'
+                    : json?.error) ||
+                `HTTP ${res.status}`;
+
+            const err = new Error(msg);
+            err.status = res.status;
+            err.code = json?.error || null;
+            throw err;
         }
 
         if (json.workspace_id) {
@@ -1575,11 +1585,10 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
 
         await loadWorkspaceList();
 
-        if (els.mcaWorkspaceStatus) {
-            els.mcaWorkspaceStatus.textContent = saveAsNew
-                ? 'Workspace created.'
-                : 'Workspace updated.';
-        }
+        setWorkspaceStatus(
+            saveAsNew ? 'Workspace created.' : 'Workspace updated.',
+            'success'
+        );
     }
 
     let workspaceSaveMode = 'update'; // 'update' | 'create'
@@ -1591,22 +1600,74 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
 
         els.mcaWorkspaceForm?.addEventListener('submit', async (ev) => {
             ev.preventDefault();
+
             const name = String(els.mcaWorkspaceNameInput?.value || '').trim();
-            if (!name) return;
+            if (!name) {
+                setWorkspaceStatus('Please enter a workspace name.', 'danger');
+                els.mcaWorkspaceNameInput?.focus();
+                return;
+            }
+
+            const saveAsNew = workspaceSaveMode === 'create';
+
+            setWorkspaceStatus(
+                saveAsNew ? 'Creating workspace…' : 'Updating workspace…',
+                'muted'
+            );
+            setWorkspaceSaving(true, saveAsNew ? 'Creating…' : 'Updating…');
 
             try {
                 await saveCurrentWorkspace({
-                    saveAsNew: workspaceSaveMode === 'create',
+                    saveAsNew,
                     explicitName: name,
                 });
+
+                setWorkspaceStatus(
+                    saveAsNew ? 'Workspace created.' : 'Workspace updated.',
+                    'success'
+                );
+
                 workspaceModalBs?.hide();
             } catch (err) {
                 console.error(err);
-                if (els.mcaWorkspaceStatus) {
-                    els.mcaWorkspaceStatus.textContent = err.message || String(err);
+
+                const message = err?.message || String(err);
+
+                setWorkspaceStatus(message, 'danger');
+
+                if (err?.status === 409 || err?.code === 'workspace_name_exists') {
+                    els.mcaWorkspaceNameInput?.focus();
+                    els.mcaWorkspaceNameInput?.select();
                 }
+            } finally {
+                setWorkspaceSaving(false);
             }
         });
+    }
+
+    function setWorkspaceSaving(isSaving, label = 'Saving…') {
+        const btn = els.mcaWorkspaceModalSubmit;
+        if (!btn) return;
+
+        if (isSaving) {
+            btn.dataset.originalText = btn.dataset.originalText || btn.textContent;
+            btn.disabled = true;
+            btn.innerHTML = `
+            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+            <span>${escapeHtml(label)}</span>
+        `;
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = escapeHtml(btn.dataset.originalText || 'Save');
+            delete btn.dataset.originalText;
+        }
+    }
+
+    function setWorkspaceStatus(message, type = 'muted') {
+        if (!els.mcaWorkspaceStatus) return;
+
+        els.mcaWorkspaceStatus.textContent = message || '';
+        els.mcaWorkspaceStatus.className = `small text-${type}`;
     }
 
     function getSelectedWorkspaceValue() {
@@ -1658,6 +1719,7 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         }
 
         els.mcaWorkspaceNameInput.value = defaultName;
+        setWorkspaceStatus('', 'muted');
         workspaceModalBs?.show();
 
         setTimeout(() => {
