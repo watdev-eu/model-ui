@@ -116,27 +116,101 @@ if ($canViewImport) {
                         <div id="uploadGithubBlock" class="row g-3 d-none">
                             <div class="col-md-6">
                                 <label class="form-label">GitHub repository URL</label>
-                                <input type="url" name="github_repo_url" class="form-control" placeholder="https://github.com/org/repo" disabled>
-                            </div>
-
-                            <div class="col-md-6">
-                                <label class="form-label">Branch / tag</label>
-                                <input type="text" name="github_ref" class="form-control" placeholder="main" disabled>
-                            </div>
-
-                            <div class="col-md-6">
-                                <label class="form-label">Folder path</label>
-                                <input type="text" name="github_path" class="form-control" placeholder="outputs/" disabled>
+                                <input type="url" name="github_repo_url" id="githubRepoUrl" class="form-control source-github" placeholder="https://github.com/org/repo">
                             </div>
 
                             <div class="col-md-6">
                                 <label class="form-label">Personal access token</label>
-                                <input type="password" name="github_token" class="form-control" disabled>
+                                <input type="password" name="github_token" id="githubToken" class="form-control source-github" autocomplete="off">
+                                <div class="form-text">Optional. Required for private repositories.</div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">Output branch</label>
+                                <div class="input-group">
+                                    <select name="github_ref" id="githubRefSelect" class="form-select source-github">
+                                        <option value="output" selected>output</option>
+                                    </select>
+                                    <button type="button" class="btn btn-outline-secondary" id="btnLoadGithubBranches">
+                                        Load branches
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">Scenario</label>
+                                <div class="input-group">
+                                    <select name="scenario_path" id="githubScenarioSelect" class="form-select source-github">
+                                        <option value="">Choose scenario…</option>
+                                    </select>
+                                    <button type="button" class="btn btn-outline-secondary" id="btnLoadGithubScenarios">
+                                        Load scenarios
+                                    </button>
+                                </div>
+                                <div class="form-text">Scenarios are folders on the selected branch that contain output.zip.</div>
                             </div>
 
                             <div class="col-12">
                                 <div class="alert alert-secondary mb-0">
-                                    GitHub import UI will be implemented later.
+                                    Expected structure: selected branch → scenario folder → <code>output.zip</code>.
+                                    The zip must contain <code>file.cio</code>, <code>output.hru</code>, <code>output.snu</code>, and optionally <code>output.rch</code>.
+                                </div>
+                            </div>
+
+                            <div class="col-12">
+                                <div class="accordion" id="githubImportHelp">
+                                    <div class="accordion-item">
+                                        <h2 class="accordion-header" id="githubImportHelpHeading">
+                                            <button class="accordion-button collapsed" type="button"
+                                                    data-bs-toggle="collapse"
+                                                    data-bs-target="#githubImportHelpBody"
+                                                    aria-expanded="false"
+                                                    aria-controls="githubImportHelpBody">
+                                                How to find the GitHub URL and access token
+                                            </button>
+                                        </h2>
+
+                                        <div id="githubImportHelpBody"
+                                             class="accordion-collapse collapse"
+                                             aria-labelledby="githubImportHelpHeading"
+                                             data-bs-parent="#githubImportHelp">
+                                            <div class="accordion-body small">
+                                                <h6>1. Find the repository URL</h6>
+                                                <ol class="mb-3">
+                                                    <li>Open the repository in GitHub.</li>
+                                                    <li>Copy the URL from your browser address bar.</li>
+                                                    <li>Use the repository root URL, for example: <code>https://github.com/org/repo</code>.</li>
+                                                    <li>Do not copy a branch, folder, or file URL such as <code>/tree/output/...</code> or <code>/blob/...</code>.</li>
+                                                </ol>
+
+                                                <h6>2. Check whether the repository is private</h6>
+                                                <ol class="mb-3">
+                                                    <li>Open the repository page in GitHub.</li>
+                                                    <li>Look next to the repository name at the top of the page.</li>
+                                                    <li>If you see a <strong>Private</strong> badge, a personal access token is required.</li>
+                                                    <li>If you see a <strong>Public</strong> badge, you can usually leave the token field empty.</li>
+                                                </ol>
+
+                                                <h6>3. Create a GitHub personal access token</h6>
+                                                <ol class="mb-3">
+                                                    <li>In GitHub, click your profile picture in the top-right corner.</li>
+                                                    <li>Go to <strong>Settings</strong>.</li>
+                                                    <li>Open <strong>Developer settings</strong>.</li>
+                                                    <li>Open <strong>Personal access tokens</strong>.</li>
+                                                    <li>Choose <strong>Fine-grained tokens</strong>.</li>
+                                                    <li>Create a new token for the repository you want to import from.</li>
+                                                    <li>Give it read-only access to repository contents.</li>
+                                                    <li>Generate the token and copy it immediately.</li>
+                                                </ol>
+
+                                                <div class="alert alert-warning mb-0">
+                                                    The token is only used to read the selected repository during inspection.
+                                                    Do not use a token with write or administration permissions.
+                                                    Do not share your token with other users.
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

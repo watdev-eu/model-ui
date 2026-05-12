@@ -21,6 +21,13 @@
     const uploadCsvBlock = document.getElementById('uploadCsvBlock');
     const uploadGithubBlock = document.getElementById('uploadGithubBlock');
 
+    const githubRepoUrl = document.getElementById('githubRepoUrl');
+    const githubToken = document.getElementById('githubToken');
+    const githubRefSelect = document.getElementById('githubRefSelect');
+    const githubScenarioSelect = document.getElementById('githubScenarioSelect');
+    const btnLoadGithubBranches = document.getElementById('btnLoadGithubBranches');
+    const btnLoadGithubScenarios = document.getElementById('btnLoadGithubScenarios');
+
     let inspectData = null;
     let selectedSubbasins = new Set();
     let allSubbasins = [];
@@ -133,7 +140,15 @@
             el.required = source === 'csv' && ['hru_csv_file', 'snu_csv_file'].includes(el.name);
         });
 
-        btnInspect.disabled = source === 'github';
+        btnInspect.disabled = false;
+        btnInspect.textContent = source === 'github' ? 'Inspect GitHub files' : 'Inspect files';
+
+        inspectForm.querySelectorAll('.source-github').forEach(el => {
+            el.disabled = source !== 'github';
+            if (el.name === 'github_repo_url' || el.name === 'scenario_path') {
+                el.required = source === 'github';
+            }
+        });
 
         resetInspectionState();
     }
@@ -295,6 +310,25 @@
         }
     }
 
+    if (btnLoadGithubBranches) {
+        btnLoadGithubBranches.addEventListener('click', loadGithubBranches);
+    }
+
+    if (btnLoadGithubScenarios) {
+        btnLoadGithubScenarios.addEventListener('click', loadGithubScenarios);
+    }
+
+    if (githubRefSelect) {
+        githubRefSelect.addEventListener('change', () => {
+            githubScenarioSelect.innerHTML = '<option value="">Choose scenario…</option>';
+            resetInspectionState();
+        });
+    }
+
+    if (githubScenarioSelect) {
+        githubScenarioSelect.addEventListener('change', resetInspectionState);
+    }
+
     function initMap() {
         vectorSource = new ol.source.Vector();
         selectionLayer = new ol.layer.Vector({
@@ -386,11 +420,113 @@
         return parts.join(' ');
     }
 
-    btnInspect.addEventListener('click', async () => {
-        if (currentSource() === 'github') {
-            showToast('GitHub import is not implemented yet.', true);
+    function githubFormParams() {
+        const params = new URLSearchParams();
+        params.set('github_repo_url', githubRepoUrl?.value || '');
+        params.set('github_token', githubToken?.value || '');
+        params.set('github_ref', githubRefSelect?.value || 'output');
+        return params;
+    }
+
+    async function fetchJson(url, options = {}) {
+        const res = await fetch(url, {
+            credentials: 'include',
+            ...options
+        });
+
+        const data = await res.json();
+
+        if (!res.ok || !data.ok) {
+            throw new Error(data.error || 'Request failed.');
+        }
+
+        return data;
+    }
+
+    async function loadGithubBranches() {
+        if (!githubRepoUrl.value.trim()) {
+            showToast('Please enter a GitHub repository URL first.', true);
+            githubRepoUrl.focus();
             return;
         }
+
+        setButtonBusy(btnLoadGithubBranches, true, 'Loading...', 'Load branches');
+
+        try {
+            const params = githubFormParams();
+            const data = await fetchJson('/api/github_repo_branches.php?' + params.toString());
+
+            githubRefSelect.innerHTML = '';
+            githubScenarioSelect.innerHTML = '<option value="">Choose scenario…</option>';
+
+            if (!data.branches || !data.branches.length) {
+                githubRefSelect.innerHTML = '<option value="">No branches found</option>';
+                return;
+            }
+
+            data.branches.forEach(branch => {
+                const option = document.createElement('option');
+                option.value = branch;
+                option.textContent = branch;
+                if (branch === data.default_branch) {
+                    option.selected = true;
+                }
+                githubRefSelect.appendChild(option);
+            });
+
+            showToast('Branches loaded.');
+        } catch (err) {
+            console.error(err);
+            showToast(err.message || 'Failed to load branches.', true);
+        } finally {
+            setButtonBusy(btnLoadGithubBranches, false, 'Loading...', 'Load branches');
+        }
+    }
+
+    async function loadGithubScenarios() {
+        if (!githubRepoUrl.value.trim()) {
+            showToast('Please enter a GitHub repository URL first.', true);
+            githubRepoUrl.focus();
+            return;
+        }
+
+        if (!githubRefSelect.value.trim()) {
+            showToast('Please choose a branch first.', true);
+            githubRefSelect.focus();
+            return;
+        }
+
+        setButtonBusy(btnLoadGithubScenarios, true, 'Loading...', 'Load scenarios');
+
+        try {
+            const params = githubFormParams();
+            const data = await fetchJson('/api/github_output_scenarios.php?' + params.toString());
+
+            githubScenarioSelect.innerHTML = '<option value="">Choose scenario…</option>';
+
+            if (!data.scenarios || !data.scenarios.length) {
+                showToast('No scenario folders with output.zip were found.', true);
+                return;
+            }
+
+            data.scenarios.forEach(scenario => {
+                const option = document.createElement('option');
+                option.value = scenario.path;
+                option.textContent = scenario.name;
+                githubScenarioSelect.appendChild(option);
+            });
+
+            showToast('Scenarios loaded.');
+        } catch (err) {
+            console.error(err);
+            showToast(err.message || 'Failed to load scenarios.', true);
+        } finally {
+            setButtonBusy(btnLoadGithubScenarios, false, 'Loading...', 'Load scenarios');
+        }
+    }
+
+    btnInspect.addEventListener('click', async () => {
+        const source = currentSource();
 
         if (!inspectForm.reportValidity()) {
             return;
@@ -399,13 +535,28 @@
         const myEpoch = ++inspectRequestEpoch;
         const fd = new FormData(inspectForm);
 
-        setButtonBusy(btnInspect, true, 'Inspecting files...', 'Inspect files');
-        setStatusMessage('Uploading and inspecting files. This can take a little while for large SWAT outputs.', 'info');
+        setButtonBusy(btnInspect, true, 'Inspecting files...', source === 'github' ? 'Inspect GitHub files' : 'Inspect files');
+
+        setStatusMessage(
+            source === 'github'
+                ? 'Downloading and inspecting GitHub output.zip. This can take a little while.'
+                : 'Uploading and inspecting files. This can take a little while for large SWAT outputs.',
+            'info'
+        );
 
         try {
-            const result = await postFormWithProgress('/api/import_inspect.php', fd, message => {
+            const inspectUrl = source === 'github'
+                ? '/api/import_github_inspect.php'
+                : '/api/import_inspect.php';
+
+            const result = await postFormWithProgress(inspectUrl, fd, message => {
                 if (myEpoch === inspectRequestEpoch) {
-                    setStatusMessage(message, 'info');
+                    setStatusMessage(
+                        source === 'github'
+                            ? 'Contacting GitHub and preparing output.zip...'
+                            : message,
+                        'info'
+                    );
                 }
             });
 
@@ -415,7 +566,7 @@
 
             const data = result.data;
 
-            setStatusMessage('Upload complete. Server is inspecting files...', 'info');
+            setStatusMessage('Server is inspecting files...', 'info');
 
             if (!result.ok || !data.ok) {
                 const message = buildInspectionErrorMessage(data, result.status);
@@ -426,7 +577,9 @@
 
             inspectData = data;
             importTokenInput.value = data.import_token;
-            detectedSubbasins = (data.detected_subbasins || []).map(v => parseInt(v, 10)).filter(v => v > 0);
+            detectedSubbasins = (data.detected_subbasins || [])
+                .map(v => parseInt(v, 10))
+                .filter(v => v > 0);
 
             inspectResult.classList.remove('d-none');
             renderCioSummary(data.cio || {});
@@ -437,24 +590,22 @@
 
             renderUnknownCrops(data.unknown_crops || []);
             enableStep2And3();
+
             setStatusMessage('Files inspected successfully. You can now complete the metadata and select subbasins.', 'success');
             showToast('Files inspected successfully.');
-
-            // Keep model run date on today; do not overwrite it with detected period start.
         } catch (err) {
             if (myEpoch !== inspectRequestEpoch) {
                 return;
             }
+
             console.error(err);
             const message = err?.message || 'Server error during inspection.';
             setStatusMessage(message, 'danger');
             showToast(message, true);
         } finally {
             if (myEpoch === inspectRequestEpoch) {
-                setButtonBusy(btnInspect, false, 'Inspecting files...', 'Inspect files');
-                if (currentSource() === 'github') {
-                    btnInspect.disabled = true;
-                }
+                setButtonBusy(btnInspect, false, 'Inspecting files...', source === 'github' ? 'Inspect GitHub files' : 'Inspect files');
+                btnInspect.textContent = currentSource() === 'github' ? 'Inspect GitHub files' : 'Inspect files';
             }
         }
     });
