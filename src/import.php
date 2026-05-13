@@ -404,8 +404,8 @@ if ($canViewImport) {
     </div>
 
     <?php if ($canViewImport): ?>
-        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v9.2.4/ol.css">
-        <script src="https://cdn.jsdelivr.net/npm/ol@v9.2.4/dist/ol.js"></script>
+        <link rel="stylesheet" href="/assets/vendor/ol/ol.css">
+        <script src="/assets/vendor/ol/ol.js"></script>
         <script>
             window.WATDEV_IMPORT_BOOTSTRAP = {
                 csrfToken: <?= json_encode($csrfToken ?? '') ?>,

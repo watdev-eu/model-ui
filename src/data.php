@@ -560,9 +560,10 @@ $perCol  = (int)ceil(max(1, count($crops)) / $columns);
 <?php include __DIR__ . '/includes/footer.php'; ?>
 
 <?php if ($canViewData): ?>
+    <link rel="stylesheet" href="/assets/vendor/ol/ol.css">
+    <script src="/assets/vendor/ol/ol.js"></script>
     <script src="/assets/js/data-crops.js"></script>
     <script src="/assets/js/data-runs.js"></script>
     <script src="/assets/js/data-mca-defaults.js"></script>
     <script src="/assets/js/data-run-edit.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/ol@latest/dist/ol.js"></script>
 <?php endif; ?>

@@ -309,11 +309,11 @@ final class SwatRunRepository
         $pdo = Database::pdo();
 
         $stmt = $pdo->prepare("
-        SELECT sub
-        FROM swat_run_subbasins
-        WHERE run_id = :run_id
-        ORDER BY sub
-    ");
+            SELECT sub
+            FROM swat_run_subbasins
+            WHERE run_id = :run_id
+            ORDER BY sub
+        ");
         $stmt->execute([':run_id' => $runId]);
 
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
@@ -324,10 +324,10 @@ final class SwatRunRepository
         $pdo = Database::pdo();
 
         $stmt = $pdo->prepare("
-        SELECT id, study_area
-        FROM swat_runs
-        WHERE id = :id
-    ");
+            SELECT id, study_area
+            FROM swat_runs
+            WHERE id = :id
+        ");
         $stmt->execute([':id' => $runId]);
         $run = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -345,10 +345,10 @@ final class SwatRunRepository
         }
 
         $stmt = $pdo->prepare("
-        SELECT sub
-        FROM study_area_subbasins
-        WHERE study_area_id = :study_area_id
-    ");
+            SELECT sub
+            FROM study_area_subbasins
+            WHERE study_area_id = :study_area_id
+        ");
         $stmt->execute([':study_area_id' => $studyAreaId]);
 
         $validSubs = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
@@ -367,9 +367,9 @@ final class SwatRunRepository
             $del->execute([':run_id' => $runId]);
 
             $ins = $pdo->prepare("
-            INSERT INTO swat_run_subbasins (run_id, study_area_id, sub)
-            VALUES (:run_id, :study_area_id, :sub)
-        ");
+                INSERT INTO swat_run_subbasins (run_id, study_area_id, sub)
+                VALUES (:run_id, :study_area_id, :sub)
+            ");
 
             foreach ($selectedSubbasins as $sub) {
                 $ins->execute([
@@ -384,5 +384,54 @@ final class SwatRunRepository
             $pdo->rollBack();
             throw $e;
         }
+    }
+
+    public static function downloadPolicy(int $runId, ?string $userId): array
+    {
+        $run = self::find($runId);
+
+        if (!$run) {
+            return [
+                'allowed' => false,
+                'reason' => 'Run not found',
+                'run' => null,
+            ];
+        }
+
+        if (!self::userCanAccess($runId, $userId)) {
+            return [
+                'allowed' => false,
+                'reason' => 'You do not have access to this run',
+                'run' => $run,
+            ];
+        }
+
+        if (empty($run['is_downloadable'])) {
+            return [
+                'allowed' => false,
+                'reason' => 'This run is not downloadable',
+                'run' => $run,
+            ];
+        }
+
+        $fromDate = trim((string)($run['downloadable_from_date'] ?? ''));
+
+        if ($fromDate !== '') {
+            $today = (new DateTimeImmutable('today'))->format('Y-m-d');
+
+            if ($fromDate > $today) {
+                return [
+                    'allowed' => false,
+                    'reason' => 'This run is not downloadable yet',
+                    'run' => $run,
+                ];
+            }
+        }
+
+        return [
+            'allowed' => true,
+            'reason' => '',
+            'run' => $run,
+        ];
     }
 }

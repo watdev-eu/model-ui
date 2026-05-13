@@ -17,8 +17,8 @@ $canManageCustomScenarios = Auth::isLoggedIn();
 $canUseMcaWorkspaces = Auth::isLoggedIn();
 ?>
 
-    <script src="https://cdn.jsdelivr.net/npm/proj4@2.11.0/dist/proj4.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@9.2.4/ol.css">
+    <script src="/assets/vendor/proj4/proj4.js"></script>
+    <link rel="stylesheet" href="/assets/vendor/ol/ol.css">
     <style>
         #map { height: 560px; }
         .legend { background:#fff; padding:8px 10px; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,.2); font-size:12px; }
@@ -191,6 +191,16 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                             Use the checkboxes to enable or disable scenarios.
                         </div>
                         <div id="preloadStatus" class="text-muted small mt-1 d-none"></div>
+                        <div class="d-grid mt-2">
+                            <button
+                                    type="button"
+                                    id="downloadSelectedDatasetsBtn"
+                                    class="btn btn-sm btn-outline-success d-none">
+                                <i class="bi bi-download me-1"></i>
+                                Download selected data as CSV
+                            </button>
+                        </div>
+                        <div id="downloadSelectedDatasetsStatus" class="form-text small"></div>
                     </div>
 
                     <div id="loadingAlert" class="alert alert-info d-none align-items-center gap-2" role="alert">
@@ -381,11 +391,11 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                             <div class="col-12">
                                 <div class="card">
                                     <div class="card-body">
-                                        <div class="small text-muted mb-2">Spider chart<div class="d-flex justify-content-between align-items-center mb-2">
-                                                <div class="small text-muted">Spider chart (normalized 0–1)</div>
-                                                <div id="mcaRadarChartExport"></div>
-                                            </div>
-                                            <div id="mcaRadarChart" style="height:420px;"></div>
+                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                            <div class="small text-muted">Spider chart (normalized 0–1)</div>
+                                            <div id="mcaRadarChartExport"></div>
+                                        </div>
+                                        <div id="mcaRadarChart" style="height:420px;"></div>
                                     </div>
                                 </div>
                             </div>
@@ -410,8 +420,8 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
     </div>
 
     <!-- libs -->
-    <script src="https://cdn.plot.ly/plotly-2.35.3.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/ol@9.2.4/dist/ol.js"></script>
+    <script src="/assets/vendor/plotly/plotly-2.35.3.min.js"></script>
+    <script src="/assets/vendor/ol/ol.js"></script>
 
     <!-- module that wires switching -->
     <script type="module">
@@ -428,6 +438,8 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
             const ctrl = initSubbasinDashboard({
                 els: {
                     dataset: document.getElementById('datasetSelect'),
+                    downloadSelectedDatasetsBtn: document.getElementById('downloadSelectedDatasetsBtn'),
+                    downloadSelectedDatasetsStatus: document.getElementById('downloadSelectedDatasetsStatus'),
                     manageCustomScenariosBtn: document.getElementById('manageCustomScenariosBtn'),
                     datasetMetadataModal: document.getElementById('datasetMetadataModal'),
                     datasetMetadataTitle: document.getElementById('datasetMetadataTitle'),

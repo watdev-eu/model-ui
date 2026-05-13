@@ -13,23 +13,23 @@ final class CustomScenarioRepository
 
         $sql = <<<SQL
             select
-                cs.id,
-                cs.study_area_id,
-                cs.created_by,
-                cs.name,
-                cs.description,
-                cs.created_at,
-                cs.updated_at,
+                css.id,
+                css.study_area_id,
+                css.created_by,
+                css.name,
+                css.description,
+                css.created_at,
+                css.updated_at,
                 count(ca.sub) as assigned_subbasins
-            from custom_scenarios cs
+            from custom_scenarios css
             left join custom_scenario_subbasin_runs ca
-                on ca.custom_scenario_id = cs.id
-            where cs.study_area_id = :study_area_id
-              and cs.created_by = :created_by
+                on ca.custom_scenario_id = css.id
+            where css.study_area_id = :study_area_id
+              and css.created_by = :created_by
             group by
-                cs.id, cs.study_area_id, cs.created_by,
-                cs.name, cs.description, cs.created_at, cs.updated_at
-            order by cs.updated_at desc, cs.name asc
+                css.id, css.study_area_id, css.created_by,
+                css.name, css.description, css.created_at, css.updated_at
+            order by css.updated_at desc, css.name asc
         SQL;
 
         $stmt = $pdo->prepare($sql);
@@ -66,10 +66,10 @@ final class CustomScenarioRepository
                 ca.sub,
                 ca.source_run_id
             from custom_scenario_subbasin_runs ca
-            join custom_scenarios cs
-              on cs.id = ca.custom_scenario_id
+            join custom_scenarios css
+              on css.id = ca.custom_scenario_id
             where ca.custom_scenario_id = :scenario_id
-              and cs.created_by = :created_by
+              and css.created_by = :created_by
             order by ca.sub asc
         SQL;
 

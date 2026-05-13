@@ -215,6 +215,9 @@ export function initSubbasinDashboard({
 
             <dt class="col-sm-4">License</dt>
             <dd class="col-sm-8">${escHtml(meta.license_name || '—')}</dd>
+            
+            <dt class="col-sm-4">Downloadable</dt>
+            <dd class="col-sm-8">${downloadable}</dd>
 
             <dt class="col-sm-4">Visibility</dt>
             <dd class="col-sm-8">${escHtml(meta.visibility || '—')}</dd>
@@ -404,6 +407,10 @@ export function initSubbasinDashboard({
             await handleDatasetSelectionChanged();
         });
 
+        els.downloadSelectedDatasetsBtn?.addEventListener('click', () => {
+            downloadSelectedDatasetsCsv();
+        });
+
         els.dataset.addEventListener('click', (ev) => {
             const btn = ev.target.closest('.dataset-info-btn');
             if (!btn) return;
@@ -588,6 +595,100 @@ export function initSubbasinDashboard({
                 setMcaEnabled(!!els.mcaEnableSwitch.checked);
             });
         }
+    }
+
+    function updateDatasetDownloadButton() {
+        if (!els.downloadSelectedDatasetsBtn) return;
+
+        const selectedIds = getSelectedRunIdsFromSelect();
+
+        if (!selectedIds.length) {
+            els.downloadSelectedDatasetsBtn.classList.add('d-none');
+            if (els.downloadSelectedDatasetsStatus) {
+                els.downloadSelectedDatasetsStatus.textContent = '';
+            }
+            return;
+        }
+
+        const unavailable = selectedIds.filter(id => {
+            const meta = runsMeta.find(r => String(r.id) === String(id));
+            return !datasetMetaIsDownloadableNow(meta);
+        });
+
+        if (unavailable.length) {
+            els.downloadSelectedDatasetsBtn.classList.add('d-none');
+
+            if (els.downloadSelectedDatasetsStatus) {
+                els.downloadSelectedDatasetsStatus.textContent =
+                    'Download is only available when all selected datasets are marked downloadable and the release date has passed.';
+            }
+
+            return;
+        }
+
+        els.downloadSelectedDatasetsBtn.classList.remove('d-none');
+
+        if (els.downloadSelectedDatasetsStatus) {
+            els.downloadSelectedDatasetsStatus.textContent =
+                'CSV download includes all datapoints for the selected datasets.';
+        }
+    }
+
+    function datasetMetaIsDownloadableNow(meta) {
+        if (!meta) return false;
+
+        if (
+            meta.is_downloadable_now === true ||
+            meta.is_downloadable_now === 1 ||
+            meta.is_downloadable_now === '1' ||
+            meta.is_downloadable_now === 't' ||
+            meta.is_downloadable_now === 'true'
+        ) {
+            return true;
+        }
+
+        const isDownloadable =
+            meta.is_downloadable === true ||
+            meta.is_downloadable === 1 ||
+            meta.is_downloadable === '1' ||
+            meta.is_downloadable === 't' ||
+            meta.is_downloadable === 'true';
+
+        if (!isDownloadable) return false;
+
+        const fromDate = String(meta.downloadable_from_date || '').trim();
+        if (!fromDate) return true;
+
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        const todayStr = `${yyyy}-${mm}-${dd}`;
+
+        return fromDate <= todayStr;
+    }
+
+    function downloadSelectedDatasetsCsv() {
+        const selectedIds = getSelectedRunIdsFromSelect();
+
+        if (!selectedIds.length) {
+            showToast('Select at least one dataset first.', true, null, 'OK', 3000);
+            return;
+        }
+
+        const unavailable = selectedIds.filter(id => {
+            const meta = runsMeta.find(r => String(r.id) === String(id));
+            return !datasetMetaIsDownloadableNow(meta);
+        });
+
+        if (unavailable.length) {
+            showToast('One or more selected datasets are not available for download.', true, null, 'OK', 4000);
+            updateDatasetDownloadButton();
+            return;
+        }
+
+        const url = `${apiBase}/swat_datasets_download_csv.php?dataset_ids=${encodeURIComponent(selectedIds.join(','))}`;
+        window.location.href = url;
     }
 
     async function setMcaEnabled(on, { reloadPreset = true } = {}) {
@@ -1006,6 +1107,7 @@ export function initSubbasinDashboard({
         }
 
         els.dataset.innerHTML = html;
+        updateDatasetDownloadButton();
 
         // return list of ids so caller can decide what to auto-select
         return runs.map(r => r.id);
@@ -1790,6 +1892,13 @@ export function initSubbasinDashboard({
         if (els.seriesChart) Plotly.purge(els.seriesChart);
         if (els.cropChart)   Plotly.purge(els.cropChart);
 
+        if (els.downloadSelectedDatasetsBtn) {
+            els.downloadSelectedDatasetsBtn.classList.add('d-none');
+        }
+        if (els.downloadSelectedDatasetsStatus) {
+            els.downloadSelectedDatasetsStatus.textContent = '';
+        }
+
         updateHelpText();
     }
 
@@ -1845,6 +1954,7 @@ export function initSubbasinDashboard({
                 });
                 mca.setAllowedCrops(getMcaAllowedCrops());
             }
+            updateDatasetDownloadButton();
             return;
         }
 
@@ -1965,6 +2075,7 @@ export function initSubbasinDashboard({
         } finally {
             setBusy(false);
             updateHelpText();
+            updateDatasetDownloadButton();
         }
     }
 
