@@ -263,7 +263,7 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                     <h2 class="h6 mb-2">Visualizations</h2>
                     <div class="text-muted small mb-2" id="seriesHint">Click a subbasin to load its time series and crop breakdown.</div>
                     <div class="row g-3">
-                        <div class="col-12">
+                        <div class="col-12 col-xxl-6">
                             <div class="d-flex justify-content-between align-items-center mb-2">
                                 <div class="small text-muted">Time series</div>
                                 <div id="seriesChartExport"></div>
@@ -271,7 +271,7 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                             <div id="seriesChart" style="height:360px"></div>
                         </div>
 
-                        <div class="col-12">
+                        <div class="col-12 col-xxl-6">
                             <div class="d-flex justify-content-between align-items-center mb-2">
                                 <div class="small text-muted">Crop breakdown</div>
                                 <div id="cropChartExport"></div>
