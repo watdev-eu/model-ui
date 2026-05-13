@@ -70,6 +70,12 @@ export function initSubbasinDashboard({
         '#FFA15A', '#19D3F3', '#FF6692', '#B6E880'
     ];
 
+    // Escape helpers for safe HTML/attributes
+    const escHtml = s => String(s).replace(/[&<>"']/g, m => (
+        {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]
+    ));
+    const escAttr = s => escHtml(s).replace(/"/g,'&quot;');
+
     // ---------- Lazy registries (load once) ----------
     let indicatorRegistryLoaded = false;
     let cropLookupLoaded = false;
@@ -296,6 +302,31 @@ export function initSubbasinDashboard({
     initWorkspaceLoadConfirm();
     initDatasetMetadataModal();
     initCropFilterModal();
+
+    initPlotExportControl({
+        wrapEl: els.seriesChartExport,
+        chartEl: els.seriesChart,
+        filenameBase: 'time-series',
+    });
+
+    initPlotExportControl({
+        wrapEl: els.cropChartExport,
+        chartEl: els.cropChart,
+        filenameBase: 'crop-breakdown',
+    });
+
+    initPlotExportControl({
+        wrapEl: els.mcaRadarChartExport,
+        chartEl: els.mcaRadarChart,
+        filenameBase: 'mca-spider-chart',
+    });
+
+    initPlotExportControl({
+        wrapEl: els.mcaTotalsChartExport,
+        chartEl: els.mcaTotalsChart,
+        filenameBase: 'mca-total-score',
+    });
+
     mca = initMcaController({
         apiBase,
         els: {
@@ -1422,6 +1453,126 @@ export function initSubbasinDashboard({
         updateHelpText();
     }
 
+    function initPlotExportControl({
+                                       wrapEl,
+                                       chartEl,
+                                       filenameBase,
+                                   }) {
+        if (!wrapEl || !chartEl) return;
+
+        const formats = [
+            { value: 'png', label: 'PNG' },
+            { value: 'svg', label: 'SVG' },
+            { value: 'jpeg', label: 'JPEG' },
+            { value: 'webp', label: 'WebP' },
+        ];
+
+        const sizes = [
+            { value: 'standard', label: 'Standard', width: 1200, height: 800 },
+            { value: 'large', label: 'Large', width: 1800, height: 1200 },
+            { value: 'presentation', label: 'Presentation', width: 1920, height: 1080 },
+            { value: 'print', label: 'Print', width: 2400, height: 1600 },
+        ];
+
+        const formatName = `${filenameBase}-format`;
+        const sizeName = `${filenameBase}-size`;
+
+        wrapEl.innerHTML = `
+        <div class="dropdown">
+            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                Download
+            </button>
+
+            <div class="dropdown-menu dropdown-menu-end p-3" style="min-width:240px">
+                <div class="small fw-semibold mb-1">Format</div>
+                ${formats.map((f, i) => `
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio"
+                               name="${escAttr(formatName)}"
+                               id="${escAttr(formatName)}-${escAttr(f.value)}"
+                               value="${escAttr(f.value)}"
+                               ${i === 0 ? 'checked' : ''}>
+                        <label class="form-check-label" for="${escAttr(formatName)}-${escAttr(f.value)}">
+                            ${escHtml(f.label)}
+                        </label>
+                    </div>
+                `).join('')}
+
+                <hr class="my-2">
+
+                <div class="small fw-semibold mb-1">Size</div>
+                ${sizes.map((s, i) => `
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio"
+                               name="${escAttr(sizeName)}"
+                               id="${escAttr(sizeName)}-${escAttr(s.value)}"
+                               value="${escAttr(s.value)}"
+                               ${i === 1 ? 'checked' : ''}>
+                        <label class="form-check-label" for="${escAttr(sizeName)}-${escAttr(s.value)}">
+                            ${escHtml(s.label)}
+                        </label>
+                    </div>
+                `).join('')}
+
+                <button type="button" class="btn btn-sm btn-primary w-100 mt-3">
+                    Download chart
+                </button>
+            </div>
+        </div>
+    `;
+
+        const downloadBtn = wrapEl.querySelector('.btn-primary');
+
+        downloadBtn?.addEventListener('click', async () => {
+            const format = wrapEl.querySelector(`input[name="${formatName}"]:checked`)?.value || 'png';
+            const sizeKey = wrapEl.querySelector(`input[name="${sizeName}"]:checked`)?.value || 'large';
+            const size = sizes.find(s => s.value === sizeKey) || sizes[1];
+
+            const hasPlot =
+                chartEl.data &&
+                Array.isArray(chartEl.data) &&
+                chartEl.data.length > 0;
+
+            if (!hasPlot) {
+                showToast('There is no chart to download yet.', true, null, 'OK', 3000);
+                return;
+            }
+
+            const suffixParts = [];
+
+            if (current.selectedSub) {
+                suffixParts.push(`subbasin-${current.selectedSub}`);
+            }
+
+            if (current.indicatorId) {
+                suffixParts.push(current.indicatorId);
+            }
+
+            suffixParts.push(`year-${current.yearIndex}`);
+
+            const filename = [
+                filenameBase,
+                ...suffixParts,
+            ]
+                .join('-')
+                .replace(/[^a-zA-Z0-9_-]+/g, '-')
+                .replace(/-+/g, '-')
+                .replace(/^-|-$/g, '');
+
+            try {
+                await Plotly.downloadImage(chartEl, {
+                    format,
+                    width: size.width,
+                    height: size.height,
+                    filename,
+                });
+            } catch (err) {
+                console.error('[chart export] failed', err);
+                showToast('Failed to download chart.', true, null, 'OK', 4000);
+            }
+        });
+    }
+
     // ---------- UI population ----------
     function populateMetricsCombined() {
         if (!els.metric) return;
@@ -2379,12 +2530,6 @@ export function initSubbasinDashboard({
         if (a >= 100)  return n.toFixed(1);
         return n.toFixed(3);
     }
-
-    // Escape helpers for safe HTML/attributes
-    const escHtml = s => String(s).replace(/[&<>"']/g, m => (
-        {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]
-    ));
-    const escAttr = s => escHtml(s).replace(/"/g,'&quot;');
 
     function rampViridisRGB(t) {
         const stops = [

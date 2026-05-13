@@ -253,8 +253,21 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                     <h2 class="h6 mb-2">Visualizations</h2>
                     <div class="text-muted small mb-2" id="seriesHint">Click a subbasin to load its time series and crop breakdown.</div>
                     <div class="row g-3">
-                        <div class="col-12 col-lg-6"><div id="seriesChart" style="height:360px"></div></div>
-                        <div class="col-12 col-lg-6"><div id="cropChart" style="height:360px"></div></div>
+                        <div class="col-12 col-lg-6">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div class="small text-muted">Time series</div>
+                                <div id="seriesChartExport"></div>
+                            </div>
+                            <div id="seriesChart" style="height:360px"></div>
+                        </div>
+
+                        <div class="col-12 col-lg-6">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div class="small text-muted">Crop breakdown</div>
+                                <div id="cropChartExport"></div>
+                            </div>
+                            <div id="cropChart" style="height:360px"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -368,8 +381,11 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                             <div class="col-12">
                                 <div class="card">
                                     <div class="card-body">
-                                        <div class="small text-muted mb-2">Spider chart (normalized 0–1)</div>
-                                        <div id="mcaRadarChart" style="height:420px;"></div>
+                                        <div class="small text-muted mb-2">Spider chart<div class="d-flex justify-content-between align-items-center mb-2">
+                                                <div class="small text-muted">Spider chart (normalized 0–1)</div>
+                                                <div id="mcaRadarChartExport"></div>
+                                            </div>
+                                            <div id="mcaRadarChart" style="height:420px;"></div>
                                     </div>
                                 </div>
                             </div>
@@ -377,7 +393,10 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                             <div class="col-12">
                                 <div class="card">
                                     <div class="card-body">
-                                        <div class="small text-muted mb-2">Overall MCA score (weighted total)</div>
+                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                            <div class="small text-muted">Overall MCA score (weighted total)</div>
+                                            <div id="mcaTotalsChartExport"></div>
+                                        </div>
                                         <div id="mcaTotalsChart" style="height:320px;"></div>
                                     </div>
                                 </div>
@@ -484,6 +503,11 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                     mcaVizWrap: document.getElementById('mcaVizWrap'),
                     mcaRadarChart: document.getElementById('mcaRadarChart'),
                     mcaTotalsChart: document.getElementById('mcaTotalsChart'),
+
+                    seriesChartExport: document.getElementById('seriesChartExport'),
+                    cropChartExport: document.getElementById('cropChartExport'),
+                    mcaRadarChartExport: document.getElementById('mcaRadarChartExport'),
+                    mcaTotalsChartExport: document.getElementById('mcaTotalsChartExport'),
 
                     loadingAlert: document.getElementById('loadingAlert'),
                     loadingTitle: document.getElementById('loadingTitle'),
