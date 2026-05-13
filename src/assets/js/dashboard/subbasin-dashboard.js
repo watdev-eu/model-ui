@@ -464,7 +464,16 @@ export function initSubbasinDashboard({
             current.yearIndex = +els.yearSlider.value;
             els.yearLabel.textContent = scenarioYearLabel(current.yearIndex);
             if (rafId) cancelAnimationFrame(rafId);
-            rafId = requestAnimationFrame(() => { recomputeAndRedraw(true); rafId = null; });
+            rafId = requestAnimationFrame(() => {
+                recomputeAndRedraw(true);
+
+                // Year slider affects the crop breakdown chart
+                if (current.selectedSub) {
+                    drawCropChart(currentIndicator());
+                }
+
+                rafId = null;
+            });
         });
 
         els.aggMode.addEventListener('change', () => {
