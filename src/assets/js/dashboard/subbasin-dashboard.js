@@ -610,17 +610,19 @@ export function initSubbasinDashboard({
             return;
         }
 
-        const unavailable = selectedIds.filter(id => {
+        const available = selectedIds.filter(id => {
             const meta = runsMeta.find(r => String(r.id) === String(id));
-            return !datasetMetaIsDownloadableNow(meta);
+            return datasetMetaIsDownloadableNow(meta);
         });
 
-        if (unavailable.length) {
+        const unavailable = selectedIds.filter(id => !available.includes(id));
+
+        if (!available.length) {
             els.downloadSelectedDatasetsBtn.classList.add('d-none');
 
             if (els.downloadSelectedDatasetsStatus) {
                 els.downloadSelectedDatasetsStatus.textContent =
-                    'Download is only available when all selected datasets are marked downloadable and the release date has passed.';
+                    'None of the selected datasets are currently available for download.';
             }
 
             return;
@@ -629,8 +631,9 @@ export function initSubbasinDashboard({
         els.downloadSelectedDatasetsBtn.classList.remove('d-none');
 
         if (els.downloadSelectedDatasetsStatus) {
-            els.downloadSelectedDatasetsStatus.textContent =
-                'CSV download includes all datapoints for the selected datasets.';
+            els.downloadSelectedDatasetsStatus.textContent = unavailable.length
+                ? `CSV download will include ${available.length} downloadable selected dataset(s). ${unavailable.length} selected dataset(s) will be skipped.`
+                : 'CSV download includes all datapoints for the selected datasets.';
         }
     }
 
@@ -676,18 +679,30 @@ export function initSubbasinDashboard({
             return;
         }
 
-        const unavailable = selectedIds.filter(id => {
+        const available = selectedIds.filter(id => {
             const meta = runsMeta.find(r => String(r.id) === String(id));
-            return !datasetMetaIsDownloadableNow(meta);
+            return datasetMetaIsDownloadableNow(meta);
         });
 
-        if (unavailable.length) {
-            showToast('One or more selected datasets are not available for download.', true, null, 'OK', 4000);
+        const unavailable = selectedIds.filter(id => !available.includes(id));
+
+        if (!available.length) {
+            showToast('None of the selected datasets are available for download.', true, null, 'OK', 4000);
             updateDatasetDownloadButton();
             return;
         }
 
-        const url = `${apiBase}/swat_datasets_download_csv.php?dataset_ids=${encodeURIComponent(selectedIds.join(','))}`;
+        if (unavailable.length) {
+            showToast(
+                `${unavailable.length} selected dataset(s) are not downloadable and will be skipped.`,
+                false,
+                null,
+                'OK',
+                5000
+            );
+        }
+
+        const url = `${apiBase}/swat_datasets_download_csv.php?dataset_ids=${encodeURIComponent(available.join(','))}`;
         window.location.href = url;
     }
 

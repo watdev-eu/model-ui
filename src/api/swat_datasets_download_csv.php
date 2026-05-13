@@ -1,5 +1,5 @@
 <?php
-// api/swat_datasets_download_csv
+// api/swat_datasets_download_csv.php
 
 declare(strict_types=1);
 
@@ -9,6 +9,7 @@ require_once __DIR__ . '/../classes/Auth.php';
 require_once __DIR__ . '/../classes/DashboardDatasetKey.php';
 require_once __DIR__ . '/../classes/SwatRunRepository.php';
 require_once __DIR__ . '/../classes/CustomScenarioRepository.php';
+require_once __DIR__ . '/../classes/CropRepository.php';
 
 $raw = trim((string)($_GET['dataset_ids'] ?? ''));
 
@@ -40,6 +41,14 @@ if (!$datasetKeys) {
 $plans = [];
 
 try {
+    $cropLookup = [];
+    foreach (CropRepository::all() as $crop) {
+        $code = (string)($crop['code'] ?? '');
+        if ($code !== '') {
+            $cropLookup[$code] = (string)($crop['name'] ?? '');
+        }
+    }
+
     foreach ($datasetKeys as $datasetKey) {
         $parsed = DashboardDatasetKey::parse($datasetKey);
 
@@ -134,6 +143,7 @@ try {
         'year',
         'sub',
         'crop',
+        'crop_name',
         'value',
     ]);
 
@@ -148,7 +158,8 @@ try {
                 (string)$plan['dataset_key'],
                 (string)$plan['dataset_label'],
                 'run',
-                null
+                null,
+                $cropLookup
             );
 
             continue;
@@ -165,7 +176,8 @@ try {
                     (string)$plan['dataset_key'],
                     (string)$plan['dataset_label'],
                     'custom',
-                    $effectiveRunMap
+                    $effectiveRunMap,
+                    $cropLookup
                 );
             }
         }
@@ -192,7 +204,8 @@ function streamRunRows(
     string $datasetKey,
     string $datasetLabel,
     string $datasetType,
-    ?array $effectiveRunMap
+    ?array $effectiveRunMap,
+    array $cropLookup
 ): void {
     $run = SwatRunRepository::find($runId);
     $sourceRunLabel = (string)($run['run_label'] ?? ('Run ' . $runId));
@@ -223,6 +236,9 @@ function streamRunRows(
             }
         }
 
+        $cropCode = (string)($row['crop'] ?? '');
+        $cropName = $cropCode !== '' ? ($cropLookup[$cropCode] ?? '') : '';
+
         fputcsv($out, [
             $datasetKey,
             $datasetLabel,
@@ -232,7 +248,8 @@ function streamRunRows(
             $row['indicator_code'],
             $row['year'],
             $row['sub'],
-            $row['crop'],
+            $cropCode,
+            $cropName,
             $row['value'],
         ]);
     }
