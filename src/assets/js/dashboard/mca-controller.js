@@ -1363,6 +1363,10 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
             fd.append('workspace_id', String(activeWorkspaceId));
         }
 
+        if (currentVariableSetId) {
+            fd.append('variable_set_id', String(currentVariableSetId));
+        }
+
         fd.append('study_area_id', String(studyAreaId));
         fd.append('name', name);
         fd.append('description', '');

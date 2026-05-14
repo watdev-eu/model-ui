@@ -722,6 +722,41 @@ final class McaComputeService
         'bmp_material_other_usd_ha',
     ];
 
+    private static function fetchRunVariablesForRun(
+        int $variableSetId,
+        int $runId,
+        array $keys
+    ): array {
+        if ($variableSetId <= 0 || $runId <= 0 || !$keys) {
+            return [];
+        }
+
+        $pdo = Database::pdo();
+        $placeholders = implode(',', array_fill(0, count($keys), '?'));
+
+        $stmt = $pdo->prepare("
+            SELECT
+                v.key,
+                v.name,
+                v.unit,
+                v.description,
+                v.data_type,
+                vvr.value_num,
+                vvr.value_text,
+                vvr.value_bool
+            FROM mca_variables v
+            LEFT JOIN mca_variable_values_run vvr
+              ON vvr.variable_id = v.id
+             AND vvr.variable_set_id = ?
+             AND vvr.run_id = ?
+            WHERE v.key IN ($placeholders)
+            ORDER BY v.key
+        ");
+
+        $stmt->execute(array_merge([$variableSetId, $runId], $keys));
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     /**
      * Compute BCR series and overall for a single run and crop.
      *
@@ -905,6 +940,20 @@ final class McaComputeService
             $datasetContexts
         );
 
+        $baselineDatasetId = (string)$baselineRunId;
+        $baselineIsVisible = in_array($baselineDatasetId, $datasetIds, true);
+
+        $baselineDatasetContext = null;
+        if (!$baselineIsVisible) {
+            $baselineDatasetContext = [
+                'dataset_id' => $baselineDatasetId,
+                'dataset_type' => 'run',
+                'source_run_ids' => [$baselineRunId],
+                'effective_run_map' => null,
+                '_hidden_baseline_reference' => true,
+            ];
+        }
+
         $allSourceRunIds = [];
         foreach ($datasetContexts as $ctxItem) {
             foreach (($ctxItem['source_run_ids'] ?? []) as $rid) {
@@ -987,6 +1036,15 @@ final class McaComputeService
             $swatSeriesByDataset[$ds['dataset_id']] = self::buildDatasetSwatSeries($ds, $swatSeriesByRun);
         }
 
+        // Hidden baseline reference dataset.
+        // It is used for normalization only, not returned in dataset_ids/charts.
+        if ($baselineDatasetContext !== null) {
+            $swatSeriesByDataset[$baselineDatasetId] = self::buildDatasetSwatSeries(
+                $baselineDatasetContext,
+                $swatSeriesByRun
+            );
+        }
+
         // Index crop variables (prices)
         $cropVarsIdx = self::indexCropVars($payload['crop_variables'] ?? []);
 
@@ -1016,6 +1074,27 @@ final class McaComputeService
 
         $globalVars = $payload['variables'] ?? [];
         $globalIdx = self::indexVarsByKey($globalVars);
+        $variableSetId = (int)($payload['variable_set_id'] ?? 0);
+
+        $baselineRunVarKeys = [
+            'economic_life_years',
+            'discount_rate',
+            'bmp_invest_cost_usd_ha',
+            'bmp_annual_om_cost_usd_ha',
+            'water_cost_usd_m3',
+            'water_use_fee_usd_ha',
+        ];
+
+        if ($baselineDatasetContext !== null && $variableSetId > 0) {
+            $baselineRunVars = self::fetchRunVariablesForRun(
+                $variableSetId,
+                $baselineRunId,
+                $baselineRunVarKeys
+            );
+
+            $runVarsById[$baselineDatasetId] = $baselineRunVars;
+            $runVarIdxById[$baselineDatasetId] = self::indexVarsByKey($baselineRunVars);
+        }
 
         $viewerIndicators = McaIndicatorRegistry::listForCodes($enabledIndicatorCodes);
 
@@ -1024,10 +1103,15 @@ final class McaComputeService
 
         $results['raw'] = ['by_dataset' => []];
 
+        $computeContexts = $datasetContexts;
+        if ($baselineDatasetContext !== null) {
+            $computeContexts[] = $baselineDatasetContext;
+        }
+
         // ------------------------------------------------------------
         // Direct SWAT indicators: expose as raw MCA-capable indicators
         // ------------------------------------------------------------
-        foreach ($datasetContexts as $ds) {
+        foreach ($computeContexts as $ds) {
             $datasetId = (string)$ds['dataset_id'];
 
             foreach ($directSwatCodes as $code) {
@@ -1053,7 +1137,7 @@ final class McaComputeService
                 'by_dataset' => [],
             ];
 
-            foreach ($datasetContexts as $ds) {
+            foreach ($computeContexts as $ds) {
                 $datasetId = (string)$ds['dataset_id'];
 
                 $runVarIdx = $runVarIdxById[$datasetId] ?? [];
@@ -1130,7 +1214,7 @@ final class McaComputeService
         // --------------------------------------------------------
         // Other computed MCA indicators (single number + time series)
         // --------------------------------------------------------
-        foreach ($datasetContexts as $ds) {
+        foreach ($computeContexts as $ds) {
             $datasetId = (string)$ds['dataset_id'];
 
             $runVarIdx = $runVarIdxById[$datasetId] ?? [];
@@ -1591,16 +1675,23 @@ final class McaComputeService
         $weighted   = ['by_dataset' => []];
         $totals     = [];
 
-        $normBaselineId = null;
-        foreach ($datasetContexts as $ds) {
-            if (($ds['dataset_type'] ?? '') === 'run' && ((int)($ds['source_run_ids'][0] ?? 0) === $baselineRunId)) {
-                $normBaselineId = (string)$ds['dataset_id'];
-                break;
+        $normBaselineId = isset($results['raw']['by_dataset'][$baselineDatasetId])
+            ? $baselineDatasetId
+            : null;
+
+        if ($normBaselineId === null) {
+            foreach ($datasetContexts as $ds) {
+                if (($ds['dataset_type'] ?? '') === 'run' && ((int)($ds['source_run_ids'][0] ?? 0) === $baselineRunId)) {
+                    $normBaselineId = (string)$ds['dataset_id'];
+                    break;
+                }
             }
         }
+
         if ($normBaselineId === null) {
             $normBaselineId = $datasetIds[0] ?? null;
         }
+
         if (!$normBaselineId) {
             throw new RuntimeException('No runs available for normalization.');
         }
@@ -1611,11 +1702,7 @@ final class McaComputeService
             return max($lo, min($hi, $x));
         };
 
-        $baselineDerivedMcaCodes = [
-            'bcr',
-            'cost_saving_usd',
-            'income_increase_pct',
-        ];
+        $baselineDerivedMcaCodes = [];
 
         foreach ($enabledIndicatorCodes as $code) {
             if (in_array($code, $baselineDerivedMcaCodes, true)) {
@@ -1852,6 +1939,17 @@ final class McaComputeService
         $results['normalized_ts'] = $normalizedTs;
         $results['weighted_ts']   = $weightedTs;
         $results['totals_ts']     = $totalsTs;
+
+        if ($baselineDatasetContext !== null) {
+            unset($results['raw']['by_dataset'][$baselineDatasetId]);
+
+            if (isset($results['bcr']['by_dataset'][$baselineDatasetId])) {
+                unset($results['bcr']['by_dataset'][$baselineDatasetId]);
+            }
+
+            // Prevent hidden baseline SWAT source data from being returned.
+            unset($swatSeriesByRun[$baselineRunId]);
+        }
 
         return [
             'ok' => true,
