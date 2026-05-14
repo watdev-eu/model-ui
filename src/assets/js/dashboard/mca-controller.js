@@ -1960,11 +1960,27 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
 
     function getViewerIndicatorDefs() {
         const list = resultsCache?.viewer_indicators;
-        return Array.isArray(list) ? list.map(x => ({
-            ...x,
-            id: x.code || x.id,
-            isMca: true,
-        })) : [];
+
+        if (!Array.isArray(list)) return [];
+
+        return list
+            // Only expose socio-economic MCA indicators to the dashboard metric dropdown.
+            // Direct SWAT / biophysical indicators are already loaded separately by the dashboard.
+            .filter(x => {
+                const source = String(x.source || '').toLowerCase();
+                const sector = String(x.sector || x.category || '').toLowerCase();
+
+                return source !== 'swat'
+                    && sector !== 'crop'
+                    && sector !== 'groundwater'
+                    && sector !== 'soil'
+                    && sector !== 'surface water';
+            })
+            .map(x => ({
+                ...x,
+                id: x.code || x.id,
+                isMca: true,
+            }));
     }
 
     function getViewerRows(datasetId, indicatorCode) {
