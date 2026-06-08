@@ -1846,11 +1846,18 @@ export function initSubbasinDashboard({
         const showCropSelect = needsCrop && current.aggMode !== 'sub';
 
         if (els.cropGroup) els.cropGroup.style.display = showCropSelect ? 'block' : 'none';
+        if (els.cropFilterBtn) els.cropFilterBtn.style.display = needsCrop ? 'inline-flex' : 'none';
 
         // Help text: prefer description, otherwise fallback
         if (els.indicatorHelp) {
             const fallback = def
-                ? `Source: ${String(def.source || '').toUpperCase()} · ${def.grain === 'sub_crop' ? 'Subbasin + crop' : 'Subbasin'}`
+                ? `Source: ${String(def.source || '').toUpperCase()} · ${
+                    def.grain === 'sub_crop'
+                        ? (current.aggMode === 'sub'
+                            ? 'Subbasin average across selected crops'
+                            : 'Subbasin + selected crop')
+                        : 'Subbasin'
+                }`
                 : '';
             els.indicatorHelp.textContent = (def?.description || fallback || '');
         }

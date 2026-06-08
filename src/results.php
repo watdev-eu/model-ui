@@ -220,11 +220,12 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                     <div class="mb-3" id="cropGroup" style="display:none">
                         <label class="form-label" for="cropSelect">Crop</label>
                         <select id="cropSelect" class="form-select"></select>
-                        <div class="d-grid mt-2">
-                            <button type="button" id="cropFilterBtn" class="btn btn-sm btn-outline-secondary">
-                                Select crops for visualisation and analysis
-                            </button>
-                        </div>
+                    </div>
+
+                    <div class="mb-3 d-grid">
+                        <button type="button" id="cropFilterBtn" class="btn btn-sm btn-outline-secondary" style="display:none">
+                            Select crops for visualisation and analysis
+                        </button>
                     </div>
 
                     <div class="mb-3">
