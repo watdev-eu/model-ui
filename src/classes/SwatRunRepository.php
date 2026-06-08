@@ -27,6 +27,28 @@ final class SwatRunRepository
     }
 
     /**
+     * List only public/default runs for public-facing pages.
+     */
+    public static function publicAll(): array
+    {
+        $pdo = Database::pdo();
+        $sql = "
+            SELECT
+                r.*,
+                sa.name AS study_area_name,
+                sa.id   AS study_area_id,
+                rl.name AS license_name
+            FROM swat_runs r
+            JOIN study_areas sa ON sa.id = r.study_area
+            LEFT JOIN run_licenses rl ON rl.id = r.license_id
+            WHERE r.visibility = 'public'
+               OR r.is_default = TRUE
+            ORDER BY sa.name, r.run_label
+        ";
+        return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
      * Find a single run by id.
      */
     public static function find(int $id): ?array

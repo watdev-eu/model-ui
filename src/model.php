@@ -8,7 +8,7 @@ $pageButtons = [];
 require_once __DIR__ . '/includes/layout.php';
 
 require_once __DIR__ . '/classes/SwatRunRepository.php';
-$runs = SwatRunRepository::all();
+$runs = SwatRunRepository::publicAll();
 
 function renderStatusBadge(): string {
     // placeholder for now – later you can add a column `status`
