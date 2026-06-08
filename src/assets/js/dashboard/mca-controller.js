@@ -59,6 +59,98 @@ export function initMcaController({ apiBase, els }) {
         swatIndicatorDefsLoaded = true;
     }
 
+    function normalizeMcaCategory(it) {
+        const raw = String(it.category || it.sector || 'Other').trim();
+        const key = raw.toLowerCase();
+
+        if (key === 'surface water' || key === 'groundwater') return 'Water';
+
+        const code = String(it.indicator_calc_key || it.indicator_code || it.code || '').toLowerCase();
+        const name = String(it.indicator_name || it.name || '').toLowerCase();
+
+        // Move fertilizer use efficiency indicators to Crop
+        if (
+            name.includes('fertilizer use efficiency') ||
+            name.includes('fertiliser use efficiency') ||
+            code.includes('fertilizer_use_efficiency') ||
+            code.includes('fertiliser_use_efficiency')
+        ) {
+            return 'Crop';
+        }
+
+        // Move technical water use efficiency to Crop
+        if (
+            name.includes('technical water use efficiency') ||
+            code.includes('technical_water_use_efficiency') ||
+            code.includes('water_tech_eff') ||
+            (name.includes('technical efficiency') && name.includes('water use'))
+        ) {
+            return 'Crop';
+        }
+
+        return raw;
+    }
+
+    function normalizeMcaIndicatorName(it) {
+        const code = String(it.indicator_calc_key || it.indicator_code || it.code || '').toLowerCase();
+        const name = String(it.indicator_name || it.name || '').trim();
+        const nameLower = name.toLowerCase();
+
+        if (
+            nameLower === 'soil organic carbon' ||
+            code.includes('soil_organic_carbon')
+        ) {
+            return 'Soil organic carbon SOC';
+        }
+
+        return name;
+    }
+
+    function shouldHideMcaIndicator(it) {
+        const code = String(it.indicator_calc_key || it.indicator_code || it.code || '').toLowerCase();
+        const name = String(it.indicator_name || it.name || '').toLowerCase();
+
+        return (
+            // Remove from MCA completely
+            name.includes('% increase in net farm income') ||
+            name.includes('increase in net farm income') ||
+            code.includes('increase_net_farm_income') ||
+            code.includes('net_farm_income_increase') ||
+
+            name.includes('intensity of water use by agriculture') ||
+            code.includes('intensity_of_water_use') ||
+            code.includes('water_use_intensity') ||
+
+            name.includes('carbon sequestration') ||
+            code.includes('carbon_sequestration') ||
+
+            // Remove SWAT nutrient use efficiency indicators from MCA
+            name.includes('nutrient use efficiency') ||
+            code.includes('nutrient_use_efficiency') ||
+            code.includes('nue') ||
+            code.includes('pue') ||
+
+            name.includes('area with soil erosion') ||
+            name.includes('soil erosion classified') ||
+            code.includes('soil_erosion_classified') ||
+            code.includes('area_with_soil_erosion') ||
+
+            name.includes('soil fertility soc') ||
+            code.includes('soil_fertility_soc')
+        );
+    }
+
+    function filterAndNormalizeMcaIndicators(items) {
+        return (items || [])
+            .filter(it => !shouldHideMcaIndicator(it))
+            .map(it => ({
+                ...it,
+                indicator_name: normalizeMcaIndicatorName(it),
+                name: normalizeMcaIndicatorName(it),
+                category: normalizeMcaCategory(it),
+            }));
+    }
+
     function mergePresetItemsWithSwatIndicators(presetItems, swatDefs) {
         const out = [];
         const seen = new Set();
@@ -95,7 +187,7 @@ export function initMcaController({ apiBase, els }) {
             });
         }
 
-        return out;
+        return filterAndNormalizeMcaIndicators(out);
     }
 
     function datasetIdString(id) {
@@ -518,7 +610,7 @@ export function initMcaController({ apiBase, els }) {
             groups.get(category).push(it);
         }
 
-        const preferredOrder = ['Socioeconomic', 'Crop', 'Groundwater', 'Soil', 'Surface water'];
+        const preferredOrder = ['Socioeconomic', 'Crop', 'Water', 'Soil'];
         const orderedCategories = [
             ...preferredOrder.filter(cat => groups.has(cat)),
             ...[...groups.keys()].filter(cat => !preferredOrder.includes(cat)).sort((a, b) => a.localeCompare(b))
@@ -547,6 +639,11 @@ export function initMcaController({ apiBase, els }) {
                 const idx = items.indexOf(it);
                 const code = String(it.indicator_code ?? it.indicator_calc_key ?? '');
                 const name = String(it.indicator_name ?? it.name ?? code);
+                const source = String(it.source || '').toLowerCase();
+
+                const secondaryText = source === 'swat'
+                    ? `SWAT output (${code})`
+                    : String(it.description || it.indicator_description || it.desc || code);
                 const dir  = (it.direction === 'neg' || it.direction === 'pos') ? it.direction : 'pos';
                 const wNum = Number(it.weight);
                 const w    = Number.isFinite(wNum) ? Math.max(0, wNum) : 0;
@@ -558,7 +655,9 @@ export function initMcaController({ apiBase, els }) {
                         </td>
                         <td>
                           <div class="fw-semibold">${escapeHtml(name)}</div>
-                          <div class="text-muted small mono">${escapeHtml(code)}</div>
+                          <div class="text-muted small ${source === 'swat' ? 'mono' : ''}">
+                            ${escapeHtml(secondaryText)}
+                          </div>
                         </td>
                         <td>
                           <div class="btn-group btn-group-sm w-100 mca-dir-group" role="group">
@@ -1168,6 +1267,13 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
             const res = await fetch(url);
             const json = await res.json();
             if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
+            console.log('[MCA preset active] raw json.items sample:', {
+                count: Array.isArray(json.items) ? json.items.length : null,
+                first_items: Array.isArray(json.items) ? json.items.slice(0, 5) : null,
+                keys_first_item: Array.isArray(json.items) && json.items[0]
+                    ? Object.keys(json.items[0])
+                    : null,
+            });
 
             runInputs.set(rid, {
                 loading: false,
@@ -1711,10 +1817,24 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
 
         await ensureSwatIndicatorDefsLoaded();
 
+        console.log('[MCA indicators accordion] raw json.items:', {
+            count: Array.isArray(json.items) ? json.items.length : null,
+            first: Array.isArray(json.items) ? json.items[0] : null,
+            sample: Array.isArray(json.items) ? json.items.slice(0, 10) : null,
+            keys: Array.isArray(json.items) && json.items[0] ? Object.keys(json.items[0]) : null,
+        });
+
         const mergedPresetItems = mergePresetItemsWithSwatIndicators(
             (json.items || []).map(x => ({ ...x })),
             swatIndicatorDefs
         );
+
+        console.log('[MCA indicators accordion] mergedPresetItems:', {
+            count: mergedPresetItems.length,
+            first: mergedPresetItems[0],
+            sample: mergedPresetItems.slice(0, 10),
+            keys: mergedPresetItems[0] ? Object.keys(mergedPresetItems[0]) : null,
+        });
 
         defaultPresetItems = mergedPresetItems.map(x => ({ ...x }));
         currentPresetItems = mergedPresetItems.map(x => ({ ...x }));
@@ -1968,6 +2088,7 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
         if (!Array.isArray(list)) return [];
 
         return list
+            .filter(x => !shouldHideMcaIndicator(x))
             // Only expose socio-economic MCA indicators to the dashboard metric dropdown.
             // Direct SWAT / biophysical indicators are already loaded separately by the dashboard.
             .filter(x => {

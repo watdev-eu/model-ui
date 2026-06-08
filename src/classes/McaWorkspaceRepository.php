@@ -202,16 +202,19 @@ final class McaWorkspaceRepository
         $pdo = Database::pdo();
         $stmt = $pdo->prepare("
             SELECT
-                indicator_calc_key,
-                indicator_code,
-                indicator_name,
-                weight,
-                direction,
-                is_enabled,
-                sort_order
-            FROM mca_workspace_preset_items
-            WHERE workspace_id = :id
-            ORDER BY sort_order ASC, indicator_calc_key ASC
+                w.indicator_calc_key,
+                w.indicator_code,
+                w.indicator_name,
+                i.description,
+                w.weight,
+                w.direction,
+                w.is_enabled,
+                w.sort_order
+            FROM mca_workspace_preset_items w
+            LEFT JOIN mca_indicators i
+                ON i.calc_key = w.indicator_calc_key
+            WHERE w.workspace_id = :id
+            ORDER BY w.sort_order ASC, w.indicator_calc_key ASC
         ");
         $stmt->execute([':id' => $workspaceId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];

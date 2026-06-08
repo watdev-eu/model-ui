@@ -251,6 +251,7 @@ if ($workspace) {
         SELECT
             i.code AS indicator_code,
             i.name AS indicator_name,
+            i.description AS description,
             i.calc_key AS indicator_calc_key,
             COALESCE(pi.direction, i.default_direction) AS direction,
             pi.weight,
