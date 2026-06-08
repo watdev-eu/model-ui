@@ -697,10 +697,6 @@ export function initMcaController({ apiBase, els }) {
           </div>
         `;
         }).join('')}
-
-      <div class="small text-muted mt-2">
-        Enabled weight sum: <span class="mono">${sumW.toFixed(1)}</span>
-      </div>
     `;
 
         els.mcaIndicatorsTableWrap.querySelectorAll('tr[data-idx]').forEach(tr => {
