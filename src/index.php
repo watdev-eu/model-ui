@@ -32,6 +32,11 @@ require_once 'includes/layout.php';
                          class="logo logo-partner"
                          loading="lazy" decoding="async">
 
+                    <img src="assets/img/isric.svg"
+                         alt="ISRIC – World Soil Information"
+                         class="logo logo-partner"
+                         loading="lazy" decoding="async">
+
                     <img src="assets/img/eu_funded.avif"
                          alt="Funded by the European Union"
                          class="logo logo-partner"
