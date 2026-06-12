@@ -334,8 +334,8 @@ export function initSubbasinDashboard({
             code.includes('net_farm_income_increase') ||
 
             name.includes('intensity of water use by agriculture') ||
-            code.includes('intensity_of_water_use') ||
-            code.includes('water_use_intensity') ||
+            code === 'water_use_intensity' ||
+            code === 'intensity_of_water_use_by_agriculture' ||
 
             name.includes('carbon sequestration') ||
             code.includes('carbon_sequestration') ||
