@@ -35,6 +35,7 @@ require_once 'includes/layout.php';
                     <img src="assets/img/isric.svg"
                          alt="ISRIC – World Soil Information"
                          class="logo logo-partner"
+                         style="height:70px;width:auto;"
                          loading="lazy" decoding="async">
 
                     <img src="assets/img/eu_funded.avif"
