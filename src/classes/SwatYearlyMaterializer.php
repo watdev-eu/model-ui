@@ -333,7 +333,7 @@ final class SwatYearlyMaterializer
                     self::toFloat($row['NCFRTKG_HA'] ?? '');
 
                 if ($nDen > 0.0) {
-                    $monthly[$key]['nue_n_sum'] += ($yld / $nDen) * 100.0;
+                    $monthly[$key]['nue_n_sum'] += ($yld / $nDen) * 1000.0;
                     $monthly[$key]['nue_n_count']++;
                 }
 
@@ -344,7 +344,7 @@ final class SwatYearlyMaterializer
                     self::toFloat($row['PCFRTKG_HA'] ?? '');
 
                 if ($pDen > 0.0) {
-                    $monthly[$key]['nue_p_sum'] += ($yld / $pDen) * 100.0;
+                    $monthly[$key]['nue_p_sum'] += ($yld / $pDen) * 1000.0;
                     $monthly[$key]['nue_p_count']++;
                 }
             }
@@ -424,7 +424,7 @@ final class SwatYearlyMaterializer
                     self::toFloat($row['NCFRTkg_ha']);
 
                 if ($nDen > 0.0) {
-                    $monthly[$key]['nue_n_sum'] += ($yld / $nDen) * 100.0;
+                    $monthly[$key]['nue_n_sum'] += ($yld * 1000.0) / $nDen;
                     $monthly[$key]['nue_n_count']++;
                 }
 
@@ -435,7 +435,7 @@ final class SwatYearlyMaterializer
                     self::toFloat($row['PCFRTkg_ha']);
 
                 if ($pDen > 0.0) {
-                    $monthly[$key]['nue_p_sum'] += ($yld / $pDen) * 100.0;
+                    $monthly[$key]['nue_p_sum'] += ($yld * 1000.0) / $pDen;
                     $monthly[$key]['nue_p_count']++;
                 }
             }

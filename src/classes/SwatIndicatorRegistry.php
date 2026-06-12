@@ -153,7 +153,7 @@ final class SwatIndicatorRegistry
         'nue_n_pct' => [
             'sector' => 'Crop',
             'name'   => 'Nutrient (N) use efficiency',
-            'unit'   => '%',
+            'unit'   => 'kg yield / kg N',
             'description' => '',
             'source' => 'hru',
             'grain'  => 'sub_crop',
@@ -166,7 +166,7 @@ final class SwatIndicatorRegistry
         'nue_p_pct' => [
             'sector' => 'Crop',
             'name'   => 'Nutrient (P) use efficiency',
-            'unit'   => '%',
+            'unit'   => 'kg yield / kg P',
             'description' => '',
             'source' => 'hru',
             'grain'  => 'sub_crop',
