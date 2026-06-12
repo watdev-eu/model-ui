@@ -279,16 +279,107 @@ export function initSubbasinDashboard({
     }
 
     // ---------- Data load ----------
+    function normalizeDashboardIndicatorSector(d) {
+        const raw = String(d.sector || d.category || 'Other').trim();
+        const key = raw.toLowerCase();
+
+        if (key === 'surface water' || key === 'groundwater') return 'Water';
+
+        const code = String(d.code || d.id || '').toLowerCase();
+        const name = String(d.name || '').toLowerCase();
+
+        if (
+            name.includes('fertilizer use efficiency') ||
+            name.includes('fertiliser use efficiency') ||
+            code.includes('fertilizer_use_efficiency') ||
+            code.includes('fertiliser_use_efficiency')
+        ) {
+            return 'Crop';
+        }
+
+        if (
+            name.includes('technical water use efficiency') ||
+            code.includes('technical_water_use_efficiency') ||
+            code.includes('water_tech_eff') ||
+            (name.includes('technical efficiency') && name.includes('water use'))
+        ) {
+            return 'Crop';
+        }
+
+        return raw;
+    }
+
+    function normalizeDashboardIndicatorName(d) {
+        const code = String(d.code || d.id || '').toLowerCase();
+        const name = String(d.name || '').trim();
+
+        if (
+            name.toLowerCase() === 'soil organic carbon' ||
+            code.includes('soil_organic_carbon')
+        ) {
+            return 'Soil organic carbon SOC';
+        }
+
+        return name;
+    }
+
+    function shouldHideDashboardIndicator(d) {
+        const code = String(d.code || d.id || '').toLowerCase();
+        const name = String(d.name || '').toLowerCase();
+
+        return (
+            name.includes('% increase in net farm income') ||
+            name.includes('increase in net farm income') ||
+            code.includes('increase_net_farm_income') ||
+            code.includes('net_farm_income_increase') ||
+
+            name.includes('intensity of water use by agriculture') ||
+            code.includes('intensity_of_water_use') ||
+            code.includes('water_use_intensity') ||
+
+            name.includes('carbon sequestration') ||
+            code.includes('carbon_sequestration') ||
+
+            name.includes('nutrient use efficiency') ||
+            code.includes('nutrient_use_efficiency') ||
+            code.includes('nue') ||
+            code.includes('pue') ||
+
+            name.includes('area with soil erosion') ||
+            name.includes('soil erosion classified') ||
+            code.includes('soil_erosion_classified') ||
+            code.includes('area_with_soil_erosion') ||
+
+            name.includes('soil fertility soc') ||
+            code.includes('soil_fertility_soc')
+        );
+    }
+
+    function normalizeDashboardIndicatorDef(d) {
+        const name = normalizeDashboardIndicatorName(d);
+        const sector = normalizeDashboardIndicatorSector(d);
+
+        return {
+            ...d,
+            name,
+            sector,
+            category: sector,
+        };
+    }
+
     async function loadIndicatorRegistry() {
         const res = await fetch(`${apiBase}/swat_indicators_list.php`);
         if (!res.ok) throw new Error(`swat_indicators_list HTTP ${res.status}`);
         const json = await res.json();
 
-        indicatorDefs = (json.indicators || []).map(d => ({
-            ...d,
-            id: d.code ?? d.id,
-            isMca: false,
-        }));
+        indicatorDefs = (json.indicators || [])
+            .map(d => ({
+                ...d,
+                id: d.code ?? d.id,
+                isMca: false,
+            }))
+            .filter(d => !shouldHideDashboardIndicator(d))
+            .map(normalizeDashboardIndicatorDef);
 
         subCropIndicatorIds = new Set(
             indicatorDefs
@@ -378,7 +469,9 @@ export function initSubbasinDashboard({
     });
 
     document.addEventListener('watdev:mca-computed', async () => {
-        mcaIndicatorDefs = mca?.getViewerIndicatorDefs?.() || [];
+        mcaIndicatorDefs = (mca?.getViewerIndicatorDefs?.() || [])
+            .filter(d => !shouldHideDashboardIndicator(d))
+            .map(normalizeDashboardIndicatorDef);
 
         for (const [, rd] of runsStore.entries()) {
             for (const d of mcaIndicatorDefs) {
