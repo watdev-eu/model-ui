@@ -1546,12 +1546,21 @@ export function initSubbasinDashboard({
 
             traces.push({
                 type: 'scatter',
-                mode: 'lines',
+                mode: 'lines+markers',
                 connectgaps: true,
-                line: { width: 2 },
+                line: {
+                    width: 2
+                },
+                marker: {
+                    size: 10,
+                    symbol: 'circle-open',
+                    line: {
+                        width: 2
+                    }
+                },
                 x: xs,
                 y: ys,
-                name: runLabel,  // legend + hover
+                name: runLabel,
                 hovertemplate: `${runLabel}<br>Year %{x}<br>%{y:.3f}<extra></extra>`
             });
         }
