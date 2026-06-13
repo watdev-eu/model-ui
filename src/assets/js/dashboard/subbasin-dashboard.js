@@ -70,6 +70,17 @@ export function initSubbasinDashboard({
         '#FFA15A', '#19D3F3', '#FF6692', '#B6E880'
     ];
 
+    const MARKER_SYMBOLS = [
+        'circle',
+        'square',
+        'diamond',
+        'triangle-up',
+        'triangle-down',
+        'cross',
+        'x',
+        'star'
+    ];
+
     // Escape helpers for safe HTML/attributes
     const escHtml = s => String(s).replace(/[&<>"']/g, m => (
         {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]
@@ -1637,18 +1648,25 @@ export function initSubbasinDashboard({
                 return Number.isFinite(v) ? v : null;
             });
 
+            const traceIndex = traces.length;
+            const color = COLORWAY[traceIndex % COLORWAY.length];
+            const markerSymbol = MARKER_SYMBOLS[traceIndex % MARKER_SYMBOLS.length];
+
             traces.push({
                 type: 'scatter',
                 mode: 'lines+markers',
                 connectgaps: true,
                 line: {
-                    width: 2
+                    width: 2,
+                    color
                 },
                 marker: {
-                    size: 10,
-                    symbol: 'circle-open',
+                    size: 11,
+                    symbol: markerSymbol,
+                    color: '#ffffff',       // fill covers/intercepts the line
                     line: {
-                        width: 2
+                        color,
+                        width: 2.5
                     }
                 },
                 x: xs,
@@ -1673,8 +1691,7 @@ export function initSubbasinDashboard({
             yaxis: {
                 title: `${def.name}${unitText() ? ` (${unitText()})` : ''}`
             },
-            showlegend: true,
-            colorway: COLORWAY
+            showlegend: true
         }, { displayModeBar: false, responsive: true });
 
         drawCropChart(def);
