@@ -294,25 +294,36 @@ export function initSubbasinDashboard({
         const raw = String(d.sector || d.category || 'Other').trim();
         const key = raw.toLowerCase();
 
-        if (key === 'surface water' || key === 'groundwater') return 'Water';
-
         const code = String(d.code || d.id || '').toLowerCase();
         const name = String(d.name || '').toLowerCase();
+
+        // Merge SWAT groundwater/surface water sectors
+        if (key === 'surface water' || key === 'groundwater') return 'Water';
+
+        // Irrigation water use belongs under Water, even though registry sector is Crop
+        if (
+            code === 'irr_mm' ||
+            name.includes('irrigation water use')
+        ) {
+            return 'Water';
+        }
+
+        // MCA / socio-economic water-use-efficiency indicators belong under Water
+        if (
+            name.includes('water use efficiency') ||
+            code.includes('water_use_efficiency') ||
+            code.includes('technical_water_use_efficiency') ||
+            code.includes('water_tech_eff') ||
+            (name.includes('technical efficiency') && name.includes('water use'))
+        ) {
+            return 'Water';
+        }
 
         if (
             name.includes('fertilizer use efficiency') ||
             name.includes('fertiliser use efficiency') ||
             code.includes('fertilizer_use_efficiency') ||
             code.includes('fertiliser_use_efficiency')
-        ) {
-            return 'Crop';
-        }
-
-        if (
-            name.includes('technical water use efficiency') ||
-            code.includes('technical_water_use_efficiency') ||
-            code.includes('water_tech_eff') ||
-            (name.includes('technical efficiency') && name.includes('water use'))
         ) {
             return 'Crop';
         }
@@ -347,9 +358,6 @@ export function initSubbasinDashboard({
             name.includes('intensity of water use by agriculture') ||
             code === 'water_use_intensity' ||
             code === 'intensity_of_water_use_by_agriculture' ||
-
-            name.includes('carbon sequestration') ||
-            code.includes('carbon_sequestration') ||
 
             name.includes('nutrient use efficiency') ||
             code.includes('nutrient_use_efficiency') ||
