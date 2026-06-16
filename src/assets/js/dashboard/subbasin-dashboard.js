@@ -1558,12 +1558,14 @@ export function initSubbasinDashboard({
         if (mapScenarioIds.length === 1) {
             return valueForSubRun(mapScenarioIds[0], sub);
         }
-        // Two scenarios: absolute difference between them
+        // Two scenarios: signed difference between them
+        // Positive means scenario B is higher than scenario A.
+        // Negative means scenario B is lower than scenario A.
         const v1 = valueForSubRun(mapScenarioIds[0], sub);
         const v2 = valueForSubRun(mapScenarioIds[1], sub);
 
         if (!Number.isFinite(v1) || !Number.isFinite(v2)) return NaN;
-        return Math.abs(v2 - v1);
+        return v2 - v1;
     }
 
     function num(v) {
@@ -2639,7 +2641,7 @@ export function initSubbasinDashboard({
         }
         const a = scenarioLabel(mapScenarioIds[0]);
         const b = scenarioLabel(mapScenarioIds[1]);
-        return ` — Difference |${b} − ${a}|`;
+        return ` — Difference ${b} − ${a}`;
     }
 
     function setBusy(on, msg = 'Loading…', { delayMs = 400 } = {}) {
