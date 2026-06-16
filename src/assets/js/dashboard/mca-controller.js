@@ -2088,8 +2088,6 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
 
         return list
             .filter(x => !shouldHideMcaIndicator(x))
-            // Only expose socio-economic MCA indicators to the dashboard metric dropdown.
-            // Direct SWAT / biophysical indicators are already loaded separately by the dashboard.
             .filter(x => {
                 const source = String(x.source || '').toLowerCase();
                 const sector = String(x.sector || x.category || '').toLowerCase();
@@ -2101,19 +2099,41 @@ ${renderBaselineFactorTable('Baseline material factors', 'USD/ha', BASELINE_MATE
                     && sector !== 'surface water'
                     && sector !== 'water';
             })
-            .map(x => ({
-                ...x,
-                id: x.code || x.id,
-                isMca: true,
-            }));
+            .map(x => {
+                const calcKey = String(
+                    x.calc_key ||
+                    x.indicator_calc_key ||
+                    x.code ||
+                    x.id ||
+                    ''
+                );
+
+                return {
+                    ...x,
+                    id: calcKey,
+                    code: calcKey,
+                    indicator_calc_key: calcKey,
+                    calc_key: calcKey,
+                    isMca: true,
+                };
+            });
     }
 
     function getViewerRows(datasetId, indicatorCode) {
-        const did = String(datasetId);
-        const code = String(indicatorCode);
+        const did = datasetIdString(datasetId);
+        const code = String(indicatorCode || '');
+        const byDataset = resultsCache?.results?.raw_spatial?.by_dataset || {};
+        const blocks = byDataset?.[did] || {};
+        const blk = blocks[code];
 
-        const blk = resultsCache?.results?.raw_spatial?.by_dataset?.[did]?.[code];
-        if (!blk) return [];
+        if (!blk) {
+            console.warn('[MCA getViewerRows] No spatial block for MCA indicator', {
+                datasetId: did,
+                indicatorCode: code,
+                availableCodes: Object.keys(blocks),
+            });
+            return [];
+        }
 
         const grain = String(blk.grain || 'sub');
         const rows = [];

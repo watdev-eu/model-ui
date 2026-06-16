@@ -1585,8 +1585,7 @@ export function initSubbasinDashboard({
         const def = currentIndicator();
         if (!def) return NaN;
 
-        // MCA still special
-        if (def.id === 'mca_score' || def.isMca) {
+        if (def.id === 'mca_score') {
             if (!mca) return NaN;
             const v = mca.getScenarioScore(runId);
             return Number.isFinite(v) ? v : NaN;
@@ -1610,7 +1609,6 @@ export function initSubbasinDashboard({
             return Number.isFinite(v) ? v : NaN;
         }
 
-        // sub_crop
         if (current.aggMode === 'sub') {
             let sum = 0;
             let count = 0;
