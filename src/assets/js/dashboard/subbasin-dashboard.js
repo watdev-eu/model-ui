@@ -899,7 +899,7 @@ export function initSubbasinDashboard({
             if (!runsStore.has(baselineKey)) {
                 console.log(`[MCA] Loading baseline run ${baselineRunId} for crop data`);
                 await ensureRunLoaded(baselineKey);
-                if (epoch !== loadEpoch) return;
+                if (!runsStore.has(baselineKey)) return;
             }
 
             const baselineData = runsStore.get(baselineKey);
@@ -2229,7 +2229,7 @@ export function initSubbasinDashboard({
             if (els.loadingDetail) els.loadingDetail.textContent = 'Loading scenario metrics…';
             await Promise.all(selectedRunIds.map(id => ensureRunLoaded(id)));
 
-            if (!runsStore.has(baselineKey)) return;
+            if (epoch !== loadEpoch) return;
 
             const remainingDefaultIds = (runsMeta || [])
                 .filter(r => !!r.is_default && !isCustomDatasetId(r.id))
