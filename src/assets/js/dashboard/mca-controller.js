@@ -290,7 +290,8 @@ export function initMcaController({ apiBase, els }) {
         });
 
         Plotly.newPlot(els.mcaRadarChart, traces, {
-            margin: { t: 30, r: 200, b: 40, l: 200 },
+            margin: { t: 30, r: 80, b: 120, l: 80 },
+
             polar: {
                 radialaxis: {
                     range: [0, 1],
@@ -300,8 +301,20 @@ export function initMcaController({ apiBase, els }) {
                     tickfont: { size: 11 },
                 },
             },
+
             showlegend: true,
-        }, { displayModeBar: false, responsive: true });
+
+            legend: {
+                orientation: 'h',
+                x: 0.5,
+                xanchor: 'center',
+                y: -0.15,
+                yanchor: 'top'
+            }
+        }, {
+            displayModeBar: false,
+            responsive: true
+        });
     }
 
     function renderTotalsBar(json) {
