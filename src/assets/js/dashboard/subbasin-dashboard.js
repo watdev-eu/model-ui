@@ -1817,64 +1817,73 @@ export function initSubbasinDashboard({
                 .replace(/-+/g, '-')
                 .replace(/^-|-$/g, '');
 
-            const exportLayout = {
-                font: {
-                    size: 28
-                },
+            const isRadarExport = filenameBase === 'mca-spider-chart';
 
-                title: {
-                    ...(chartEl.layout?.title || {}),
-                    text: `<b>${(
-                        typeof chartEl.layout?.title === 'object'
-                            ? chartEl.layout?.title?.text
-                            : chartEl.layout?.title
-                    ) || ''}</b>`,
-                    font: {
-                        size: 34
-                    }
-                },
-
-                xaxis: {
-                    ...(chartEl.layout?.xaxis || {}),
-                    title: {
-                        ...(chartEl.layout?.xaxis?.title || {}),
-                        font: {
-                            size: 34
-                        }
-                    },
-                    tickfont: {
-                        size: 30
-                    }
-                },
-
-                yaxis: {
-                    ...(chartEl.layout?.yaxis || {}),
-                    title: {
-                        ...(chartEl.layout?.yaxis?.title || {}),
-                        font: {
-                            size: 34
-                        }
-                    },
-                    tickfont: {
-                        size: 30
-                    }
-                },
-
-                legend: {
-                    ...(chartEl.layout?.legend || {}),
-                    font: {
-                        size: 30
-                    }
-                },
-
-                margin: {
-                    ...(chartEl.layout?.margin || {}),
-                    t: Math.max(chartEl.layout?.margin?.t || 30, 180),
-                    b: Math.max(chartEl.layout?.margin?.b || 40, 130),
-                    l: Math.max(chartEl.layout?.margin?.l || 55, 110),
-                    r: Math.max(chartEl.layout?.margin?.r || 10, 60),
+            if (isRadarExport) {
+                try {
+                    await Plotly.downloadImage(chartEl, {
+                        format,
+                        width: size.width,
+                        height: size.height,
+                        filename,
+                    });
+                } catch (err) {
+                    console.error('[chart export] failed', err);
+                    showToast('Failed to download chart.', true, null, 'OK', 4000);
                 }
-            };
+                return;
+            }
+
+            const rawTitle =
+                typeof chartEl.layout?.title === 'object'
+                    ? chartEl.layout?.title?.text
+                    : chartEl.layout?.title;
+
+            const exportTitle = rawTitle || '';
+
+            const exportLayout = {
+                    ...(chartEl.layout || {}),
+
+                    font: { size: 28 },
+
+                    title: {
+                        ...(chartEl.layout?.title || {}),
+                        text: `<b>${exportTitle}</b>`,
+                        font: { size: 34 },
+                        x: 0.5
+                    },
+
+                    xaxis: {
+                        ...(chartEl.layout?.xaxis || {}),
+                        title: {
+                            ...(chartEl.layout?.xaxis?.title || {}),
+                            font: { size: 30 }
+                        },
+                        tickfont: { size: 26 }
+                    },
+
+                    yaxis: {
+                        ...(chartEl.layout?.yaxis || {}),
+                        title: {
+                            ...(chartEl.layout?.yaxis?.title || {}),
+                            font: { size: 30 }
+                        },
+                        tickfont: { size: 26 }
+                    },
+
+                    legend: {
+                        ...(chartEl.layout?.legend || {}),
+                        font: { size: 26 }
+                    },
+
+                    margin: {
+                        ...(chartEl.layout?.margin || {}),
+                        t: 180,
+                        b: 130,
+                        l: 110,
+                        r: 60
+                    }
+                };
 
             const exportData = structuredClone(chartEl.data || []);
 
@@ -2220,7 +2229,7 @@ export function initSubbasinDashboard({
             if (els.loadingDetail) els.loadingDetail.textContent = 'Loading scenario metrics…';
             await Promise.all(selectedRunIds.map(id => ensureRunLoaded(id)));
 
-            if (epoch !== loadEpoch) return;
+            if (!runsStore.has(baselineKey)) return;
 
             const remainingDefaultIds = (runsMeta || [])
                 .filter(r => !!r.is_default && !isCustomDatasetId(r.id))
