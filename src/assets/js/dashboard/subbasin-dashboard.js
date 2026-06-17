@@ -1643,6 +1643,16 @@ export function initSubbasinDashboard({
 
         const traces = [];
 
+        const maxYearCount = Math.max(
+            0,
+            ...selectedRunIds.map(id => runsStore.get(id)?.years?.length || 0)
+        );
+
+        const xTickStep = Math.max(
+            1,
+            Math.ceil(maxYearCount / 10)
+        );
+
         for (const runId of selectedRunIds) {
             const rd = runsStore.get(runId);
             if (!rd) continue;
@@ -1722,7 +1732,7 @@ export function initSubbasinDashboard({
 
         const sizes = [
             { value: 'standard', label: 'Standard', width: 1200, height: 800 },
-            { value: 'large', label: 'Large', width: 1800, height: 1200 },
+            { value: 'large', label: 'Large', width: 2200, height: 1400 },
             { value: 'presentation', label: 'Presentation', width: 1920, height: 1080 },
             { value: 'print', label: 'Print', width: 2400, height: 1600 },
         ];
@@ -1760,7 +1770,7 @@ export function initSubbasinDashboard({
                                name="${escAttr(sizeName)}"
                                id="${escAttr(sizeName)}-${escAttr(s.value)}"
                                value="${escAttr(s.value)}"
-                               ${i === 1 ? 'checked' : ''}>
+                               ${i === 0 ? 'checked' : ''}>
                         <label class="form-check-label" for="${escAttr(sizeName)}-${escAttr(s.value)}">
                             ${escHtml(s.label)}
                         </label>
@@ -1793,13 +1803,8 @@ export function initSubbasinDashboard({
 
             const suffixParts = [];
 
-            if (current.selectedSub) {
-                suffixParts.push(`subbasin-${current.selectedSub}`);
-            }
-
-            if (current.indicatorId) {
-                suffixParts.push(current.indicatorId);
-            }
+            if (current.selectedSub) suffixParts.push(`subbasin-${current.selectedSub}`);
+            if (current.indicatorId) suffixParts.push(current.indicatorId);
 
             suffixParts.push(`year-${current.yearIndex}`);
 
@@ -1812,16 +1817,101 @@ export function initSubbasinDashboard({
                 .replace(/-+/g, '-')
                 .replace(/^-|-$/g, '');
 
+            const exportLayout = {
+                font: {
+                    size: 28
+                },
+
+                title: {
+                    ...(chartEl.layout?.title || {}),
+                    text: `<b>${(
+                        typeof chartEl.layout?.title === 'object'
+                            ? chartEl.layout?.title?.text
+                            : chartEl.layout?.title
+                    ) || ''}</b>`,
+                    font: {
+                        size: 34
+                    }
+                },
+
+                xaxis: {
+                    ...(chartEl.layout?.xaxis || {}),
+                    title: {
+                        ...(chartEl.layout?.xaxis?.title || {}),
+                        font: {
+                            size: 34
+                        }
+                    },
+                    tickfont: {
+                        size: 30
+                    }
+                },
+
+                yaxis: {
+                    ...(chartEl.layout?.yaxis || {}),
+                    title: {
+                        ...(chartEl.layout?.yaxis?.title || {}),
+                        font: {
+                            size: 34
+                        }
+                    },
+                    tickfont: {
+                        size: 30
+                    }
+                },
+
+                legend: {
+                    ...(chartEl.layout?.legend || {}),
+                    font: {
+                        size: 30
+                    }
+                },
+
+                margin: {
+                    ...(chartEl.layout?.margin || {}),
+                    t: Math.max(chartEl.layout?.margin?.t || 30, 180),
+                    b: Math.max(chartEl.layout?.margin?.b || 40, 130),
+                    l: Math.max(chartEl.layout?.margin?.l || 55, 110),
+                    r: Math.max(chartEl.layout?.margin?.r || 10, 60),
+                }
+            };
+
+            const exportData = structuredClone(chartEl.data || []);
+
+            const tmp = document.createElement('div');
+            tmp.style.position = 'fixed';
+            tmp.style.left = '-10000px';
+            tmp.style.top = '-10000px';
+            tmp.style.width = `${size.width}px`;
+            tmp.style.height = `${size.height}px`;
+
+            document.body.appendChild(tmp);
+
             try {
-                await Plotly.downloadImage(chartEl, {
+                await Plotly.newPlot(
+                    tmp,
+                    exportData,
+                    exportLayout,
+                    {
+                        displayModeBar: false,
+                        responsive: false
+                    }
+                );
+
+                await Plotly.downloadImage(tmp, {
                     format,
                     width: size.width,
                     height: size.height,
                     filename,
                 });
+
             } catch (err) {
                 console.error('[chart export] failed', err);
                 showToast('Failed to download chart.', true, null, 'OK', 4000);
+
+            } finally {
+                Plotly.purge(tmp);
+                tmp.remove();
             }
         });
     }
