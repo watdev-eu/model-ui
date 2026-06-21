@@ -159,7 +159,10 @@ $perCol  = (int)ceil(max(1, count($crops)) / $columns);
             <p class="text-muted">
                 <code>code</code> is what appears in the model outputs;
                 <code>name</code> is the human-readable English label.
-                You can change both here.
+                <code>dry_matter_fraction</code> converts SWAT dry yield to regular fresh/market weight:
+                <code>fresh yield = dry yield / dry_matter_fraction</code>.
+                Use a value between <code>0</code> and <code>1</code>, for example <code>0.86</code> for 14% moisture.
+                Leave empty to use fallback <code>1</code>, meaning no conversion.
             </p>
 
             <div class="row" id="crops-list">
@@ -185,6 +188,15 @@ $perCol  = (int)ceil(max(1, count($crops)) / $columns);
                                                    class="form-control crop-name"
                                                    value="<?= htmlspecialchars($crop['name'] ?? '') ?>"
                                                    placeholder="Name">
+
+                                            <input type="number"
+                                                   class="form-control crop-dry-matter"
+                                                   value="<?= htmlspecialchars((string)($crop['dry_matter_fraction'] ?? '')) ?>"
+                                                   placeholder="Dry matter"
+                                                   min="0"
+                                                   max="1"
+                                                   step="0.001"
+                                                   title="Dry matter fraction, e.g. 0.86. Fresh yield = dry yield / dry matter fraction.">
 
                                             <button type="button"
                                                     class="btn btn-outline-success js-crop-save"

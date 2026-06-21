@@ -36,7 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Renders/updates a row in the list
     function renderRow(crop) {
-        const { code, name } = crop;
+        const { code, name, dry_matter_fraction } = crop;
         if (!code) return;
 
         // 1) try to find existing row
@@ -44,6 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tr) {
             tr.querySelector('.crop-code').value = code;
             tr.querySelector('.crop-name').value = name || '';
+            tr.querySelector('.crop-dry-matter').value = dry_matter_fraction ?? '';
             return;
         }
 
@@ -76,6 +77,15 @@ document.addEventListener('DOMContentLoaded', () => {
                                class="form-control crop-name"
                                value="${escHtml(name || '')}"
                                placeholder="Name">
+                               
+                        <input type="number"
+                               class="form-control crop-dry-matter"
+                               value="${escHtml(dry_matter_fraction ?? '')}"
+                               placeholder="Dry matter"
+                               min="0"
+                               max="1"
+                               step="0.001"
+                               title="Dry matter fraction, e.g. 0.86. Fresh yield = dry yield / dry matter fraction.">
 
                         <button type="button"
                                 class="btn btn-outline-success js-crop-save"
@@ -107,6 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const originalCode = tr.dataset.code || '';
             const code = tr.querySelector('.crop-code')?.value.trim() || '';
             const name = tr.querySelector('.crop-name')?.value.trim() || '';
+            const dryMatterFraction = tr.querySelector('.crop-dry-matter')?.value.trim() || '';
 
             if (!code) {
                 showToast('Code is required', true);
@@ -114,11 +125,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             try {
-                const json = await send('save', { code, name, original_code: originalCode });
+                const json = await send('save', {
+                    code,
+                    name,
+                    original_code: originalCode,
+                    dry_matter_fraction: dryMatterFraction,
+                });
                 const saved = json.crop || { code, name };
                 tr.dataset.code = saved.code;
                 tr.querySelector('.crop-code').value = saved.code;
                 tr.querySelector('.crop-name').value = saved.name || '';
+                tr.querySelector('.crop-dry-matter').value = saved.dry_matter_fraction ?? '';
 
                 showToast(`Saved crop ${saved.code}`, false);
             } catch (err) {

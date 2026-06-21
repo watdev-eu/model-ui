@@ -53,6 +53,25 @@ try {
             $name = trim($name);
             $originalCode = trim($originalCode);
 
+            $dryMatterRaw = trim((string)($_POST['dry_matter_fraction'] ?? ''));
+            $dryMatterFraction = null;
+
+            if ($dryMatterRaw !== '') {
+                if (!is_numeric($dryMatterRaw)) {
+                    http_response_code(422);
+                    echo json_encode(['error' => 'Dry matter fraction must be a number']);
+                    exit;
+                }
+
+                $dryMatterFraction = (float)$dryMatterRaw;
+
+                if ($dryMatterFraction <= 0 || $dryMatterFraction > 1) {
+                    http_response_code(422);
+                    echo json_encode(['error' => 'Dry matter fraction must be between 0 and 1']);
+                    exit;
+                }
+            }
+
             if ($code === '' || !preg_match('/^[A-Za-z0-9_]{1,8}$/', $code)) {
                 http_response_code(422);
                 echo json_encode(['error' => 'Invalid code']);
@@ -61,9 +80,9 @@ try {
 
             try {
                 if ($originalCode !== '' && $originalCode !== $code) {
-                    CropRepository::renameAndUpdate($originalCode, $code, $name);
+                    CropRepository::renameAndUpdate($originalCode, $code, $name, $dryMatterFraction);
                 } else {
-                    CropRepository::upsert($code, $name);
+                    CropRepository::upsert($code, $name, $dryMatterFraction);
                 }
             } catch (PDOException $e) {
                 // Most likely unique violation on duplicate code
@@ -74,7 +93,11 @@ try {
 
             echo json_encode([
                 'ok'   => true,
-                'crop' => ['code' => $code, 'name' => $name],
+                'crop' => [
+                    'code' => $code,
+                    'name' => $name,
+                    'dry_matter_fraction' => $dryMatterFraction,
+                ],
             ]);
             break;
 
