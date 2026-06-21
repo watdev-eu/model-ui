@@ -28,7 +28,13 @@ CREATE TABLE IF NOT EXISTS public.crops
 (
     code character varying(8) COLLATE pg_catalog."default" NOT NULL,
     name text COLLATE pg_catalog."default" NOT NULL,
-    CONSTRAINT crops_pkey PRIMARY KEY (code)
+    dry_matter_fraction double precision,
+    CONSTRAINT crops_pkey PRIMARY KEY (code),
+    CONSTRAINT crops_dry_matter_fraction_chk
+        CHECK (
+            dry_matter_fraction IS NULL
+                OR (dry_matter_fraction > 0 AND dry_matter_fraction <= 1)
+            )
 );
 
 CREATE TABLE IF NOT EXISTS public.custom_scenario_subbasin_runs
