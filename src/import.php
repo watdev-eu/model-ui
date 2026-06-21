@@ -349,7 +349,10 @@ if ($canViewImport) {
                         <h5>Unknown crop codes</h5>
                         <p class="text-muted">
                             These crop codes were found in the uploaded files but are not yet in the database.
-                            Please provide names before importing.
+                            Please provide names before importing. Dry matter fraction is optional and should be between
+                            <code>0</code> and <code>1</code>. It converts SWAT dry yield to fresh/market yield:
+                            <code>fresh yield = dry yield / dry_matter_fraction</code>.
+                            Leave empty to use fallback <code>1</code>.
                         </p>
                         <div id="unknownCropsFields" class="row g-3"></div>
                     </div>

@@ -44,6 +44,7 @@ final class SwatRawRunImportService
         $downloadableFromDate  = self::normalizeDateOrNull($input['downloadable_from_date'] ?? null);
         $selectedSubbasinsRaw  = trim((string)($input['selected_subbasins_json'] ?? '[]'));
         $unknownCropNamesRaw   = trim((string)($input['unknown_crop_names_json'] ?? '{}'));
+        $unknownCropDryMatterRaw = trim((string)($input['unknown_crop_dry_matter_json'] ?? '{}'));
 
         if ($studyAreaId <= 0) throw new RuntimeException('Study area is required.');
         if ($runLabel === '') throw new RuntimeException('Run name is required.');
@@ -67,9 +68,14 @@ final class SwatRawRunImportService
             throw new RuntimeException('Unknown crop names are invalid.');
         }
 
+        $unknownCropDryMatter = json_decode($unknownCropDryMatterRaw, true);
+        if (!is_array($unknownCropDryMatter)) {
+            throw new RuntimeException('Unknown crop dry matter fractions are invalid.');
+        }
+
         self::validateSelectedSubbasinsAgainstDetected($selectedSubbasins, $meta);
         self::validateStudyAreaAndSubs($studyAreaId, $selectedSubbasins);
-        self::resolveUnknownCrops($meta, $unknownCropNames);
+        self::resolveUnknownCrops($meta, $unknownCropNames, $unknownCropDryMatter);
 
         $licenseId = null;
         if ($licenseName !== '') {
@@ -217,7 +223,7 @@ final class SwatRawRunImportService
         }
     }
 
-    private static function resolveUnknownCrops(array $meta, array $unknownCropNames): void
+    private static function resolveUnknownCrops(array $meta, array $unknownCropNames, array $unknownCropDryMatter): void
     {
         $knownCrops = [];
         foreach (CropRepository::all() as $row) {
@@ -225,13 +231,31 @@ final class SwatRawRunImportService
         }
 
         $allCropCodes = array_map('strtoupper', $meta['all_crop_codes'] ?? []);
+
         foreach ($allCropCodes as $code) {
             if (!isset($knownCrops[$code])) {
                 $name = trim((string)($unknownCropNames[$code] ?? ''));
+
                 if ($name === '') {
                     throw new RuntimeException("Please provide a name for crop code {$code}.");
                 }
-                CropRepository::upsert($code, $name);
+
+                $dryMatterRaw = trim((string)($unknownCropDryMatter[$code] ?? ''));
+                $dryMatterFraction = null;
+
+                if ($dryMatterRaw !== '') {
+                    if (!is_numeric($dryMatterRaw)) {
+                        throw new RuntimeException("Dry matter fraction for crop code {$code} must be a number.");
+                    }
+
+                    $dryMatterFraction = (float)$dryMatterRaw;
+
+                    if ($dryMatterFraction <= 0 || $dryMatterFraction > 1) {
+                        throw new RuntimeException("Dry matter fraction for crop code {$code} must be between 0 and 1.");
+                    }
+                }
+
+                CropRepository::upsert($code, $name, $dryMatterFraction);
             }
         }
     }

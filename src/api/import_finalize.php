@@ -63,6 +63,7 @@ function importFinalizeStatusForMessage(string $message): int
         'One or more required uploaded files are missing.',
         'A run with this name already exists for this study area.',
         'Invalid or disabled study area.',
+        'Unknown crop dry matter fractions are invalid.',
     ];
 
     foreach ($validationStarts as $prefix) {
@@ -74,7 +75,8 @@ function importFinalizeStatusForMessage(string $message): int
     if (
         str_starts_with($message, 'Selected subbasin ') ||
         str_starts_with($message, 'Subbasin ') ||
-        str_starts_with($message, 'Please provide a name for crop code ')
+        str_starts_with($message, 'Please provide a name for crop code ') ||
+        str_starts_with($message, 'Dry matter fraction for crop code ')
     ) {
         return 422;
     }

@@ -218,8 +218,26 @@
             const div = document.createElement('div');
             div.className = 'col-md-6';
             div.innerHTML = `
-                <label class="form-label">Crop name for <code>${escapeHtml(code)}</code></label>
-                <input type="text" class="form-control unknown-crop-name" data-code="${escapeHtml(code)}" required>
+                <div class="border rounded p-3 h-100">
+                    <label class="form-label">Crop name for <code>${escapeHtml(code)}</code></label>
+                    <input type="text"
+                           class="form-control unknown-crop-name mb-2"
+                           data-code="${escapeHtml(code)}"
+                           required>
+    
+                    <label class="form-label">Dry matter fraction</label>
+                    <input type="number"
+                           class="form-control unknown-crop-dry-matter"
+                           data-code="${escapeHtml(code)}"
+                           min="0"
+                           max="1"
+                           step="0.001"
+                           placeholder="e.g. 0.86">
+    
+                    <div class="form-text">
+                        Optional. Leave empty for fallback 1.
+                    </div>
+                </div>
             `;
             unknownCropsFields.appendChild(div);
         });
@@ -228,6 +246,14 @@
     function readUnknownCropNames() {
         const result = {};
         document.querySelectorAll('.unknown-crop-name').forEach(input => {
+            result[input.dataset.code] = input.value.trim();
+        });
+        return result;
+    }
+
+    function readUnknownCropDryMatterFractions() {
+        const result = {};
+        document.querySelectorAll('.unknown-crop-dry-matter').forEach(input => {
             result[input.dataset.code] = input.value.trim();
         });
         return result;
@@ -667,6 +693,7 @@
         const fd = new FormData(finalizeForm);
         fd.set('selected_subbasins_json', JSON.stringify(Array.from(selectedSubbasins).sort((a, b) => a - b)));
         fd.set('unknown_crop_names_json', JSON.stringify(readUnknownCropNames()));
+        fd.set('unknown_crop_dry_matter_json', JSON.stringify(readUnknownCropDryMatterFractions()));
 
         if (!finalizeForm.reportValidity()) {
             return;
@@ -715,6 +742,18 @@
         for (const input of document.querySelectorAll('.unknown-crop-name')) {
             if (!input.value.trim()) {
                 showToast(`Please enter a name for crop ${input.dataset.code}.`, true);
+                input.focus();
+                return;
+            }
+        }
+
+        for (const input of document.querySelectorAll('.unknown-crop-dry-matter')) {
+            const value = input.value.trim();
+            if (value === '') continue;
+
+            const num = Number(value);
+            if (!Number.isFinite(num) || num <= 0 || num > 1) {
+                showToast(`Dry matter fraction for crop ${input.dataset.code} must be between 0 and 1.`, true);
                 input.focus();
                 return;
             }
