@@ -11,6 +11,10 @@ require_once __DIR__ . '/../config/app.php';
 <div class="modal-body">
     <p class="small text-muted">
         Add one or more crops. You can leave name empty for now and fill it in later.
+        Dry matter fraction is optional and should be between <code>0</code> and <code>1</code>.
+        It converts SWAT dry yield to fresh/market yield:
+        <code>fresh yield = dry yield / dry_matter_fraction</code>.
+        Leave empty to use fallback <code>1</code>.
     </p>
 
     <form id="cropsAddModalForm">
