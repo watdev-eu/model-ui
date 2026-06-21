@@ -212,15 +212,25 @@ function streamRunRows(
 
     $stmt = $pdo->prepare("
         SELECT
-            run_id,
-            indicator_code,
-            year,
-            sub,
-            NULLIF(crop, '') AS crop,
-            value
-        FROM swat_indicator_yearly
-        WHERE run_id = :run_id
-        ORDER BY indicator_code, year, sub, crop
+            siy.run_id,
+            siy.indicator_code,
+            siy.year,
+            siy.sub,
+            NULLIF(siy.crop, '') AS crop,
+            CASE
+                WHEN siy.indicator_code IN ('yld_t_ha', 'crop_yield_t_ha')
+                 AND siy.value IS NOT NULL
+                 AND siy.crop <> ''
+                 AND c.dry_matter_fraction IS NOT NULL
+                 AND c.dry_matter_fraction > 0
+                    THEN siy.value / c.dry_matter_fraction
+                ELSE siy.value
+            END AS value
+        FROM swat_indicator_yearly siy
+        LEFT JOIN public.crops c
+            ON c.code = siy.crop
+        WHERE siy.run_id = :run_id
+        ORDER BY siy.indicator_code, siy.year, siy.sub, siy.crop
     ");
 
     $stmt->execute([':run_id' => $runId]);

@@ -116,41 +116,51 @@ final class SwatResultsRepository
         $meta = SwatIndicatorRegistry::meta($indicatorCode);
         $pdo = Database::pdo();
 
-        $where = "run_id = :run_id AND indicator_code = :indicator_code";
+        $where = "siy.run_id = :run_id AND siy.indicator_code = :indicator_code";
         $params = [
             ':run_id' => $runId,
             ':indicator_code' => $indicatorCode,
         ];
 
         if (!empty($opts['sub'])) {
-            $where .= " AND sub = :sub";
+            $where .= " AND siy.sub = :sub";
             $params[':sub'] = (int)$opts['sub'];
         }
 
         if (!empty($opts['crop'])) {
-            $where .= " AND crop = :crop";
+            $where .= " AND siy.crop = :crop";
             $params[':crop'] = (string)$opts['crop'];
         }
 
         if ($fromNorm) {
-            $where .= " AND year >= :from_year";
+            $where .= " AND siy.year >= :from_year";
             $params[':from_year'] = (int)substr($fromNorm, 0, 4);
         }
 
         if ($toNorm) {
-            $where .= " AND year <= :to_year";
+            $where .= " AND siy.year <= :to_year";
             $params[':to_year'] = (int)substr($toNorm, 0, 4);
         }
 
         $stmt = $pdo->prepare("
             SELECT
-                year,
-                sub,
-                NULLIF(crop, '') AS crop,
-                value
-            FROM swat_indicator_yearly
+                siy.year,
+                siy.sub,
+                NULLIF(siy.crop, '') AS crop,
+                CASE
+                    WHEN siy.indicator_code IN ('yld_t_ha', 'crop_yield_t_ha')
+                     AND siy.value IS NOT NULL
+                     AND siy.crop <> ''
+                     AND c.dry_matter_fraction IS NOT NULL
+                     AND c.dry_matter_fraction > 0
+                        THEN siy.value / c.dry_matter_fraction
+                    ELSE siy.value
+                END AS value
+            FROM swat_indicator_yearly siy
+            LEFT JOIN public.crops c
+                ON c.code = siy.crop
             WHERE {$where}
-            ORDER BY year, sub, crop
+            ORDER BY siy.year, siy.sub, siy.crop
         ");
         $stmt->execute($params);
 
