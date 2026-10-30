@@ -5,6 +5,7 @@ export function initSubbasinDashboard({
                                           els,
                                           studyAreaId,
                                           apiBase = '/api',
+                                          cartoApiKey = '',
                                       }) {
     // ---------- State ----------
     let loadEpoch = 0;
@@ -1277,8 +1278,18 @@ export function initSubbasinDashboard({
             });
         }
 
+        // CARTO basemaps require an API key (?key=...) on every tile request.
+        // Without a key, fall back to OpenStreetMap instead of showing watermarked tiles.
+        if (!cartoApiKey) {
+            console.warn('[basemap] No CARTO_API_KEY configured; falling back to OpenStreetMap.');
+            return new ol.source.OSM();
+        }
+
+        // Use @2x tiles on high-DPI screens for a sharper basemap.
+        const hiDpi = (window.devicePixelRatio || 1) > 1;
         return new ol.source.XYZ({
-            url: 'https://{a-c}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+            url: `https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}${hiDpi ? '@2x' : ''}.png?key=${encodeURIComponent(cartoApiKey)}`,
+            tilePixelRatio: hiDpi ? 2 : 1,
             attributions: [
                 '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
                 '&copy; <a href="https://carto.com/attributions">CARTO</a>'

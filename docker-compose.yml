@@ -16,6 +16,7 @@ services:
       KEYCLOAK_REALM: ${KEYCLOAK_REALM}
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
+      CARTO_API_KEY: ${CARTO_API_KEY:-}
     volumes:
       - ./src:/var/www/html
       - ./db:/var/www/db:ro

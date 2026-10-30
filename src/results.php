@@ -15,6 +15,7 @@ $areas     = array_values(array_filter($allAreas, fn($a) => !empty($a['enabled']
 $firstId   = $areas ? (int)$areas[0]['id'] : 0;
 $canManageCustomScenarios = Auth::isLoggedIn();
 $canUseMcaWorkspaces = Auth::isLoggedIn();
+$cartoApiKey = (string) env('CARTO_API_KEY', '');
 ?>
 
     <script src="/assets/vendor/proj4/proj4.js"></script>
@@ -527,7 +528,8 @@ $canUseMcaWorkspaces = Auth::isLoggedIn();
                     loadingDetail: document.getElementById('loadingDetail'),
                 },
                 studyAreaId: initialAreaId,
-                apiBase: '/api'
+                apiBase: '/api',
+                cartoApiKey: <?= json_encode($cartoApiKey, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>
             });
 
             const manageCustomScenariosBtn = document.getElementById('manageCustomScenariosBtn');
